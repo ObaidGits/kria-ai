@@ -288,16 +288,23 @@ impl RelationalStore for SqliteRelationalStore {
     }
 
     fn pending_outbox(&self, target: IndexTarget, limit: usize) -> MemoryResult<Vec<OutboxEntry>> {
+        let now = chrono::Utc::now().to_rfc3339();
         self.db.with_read(|conn: &Connection| {
             let mut stmt = conn
                 .prepare(
+                    // Enhanced relay fetch (task 1.8.4): adds the backoff time-gate
+                    // so entries suppressed by next_attempt_at are not returned until
+                    // their backoff window has elapsed.
                     "SELECT id, memory_id, index_target, op, content_hash, attempts, status, \
-                     created_at FROM embedding_outbox WHERE index_target = ?1 AND status = 'pending' \
-                     ORDER BY id ASC LIMIT ?2",
+                     created_at, next_attempt_at, error_code \
+                     FROM embedding_outbox \
+                     WHERE index_target = ?1 AND status = 'pending' \
+                       AND (next_attempt_at IS NULL OR next_attempt_at <= ?2) \
+                     ORDER BY id ASC LIMIT ?3",
                 )
                 .map_err(StorageError::Sqlite)?;
             let rows = stmt
-                .query_map(params![target.as_str(), limit as i64], |r| {
+                .query_map(params![target.as_str(), now, limit as i64], |r| {
                     Ok((
                         r.get::<_, i64>(0)?,
                         r.get::<_, String>(1)?,
@@ -307,12 +314,14 @@ impl RelationalStore for SqliteRelationalStore {
                         r.get::<_, i64>(5)?,
                         r.get::<_, String>(6)?,
                         r.get::<_, String>(7)?,
+                        r.get::<_, Option<String>>(8)?,
+                        r.get::<_, Option<String>>(9)?,
                     ))
                 })
                 .map_err(StorageError::Sqlite)?;
             let mut out = Vec::new();
             for row in rows {
-                let (id, mem, tgt, op, hash, attempts, status, created) =
+                let (id, mem, tgt, op, hash, attempts, status, created, naa, err) =
                     row.map_err(StorageError::Sqlite)?;
                 out.push(OutboxEntry {
                     id,
@@ -329,6 +338,8 @@ impl RelationalStore for SqliteRelationalStore {
                     status: OutboxStatus::from_str(&status)
                         .ok_or_else(|| StorageError::Serde(format!("bad status {status}")))?,
                     created_at: parse_ts(&created)?,
+                    next_attempt_at: naa.map(|s| parse_ts(&s)).transpose()?,
+                    error_code: err,
                 });
             }
             Ok(out)
@@ -341,11 +352,21 @@ impl RelationalStore for SqliteRelationalStore {
         id: i64,
         status: OutboxStatus,
         attempts: u32,
+        next_attempt_at: Option<chrono::DateTime<chrono::Utc>>,
+        error_code: Option<&str>,
     ) -> MemoryResult<()> {
         tx.conn()
             .execute(
-                "UPDATE embedding_outbox SET status = ?2, attempts = ?3 WHERE id = ?1",
-                params![id, status.as_str(), attempts as i64],
+                "UPDATE embedding_outbox \
+                 SET status = ?2, attempts = ?3, next_attempt_at = ?4, error_code = ?5 \
+                 WHERE id = ?1",
+                params![
+                    id,
+                    status.as_str(),
+                    attempts as i64,
+                    next_attempt_at.map(|t| t.to_rfc3339()),
+                    error_code,
+                ],
             )
             .map_err(StorageError::Sqlite)?;
         Ok(())
@@ -519,7 +540,7 @@ mod tests {
 
         let mut tx = db.begin().unwrap();
         store
-            .mark_outbox(&mut tx, pending[0].id, OutboxStatus::Done, 1)
+            .mark_outbox(&mut tx, pending[0].id, OutboxStatus::Done, 1, None, None)
             .unwrap();
         tx.commit().unwrap();
         assert!(store

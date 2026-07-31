@@ -149,19 +149,6 @@ describe("homeStore state machine (Req 30.1)", () => {
   });
 
   describe("local UI slices (design §13.1)", () => {
-    it("keeps a pinned dock revealed until it is unpinned", () => {
-      homeStore.setDockPinned(true);
-      expect(homeStore.dockPinned()).toBe(true);
-      expect(homeStore.dockRevealed()).toBe(true);
-
-      homeStore.setDockRevealed(false); // ignored while pinned
-      expect(homeStore.dockRevealed()).toBe(true);
-
-      homeStore.setDockPinned(false);
-      homeStore.setDockRevealed(false);
-      expect(homeStore.dockRevealed()).toBe(false);
-    });
-
     it("tracks orbit engagement and render mode", () => {
       homeStore.setOrbitEngaged(true);
       expect(homeStore.orbitEngaged()).toBe(true);

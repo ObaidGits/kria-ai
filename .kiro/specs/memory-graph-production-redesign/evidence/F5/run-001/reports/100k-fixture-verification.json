@@ -1,0 +1,230 @@
+{
+  "schema_version": "fixture-verification/v1",
+  "fixture_id": "mg-release-v2",
+  "seed": "0x4D475204",
+  "generator_version": "0.1.0",
+  "membership_hash_method": "sha256(hex) over newline-joined lexicographically-sorted valid record IDs",
+  "run_id": "run-001",
+  "gate": "F5",
+  "task": "5.1.1",
+  "utc_timestamp": "2026-07-29T07:48:56.586861053+00:00",
+  "status": "Pass",
+  "record_count": 100000,
+  "link_count": 256118,
+  "counts_by_kind": {
+    "records_by_kind": {
+      "alias": 9088,
+      "entity": 9089,
+      "episode": 9088,
+      "evidence": 9088,
+      "goal": 9088,
+      "memory": 9108,
+      "mention": 9088,
+      "relationship": 9088,
+      "rule": 9089,
+      "skill": 9089,
+      "summary": 9094
+    },
+    "records_by_truth_state": {
+      "Current": 99997
+    },
+    "records_by_memory_mode": {
+      "Permanent": 99997
+    },
+    "records_by_sensitivity": {
+      "0": 25000,
+      "1": 24999,
+      "2": 24999,
+      "3": 24999
+    },
+    "links_by_kind": {
+      "contradicts": 44641,
+      "derived_from": 100100,
+      "mentions_entity": 22335,
+      "superseded_by": 22335,
+      "supports": 66706
+    },
+    "valid_records": 99997,
+    "invalid_records": 3,
+    "valid_links": 256117,
+    "invalid_links": 1,
+    "total_records": 100000,
+    "total_links": 256118
+  },
+  "degree_distribution": {
+    "0": 11114,
+    "1": 33390,
+    "2": 22065,
+    "3": 11092,
+    "4": 1,
+    "5": 11121,
+    "8": 11214
+  },
+  "membership_hash": "sha256:816906bd94226ac4af44a0000461d498f504ef05f34bd162b1ad1cfb2140f97e",
+  "planted_answers": [
+    {
+      "query_id": "path-anchor-1",
+      "query_kind": "path_reachability",
+      "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+      "target_id": "a2ca5f60-02b0-7c3d-c208-e22f68f14465",
+      "hop_distance": 1,
+      "expected_reachable_within_3hops": true,
+      "expected_path_ids": [
+        "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "a2ca5f60-02b0-7c3d-c208-e22f68f14465"
+      ],
+      "description": "1-hop path from ea387b4b to a2ca5f60; reachable=true"
+    },
+    {
+      "query_id": "path-anchor-2",
+      "query_kind": "path_reachability",
+      "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+      "target_id": "4ad4b12c-8c16-a2bb-e561-20f66bce079d",
+      "hop_distance": 2,
+      "expected_reachable_within_3hops": true,
+      "expected_path_ids": [
+        "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "df608cc4-5c75-43ce-445a-e30dbb52cf1e",
+        "4ad4b12c-8c16-a2bb-e561-20f66bce079d"
+      ],
+      "description": "2-hop path from ea387b4b to 4ad4b12c; reachable=true"
+    },
+    {
+      "query_id": "path-anchor-3",
+      "query_kind": "path_reachability",
+      "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+      "target_id": "b117fb12-838a-6306-db65-bd7f64a3098d",
+      "hop_distance": 3,
+      "expected_reachable_within_3hops": true,
+      "expected_path_ids": [
+        "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "6abbd1a7-0531-3246-4ad5-d4eb66e408cf",
+        "44c2c1c6-1ff4-aadf-787e-0b923c0a1b4a",
+        "b117fb12-838a-6306-db65-bd7f64a3098d"
+      ],
+      "description": "3-hop path from ea387b4b to b117fb12; reachable=true"
+    },
+    {
+      "query_id": "path-anchor-4",
+      "query_kind": "path_reachability",
+      "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+      "target_id": "7b0e0023-167b-f45d-2c29-96962a5ef960",
+      "hop_distance": 4,
+      "expected_reachable_within_3hops": false,
+      "expected_path_ids": [
+        "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "faf651c3-f9f5-6bbf-da2b-fa3bf841a23b",
+        "fa2fa0e1-ae82-eb23-5d4a-ce1918690996",
+        "db45420f-4d04-d347-3610-e2799411e540",
+        "7b0e0023-167b-f45d-2c29-96962a5ef960"
+      ],
+      "description": "4-hop path from ea387b4b to 7b0e0023; reachable=false"
+    },
+    {
+      "query_id": "hidden-intermediary-1",
+      "query_kind": "hidden_intermediary",
+      "source_id": "547508a2-a579-df74-5bec-1b0e02a29e68",
+      "target_id": "8f692362-e7b3-f038-0358-27368d249cbf",
+      "hidden_intermediary_id": "77233a01-1b53-0d6c-d9d8-f60b8222c7ee",
+      "topological_hop_distance": 2,
+      "expected_reachable_ignoring_policy": true,
+      "expected_reachable_with_policy": false,
+      "description": "path is omitted when hidden intermediary present (policy enforcement)"
+    },
+    {
+      "query_id": "temporal-boundary-1",
+      "query_kind": "temporal_membership",
+      "record_id": "362eb505-2c89-7956-a8c0-d8e2c3aeaa6f",
+      "case": "valid_from_inclusive_boundary",
+      "valid_from": "2024-06-01T00:00:00Z",
+      "valid_until": "2025-01-01T00:00:00Z",
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": true,
+      "description": "temporal boundary case: valid_from_inclusive_boundary"
+    },
+    {
+      "query_id": "temporal-boundary-2",
+      "query_kind": "temporal_membership",
+      "record_id": "48bab5a7-50d6-50c8-a331-f41a4ccfb874",
+      "case": "valid_until_exclusive_boundary",
+      "valid_from": "2023-01-01T00:00:00Z",
+      "valid_until": "2024-06-01T00:00:00Z",
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": false,
+      "description": "temporal boundary case: valid_until_exclusive_boundary"
+    },
+    {
+      "query_id": "temporal-boundary-3",
+      "query_kind": "temporal_membership",
+      "record_id": "68f7f5b4-5688-87ae-6791-68907de651b9",
+      "case": "open_ended_current",
+      "valid_from": "2023-01-01T00:00:00Z",
+      "valid_until": null,
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": true,
+      "description": "temporal boundary case: open_ended_current"
+    },
+    {
+      "query_id": "temporal-boundary-4",
+      "query_kind": "temporal_membership",
+      "record_id": "60fc7c37-cb46-e9ae-95b8-99fc8941f357",
+      "case": "future_not_yet",
+      "valid_from": "2025-01-01T00:00:00Z",
+      "valid_until": null,
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": false,
+      "description": "temporal boundary case: future_not_yet"
+    },
+    {
+      "query_id": "temporal-boundary-5",
+      "query_kind": "temporal_membership",
+      "record_id": "b17278dc-1188-af73-0447-4e9f4526e6db",
+      "case": "empty_instant",
+      "valid_from": "2024-06-01T00:00:00Z",
+      "valid_until": "2024-06-01T00:00:00Z",
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": false,
+      "description": "temporal boundary case: empty_instant"
+    },
+    {
+      "query_id": "temporal-boundary-6",
+      "query_kind": "temporal_membership",
+      "record_id": "dee9a80e-c75a-d9ba-f035-35a20f196ee8",
+      "case": "past_closed",
+      "valid_from": "2023-01-01T00:00:00Z",
+      "valid_until": "2023-06-01T00:00:00Z",
+      "query_instant": "2024-06-01T00:00:00Z",
+      "expected_current_at_query_instant": false,
+      "description": "temporal boundary case: past_closed"
+    },
+    {
+      "query_id": "cycle-probe-1",
+      "query_kind": "cycle_safe_bfs",
+      "source_id": "2e5ee75f-b498-864e-eb9e-c615c1b17e2e",
+      "ring_ids": [
+        "e6841dab-61b6-5413-8083-ba3aa26336a2",
+        "2c0a5ad5-3479-e4df-074b-f551387cde1a",
+        "c1f9ff88-ad87-afb2-e0f2-737036e907ba"
+      ],
+      "expected_reachable_within_limit": [
+        "e6841dab-61b6-5413-8083-ba3aa26336a2",
+        "2c0a5ad5-3479-e4df-074b-f551387cde1a",
+        "c1f9ff88-ad87-afb2-e0f2-737036e907ba"
+      ],
+      "description": "BFS terminates on cycle; ring nodes reachable within hop limit"
+    }
+  ],
+  "package_sha256": "b9d165ef28cc0efb233b65f20bfb7fdc8b85aa066275fc757533dcce547291bf",
+  "storage_size_bytes": 156535686,
+  "determinism_verified": true,
+  "generation_time_ms": 540,
+  "contract_verified": true,
+  "contract_failures": [],
+  "reviewer": {
+    "role": "owner-self-review",
+    "reviewer_id": "owner",
+    "utc_timestamp": "2026-07-29T07:48:56.586861053+00:00",
+    "verdict": "Pass",
+    "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md"
+  }
+}

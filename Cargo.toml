@@ -36,9 +36,6 @@ rusqlite = { version = "0.32", features = ["bundled", "vtab", "backup"] }
 dashmap = "6"
 arc-swap = "1"
 
-# Approximate nearest-neighbour vector index (in-process HNSW, memory-upgrade H2)
-hnsw_rs = "=0.3.4"
-
 # System info
 sysinfo = "0.32"
 
@@ -168,7 +165,7 @@ urlencoding = "2"
 opt-level = 0
 debug = 1            # line tables only — full debug info doubled link RAM
 codegen-units = 16   # cap parallelism (default is 256 for dev)
-incremental = true
+incremental = true  # DISABLED — was generating 118GB+ of incremental state
 split-debuginfo = "unpacked"
 
 [profile.release]

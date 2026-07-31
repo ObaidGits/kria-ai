@@ -1,0 +1,127 @@
+{
+  "schema": "memory-graph.f1-handoff/v1",
+  "task": "0.5.4 — F0 gate manifest signed; F1 risk owners + serialized heavy-run constraints recorded.",
+  "gate_completed": "F0",
+  "next_gate": "F1",
+  "f0_predecessor_hash": "b71adeae1ba30b37e3d2a9f93ad193e316aba1dcbfceb162829bc092069226b3",
+  "predecessor_hash_usage": "F1's manifest.json MUST record this hash in predecessorHashes; can_promote(F1) verifies it against the signed F0 Pass manifest's manifest_hash().",
+  "evidence_verification_root": ".kiro/specs/memory-graph-production-redesign/evidence/F0 (artifact paths are relative to this root; non-escaping)",
+  "manifest_location": "evidence/F0/f0-gate/manifest.json",
+  "signed_f0_artifact_hashes": [
+    "e01ebbea72c22a844c37688e07a10996aa1f86f30fb0fd7c6286ea892b378394",
+    "42e62ca5f44302507fd9d519dd7763477ee72c13c171d3cff8dd3dcc8d3edde9",
+    "f71763679aa9567995b9069fe3f175756f581c22301e45731c68aede9f668b98",
+    "ee35b7e2c8b797b3387c3c28cdbfff371c7b66461b51e6789e6af4a7b9fbd931",
+    "5b84d43d050c569d2806f7a39d158f25fa9e0272ed06a4a230c5744d811dc18b",
+    "be6822fc878fc315fb004649f2f8be3da4eac94b4bfd72f1ddaf67853dce6a78",
+    "1c192750ae20cddf481138a6b5ac81bda326b9f38caf43a8849197b92181121a",
+    "b731f26a832647d9d5d9c8f7164260a3b896bd66ef3e5912d2322a588b576dbf",
+    "b50fb87f2cf5b3f330ddb456a5cb1f9e095a4c6acd922c33426f45ab65f6f36f",
+    "0777cef2d02ee3b784835d5af9f4ca1e965b1a9da39ea7896b6a98b338728a25",
+    "6d0eebaec245c3f544a903482911c6a6364cc90f86df4f604c51c18ad7f7cb60",
+    "a71023a2ea1bef0a2f358eb71ccd821773f5fa3f6989a56525bcbe03a8a8231e"
+  ],
+  "verified_implementation_count": 0,
+  "no_verified_implementation_claim": true,
+  "f1_risk_owners": [
+    {
+      "id": "R-AUTH-SPLIT",
+      "owner": "Backend",
+      "validation": "V-AUTH/V-SCHEMA",
+      "gate": "F1",
+      "mechanism": "second authority (adapter/graph/vector/sidecar/renderer/legacy route) causes lifecycle/revision/policy split-brain"
+    },
+    {
+      "id": "R-AUTH-ATOMIC",
+      "owner": "Data Integrity",
+      "validation": "V-AUTH-01..03",
+      "gate": "F1",
+      "mechanism": "crash leaves semantic rows without immutable Event/Audit/outbox/idempotency/revision, or advances revision twice"
+    },
+    {
+      "id": "R-EVENT-PLAINTEXT",
+      "owner": "Privacy",
+      "validation": "V-LIFE/V-CRYPTO",
+      "gate": "F1/F5",
+      "mechanism": "immutable Event Log preserves plaintext after hard delete, making deletion/crypto wording false"
+    },
+    {
+      "id": "R-POLICY-LEAK",
+      "owner": "Security",
+      "validation": "V-POLICY/V-XPORT",
+      "gate": "F1/F5",
+      "mechanism": "hidden content leaks through labels/IDs/counts/ranks/topology/cursors/caches/traces/errors/logs/aggregates"
+    },
+    {
+      "id": "R-TIMING-LEAK",
+      "owner": "Security/Performance",
+      "validation": "V-POLICY-02",
+      "gate": "F1/F5",
+      "mechanism": "policy-safe payload reveals hidden cardinality/existence via latency/retry/pagination/cache behavior"
+    },
+    {
+      "id": "R-CORRUPT-AUTH",
+      "owner": "Recovery",
+      "validation": "V-REC/V-FAULT",
+      "gate": "F1/F5",
+      "mechanism": "schema/page/event checksum/order corruption silently serves invented or partial authority"
+    },
+    {
+      "id": "R-CORRUPT-DERIVED",
+      "owner": "Data Integrity",
+      "validation": "V-REBUILD/V-REC",
+      "gate": "F1/F5",
+      "mechanism": "FTS/vector/cache corruption changes recall/presentation, mistaken for authority corruption"
+    },
+    {
+      "id": "R-DELETE-RESIDUE",
+      "owner": "Privacy",
+      "validation": "V-LIFE",
+      "gate": "F1/F5",
+      "mechanism": "deleted/forgotten content remains in FTS/vectors/graph/trace/cache/inspector/export/cursor/second window"
+    },
+    {
+      "id": "R-MIGRATION-LOSS",
+      "owner": "Data Integrity",
+      "validation": "V-SCHEMA/V-IO",
+      "gate": "F1/F5",
+      "mechanism": "hard cutover drops semantics, duplicates identities, accepts unknown required fields, or leaves old paths live"
+    },
+    {
+      "id": "R-SCHED-STARVE",
+      "owner": "Performance",
+      "validation": "V-PERF/V-RESOURCE",
+      "gate": "F1–F5",
+      "mechanism": "embedding/traversal/consolidation/rebuild/analytics/renderer blocks async threads or foreground interaction"
+    },
+    {
+      "id": "R-SUPPLY",
+      "owner": "Supply Chain",
+      "validation": "V-SBOM",
+      "gate": "F1/F5/F6",
+      "mechanism": "typo-squatted/unpinned/vulnerable crate/npm/Python/model/asset or incomplete transitive SBOM enters release"
+    },
+    {
+      "id": "R-OBSERVABILITY",
+      "owner": "Security",
+      "validation": "V-POLICY/V-RESOURCE",
+      "gate": "F1/F5",
+      "mechanism": "traces/logs/screenshots/evidence expose content/locators/identities/secrets or alter performance"
+    }
+  ],
+  "serialized_heavy_run_constraints": {
+    "source": "tasks.md Execution Contract + steering dev-context",
+    "rule": "Heavy 100k/model/release/WebKitGTK/Orca/fault/SBOM runs are serialized on the owner laptop (single-process, single-user, single-laptop). Never run two heavy suites concurrently.",
+    "single_laptop": true,
+    "no_broad_100k_in_f0": "Confirmed: F0 performed no broad 100k generation/build; mg-release-v2 (0x4D475204) materialization is deferred to F3/F5.",
+    "heavy_run_classes": [
+      "100k-scale authority/vector/graph builds (mg-release-v2)",
+      "model artifact fetch/pin/license (all-MiniLM-L6-v2 ONNX; unvendored at F0)",
+      "release/SBOM closure runs",
+      "WebKitGTK GUI + Playwright frame/idle baselines",
+      "Orca / assistive-technology accessibility runs",
+      "fault-injection / crash-matrix suites"
+    ],
+    "f1_note": "F1 authority/security/lifecycle/recovery focused suites (V-SCHEMA-01, V-AUTH-01..03, V-POLICY-01..02, V-LIFE-01, V-CRYPTO-01, V-REC-01) run colocated; the heavy V-REBUILD/V-FAULT/V-SBOM slices are serialized against other heavy runs on the owner laptop."
+  }
+}

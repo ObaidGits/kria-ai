@@ -1,0 +1,420 @@
+{
+  "schema_version": "1.0.0",
+  "gate": "F6",
+  "run_id": "run-001",
+  "task_ref": "6.3.5",
+  "artifact_type": "no_go_branch_decision",
+  "decision_status": "DEFERRED",
+  "created_at": "2025-07-30T12:00:00Z",
+
+  "_mandatory_statement": "On NO-GO, the F5 product is returned to its unmodified baseline state. No 3D code, dependency, asset, control, test, or claim may remain in the repository after the deletion is machine-verified.",
+
+  "_note": "This artifact defines the NO-GO branch for F6 gate task 6.3.5. decision_status is DEFERRED — this branch executes when ANY of the 7 conjunctive GO threshold groups fails, returns INCONCLUSIVE, or remains PENDING at the time the F6 gate outcome is determined. While all thresholds are PENDING_EXECUTION, the deletion plan is fully specified here so that it can be executed without ambiguity. No deletion actions in this file may be executed while decision_status is DEFERRED. Execution is triggered only when any prerequisite_check in go-branch-decision.json fails to record a PASS verdict.",
+
+  "go_branch_decision_ref": "evidence/F6/run-001/go-branch-decision.json",
+  "preregistration_ref": "evidence/F6/run-001/study/preregistration.json",
+
+  "activation_conditions": {
+    "_comment": "The NO-GO branch activates on ANY single miss in the 7 conjunctive threshold groups. The conjunctive rule is frozen in preregistration.json task_6_1_4 and cannot be changed post-hoc. INCONCLUSIVE counts as FAIL. PENDING at decision time counts as FAIL.",
+    "rule": "ANY single condition from the list below is sufficient to activate NO-GO. All conditions are evaluated conjunctively for GO; thus a single failure triggers NO-GO.",
+    "conditions": [
+      {
+        "id": "AC-1",
+        "threshold_group": "task_benefit_threshold",
+        "description": "Study outcome does not reach ≥10% median task-time or error improvement, OR Wilcoxon p≥0.05, OR fewer than 20 valid paired trials, OR any primary measure shows statistically significant degradation, OR study/analysis/results.json go_no_go_determination.verdict ≠ STUDY_GO.",
+        "verdict_source": "evidence/F6/run-001/study/analysis/results.json#go_no_go_determination.verdict",
+        "triggers_no_go_when": "verdict ∈ {STUDY_NO_GO, INCONCLUSIVE, missing, PENDING}"
+      },
+      {
+        "id": "AC-2",
+        "threshold_group": "fps_threshold",
+        "description": "WebKitGTK real-scene p95 frame time > 33.3 ms (< 30 FPS) under idle or contention conditions on RHW-001, OR fewer than 30 warm frame samples collected, OR evidence artifact absent.",
+        "verdict_source": "evidence/F6/run-001/technical-checks-status.json#checks[fps_check].status",
+        "triggers_no_go_when": "status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-3",
+        "threshold_group": "idle_quiet_threshold",
+        "description": "rAF does not stop within 2000 ms after last input, OR idle CPU delta > 2 percentage points above F5 baseline, OR evidence artifact absent.",
+        "verdict_source": "evidence/F6/run-001/technical-checks-status.json#checks[idle_quiet_check].status",
+        "triggers_no_go_when": "status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-4",
+        "threshold_group": "resource_parity_threshold",
+        "description": "3D peak heap > 1.5× 2D/list baseline, OR any individual GC pause ≥ 50 ms, OR VRAM delta > 256 MB above idle on RHW-001, OR any measurement artifact absent.",
+        "verdict_source": "evidence/F6/run-001/technical-checks-status.json#checks[resource_parity_check].status",
+        "triggers_no_go_when": "status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-5",
+        "threshold_group": "a11y_parity_threshold",
+        "description": "ANY of the 4 a11y sub-checks fails: (1) WebGL context loss does not fall back to 2D/list with same query/focus/pending state in ≤2 s; (2) keyboard navigation fails any of 5 steps in 3D condition; (3) Orca does not announce entity names and Inspector confirmation in 3D; (4) new serious/critical axe-core findings vs 2D/list baseline.",
+        "sub_checks": [
+          "evidence/F6/run-001/technical-checks-status.json#checks[context_loss_recovery_check].status",
+          "evidence/F6/run-001/technical-checks-status.json#checks[keyboard_parity_check].status",
+          "evidence/F6/run-001/technical-checks-status.json#checks[orca_parity_check].status",
+          "evidence/F6/run-001/technical-checks-status.json#checks[axe_scan_check].status"
+        ],
+        "triggers_no_go_when": "ANY sub-check status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-6",
+        "threshold_group": "core_task_parity_threshold",
+        "description": "F5 E2E suite does not pass against 3D-enabled build with zero regressions across all seven destinations, OR any test that passed in F5 2D/list baseline fails in the 3D-enabled build, OR evidence artifact absent.",
+        "verdict_source": "evidence/F6/run-001/technical-checks-status.json#checks[core_task_e2e_check].status",
+        "triggers_no_go_when": "status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-7",
+        "threshold_group": "foss_closure_threshold",
+        "description": "Any new dependency introduced by the 3D spike has an unresolved, pending, rejected, or incompatible FOSS disposition; OR any dependency's checksum cannot be reproduced; OR any upstream repository is unmaintained/archived/CVE-affected; OR SBOM diff artifact absent.",
+        "verdict_source": "evidence/F6/run-001/technical-checks-status.json#checks[sbom_diff_check].status",
+        "triggers_no_go_when": "status ∈ {FAIL, INCONCLUSIVE, PENDING_EXECUTION, missing}"
+      },
+      {
+        "id": "AC-8",
+        "description": "Any supply-chain or maintenance failure per DR-3: a new npm or Rust dependency that has an unresolved/pending/rejected FOSS disposition, an unmaintained/archived upstream, a known CVE, a non-reproducible checksum, or a security advisory forcing a breaking API change.",
+        "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_5.deletion_rule.no_go_trigger_conditions[DR-3]"
+      },
+      {
+        "id": "AC-9",
+        "description": "Any semantic divergence (DR-4): 3D renderer maintains its own truth, policy, layout state, or node/edge authority not derived purely from SemanticScene/pathScene.ts; renderer introduces its own record fetching or graph traversal outside GraphQueryPort; renderer writes back to SQLite authority; or renderer's visible node/edge set diverges from 2D canvas.",
+        "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_5.deletion_rule.no_go_trigger_conditions[DR-4]"
+      },
+      {
+        "id": "AC-10",
+        "description": "Any degradation of an existing F5 baseline metric attributable to 3D renderer presence (DR-5): task time, error count, E2E pass rate, VRAM, frame time, idle CPU, or any metric covered by the F5 evidence manifest.",
+        "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_5.deletion_rule.no_go_trigger_conditions[DR-5]"
+      }
+    ]
+  },
+
+  "deletion_steps": {
+    "_comment": "Ordered sequence of deletion actions. All steps must be executed in the listed order. Each step references the source inventory in task_6_2_7 or task_6_1_5 of preregistration.json. No step may be skipped. Deletion is mandatory and not discretionary.",
+    "_execution_gate": "decision_status must change from DEFERRED to NO-GO (set only when any activation_condition is confirmed triggered) before any step below is executed.",
+    "inventory_source": "evidence/F6/run-001/study/preregistration.json#task_6_2_7",
+    "mvi_inventory_source": "evidence/F6/run-001/study/preregistration.json#task_6_1_5.machine_verifiable_inventory",
+
+    "steps": [
+      {
+        "step": 1,
+        "action": "delete-files",
+        "description": "Delete all 11 new source files from task_6_2_7.f6_spike_source_files. These are files that did not exist before the F6 spike and are exclusively consumed by the memory-graph 3D renderer.",
+        "files": [
+          "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts",
+          "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.test.ts",
+          "ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeZ.test.ts",
+          "ui/src/shell/spaces/memory/graph/culling3D.ts",
+          "ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeRender.test.ts",
+          "ui/src/shell/spaces/memory/graph/camera3D.ts",
+          "ui/src/shell/spaces/memory/graph/camera3D.test.ts",
+          "ui/src/shell/spaces/memory/graph/renderPolicy3D.ts",
+          "ui/src/shell/spaces/memory/graph/renderPolicy3D.test.ts",
+          "ui/src/shell/spaces/memory/graph/profiling3D.ts",
+          "ui/src/shell/spaces/memory/graph/profiling3D.test.ts"
+        ],
+        "command": "rm -f ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.test.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeZ.test.ts ui/src/shell/spaces/memory/graph/culling3D.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeRender.test.ts ui/src/shell/spaces/memory/graph/camera3D.ts ui/src/shell/spaces/memory/graph/camera3D.test.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.test.ts ui/src/shell/spaces/memory/graph/profiling3D.ts ui/src/shell/spaces/memory/graph/profiling3D.test.ts",
+        "inventory_ref": "preregistration.json#task_6_2_7.f6_spike_source_files",
+        "count": 11
+      },
+      {
+        "step": 2,
+        "action": "revert-modified-files",
+        "description": "Revert all 4 pre-existing files modified during the F6 spike to their F5 state. The F5 state is the last committed version of each file before any F6 spike modifications. Use git checkout <F5_RELEASE_COMMIT> -- <file> where F5_RELEASE_COMMIT is recorded in the F5 evidence manifest.",
+        "files": [
+          {
+            "path": "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx",
+            "revert_to": "F5 committed state — pre-spike version that is dormant/contains no spike wiring",
+            "command": "git checkout <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx"
+          },
+          {
+            "path": "ui/src/shell/spaces/memory/graph/layout.worker.ts",
+            "revert_to": "F5 committed state — does not accept packed transferable buffers from spike",
+            "command": "git checkout <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/layout.worker.ts"
+          },
+          {
+            "path": "ui/src/shell/spaces/memory/graph/layoutSettle.ts",
+            "revert_to": "F5 committed state — does not integrate with z-mapping pipeline",
+            "command": "git checkout <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/layoutSettle.ts"
+          },
+          {
+            "path": "ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+            "revert_to": "F5 committed state — does not register spike renderer or conditional 3D/2D path",
+            "command": "git checkout <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx"
+          }
+        ],
+        "inventory_ref": "preregistration.json#task_6_2_7.f6_spike_modified_files",
+        "count": 4
+      },
+      {
+        "step": 3,
+        "action": "remove-f6-npm-packages",
+        "description": "Remove any F6-specific npm packages from ui/package.json. The F5 baseline retains three@0.169.0, @types/three@0.169.0, ngraph.forcelayout@3.3.1, and ngraph.graph@20.0.1 only if they were present before the spike and are still consumed by ConstellationCanvas3D. Any new package introduced exclusively by the F6 spike (identified via the SBOM diff in evidence/F6/run-001/supply-chain/sbom-diff.json) must be removed. Also revert any version bumps of existing packages where the bump was introduced by the spike and ConstellationCanvas3D does not require the bumped version.",
+        "command_template": "cd ui && npm uninstall <f6-exclusive-package> [...]",
+        "inventory_ref": "preregistration.json#task_6_1_5.mandatory_deletion_inventory.npm_dependencies",
+        "sbom_diff_ref": "evidence/F6/run-001/supply-chain/sbom-diff.json",
+        "f5_baseline_retained_packages": {
+          "three": "0.169.0",
+          "ngraph.forcelayout": "3.3.1",
+          "ngraph.graph": "20.0.1",
+          "@types/three": "0.169.0"
+        },
+        "note": "If the spike introduced no new npm packages and no version bumps, this step is a no-op. The SBOM diff is the authoritative source of truth."
+      },
+      {
+        "step": 4,
+        "action": "remove-f6-rust-crates",
+        "description": "Remove any F6-specific Rust crates from Cargo.toml. No F6-specific Rust crates are expected (the spike is a UI/TypeScript concern), but if the SBOM diff records any Rust crate added exclusively for the F6 renderer, it must be removed from Cargo.toml and Cargo.lock.",
+        "command_template": "cargo remove <f6-exclusive-crate> [...]",
+        "inventory_ref": "preregistration.json#task_6_1_5.mandatory_deletion_inventory.rust_cargo_dependencies",
+        "sbom_diff_ref": "evidence/F6/run-001/supply-chain/sbom-diff.json",
+        "note": "If the spike introduced no new Rust crates (expected case), this step is a no-op. The SBOM diff is the authoritative source of truth."
+      },
+      {
+        "step": 5,
+        "action": "remove-f6-documentation-claims",
+        "description": "Delete or revert any documentation or marketing claims introduced by the F6 spike: README.md sections advertising 3D memory-graph path exploration, CHANGELOG entries listing 3D as shipped or experimental, in-app UI copy implying 3D capability, and any .kiro/specs/ doc files created exclusively for the F6 implementation (distinct from this preregistration and the no-go-branch-decision.json).",
+        "targets": [
+          "Any README.md section added during F6 spike that advertises 3D memory-graph path exploration",
+          "Any CHANGELOG entry added during F6 spike that lists 3D path exploration as a shipped or experimental feature",
+          "Any in-app UI copy (tooltip, help, onboarding) implying the Knowledge destination has 3D capability",
+          "Any conditional branch in Knowledge.tsx (or equivalent) that mounts a 3D path view",
+          "Any F6-specific feature flag/constant/environment variable: VITE_ENABLE_F6_3D, F6_3D_ENABLED, enable3DPathView, CAPABILITY_3D_PATH_RENDERER, or equivalent",
+          "Any F6-specific Tauri capability/permission entry in tauri.conf.json, capabilities/*.json, or permissions/*.toml",
+          "Any F6-specific Rust feature flag in Cargo.toml"
+        ],
+        "retained_documentation": [
+          "design.md §3 reference to dormant GraphCanvas3D — pre-existing, accurate",
+          "decisions.md MGD-021 — pre-existing, documents dormancy",
+          "glossary.md GraphCanvas3D entry — pre-existing",
+          "ui/src/platform/renderMode.ts enable3D + LensRenderMode — pre-existing, shared with ConstellationCanvas3D",
+          "ui/src/platform/capabilities.ts shouldEnable3D, decideRenderMode — pre-existing, shared",
+          "ui/src/platform/coreRenderMode.ts, LensModeToggle.tsx, LensRenderMode.tsx — pre-existing, shared"
+        ],
+        "inventory_ref": "preregistration.json#task_6_1_5.mandatory_deletion_inventory.documentation_and_marketing_claims"
+      },
+      {
+        "step": 6,
+        "action": "regenerate-npm-lock",
+        "description": "Regenerate ui/package-lock.json after any npm uninstall operations in step 3. This ensures the lock file reflects the post-deletion dependency closure and contains no F6-exclusive package entries.",
+        "command": "cd ui && npm install --package-lock-only",
+        "condition": "Execute only if step 3 removed one or more packages or reverted a version bump. If step 3 was a no-op, this step is also a no-op.",
+        "verification": "The regenerated package-lock.json must not contain any package identified as F6-exclusive in the SBOM diff."
+      },
+      {
+        "step": 7,
+        "action": "regenerate-cargo-lock",
+        "description": "Regenerate Cargo.lock after any cargo remove operations in step 4. This ensures the lock file reflects the post-deletion dependency closure and contains no F6-exclusive crate entries.",
+        "command": "cargo update --workspace",
+        "condition": "Execute only if step 4 removed one or more crates. If step 4 was a no-op (expected case), this step is also a no-op.",
+        "verification": "The regenerated Cargo.lock must not contain any crate identified as F6-exclusive in the SBOM diff."
+      },
+      {
+        "step": 8,
+        "action": "regenerate-sbom",
+        "description": "Regenerate the SBOM by running CMD-MG-SBOM (or equivalent supply-chain audit command) and confirm that no F6-exclusive dependencies appear in the dependency closure. The regenerated SBOM must match the F5 SBOM baseline (evidence/F5/run-001/supply-chain/) with no new entries.",
+        "command": "CMD-MG-SBOM",
+        "expected_result": "Zero new dependencies vs F5 SBOM baseline. All entries in sbom-diff.json with an F6-exclusive consumer are absent.",
+        "f5_sbom_baseline_ref": "evidence/F5/run-001/supply-chain/",
+        "inventory_ref": "preregistration.json#task_6_1_5.mandatory_deletion_inventory.npm_dependencies"
+      },
+      {
+        "step": 9,
+        "action": "run-delta-mvi-checks",
+        "description": "Run the 7 delta MVI checks (MVI-D-01 through MVI-D-07) from task_6_2_7 of preregistration.json to machine-verify that deletion of the 11 spike source files and revert of the 4 modified files is complete. All 7 checks must pass before proceeding.",
+        "mvi_checks": [
+          {
+            "id": "MVI-D-01",
+            "command": "for f in ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.test.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeZ.test.ts ui/src/shell/spaces/memory/graph/culling3D.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeRender.test.ts ui/src/shell/spaces/memory/graph/camera3D.ts ui/src/shell/spaces/memory/graph/camera3D.test.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.test.ts ui/src/shell/spaces/memory/graph/profiling3D.ts ui/src/shell/spaces/memory/graph/profiling3D.test.ts; do [ -e \"$f\" ] && echo \"FAIL: $f exists\" && exit 1; done; echo PASS",
+            "expected_result": "PASS",
+            "description": "No new spike source files exist"
+          },
+          {
+            "id": "MVI-D-02",
+            "command": "git diff --name-only HEAD -- ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx ui/src/shell/spaces/memory/graph/layout.worker.ts ui/src/shell/spaces/memory/graph/layoutSettle.ts ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+            "expected_result": "Empty output (no diff lines)",
+            "description": "Modified files reverted to F5 state"
+          },
+          {
+            "id": "MVI-D-03",
+            "command": "grep -E \"graphCanvas3DSpike|camera3D|culling3D|renderPolicy3D|profiling3D\" ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx && echo FAIL || echo PASS",
+            "expected_result": "PASS",
+            "description": "No spike imports in MemoryUniverse.tsx"
+          },
+          {
+            "id": "MVI-D-04",
+            "command": "grep -E \"graphCanvas3DSpike|camera3D|culling3D|renderPolicy3D|profiling3D\" ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx && echo FAIL || echo PASS",
+            "expected_result": "PASS",
+            "description": "No spike imports in GraphCanvas3D.tsx"
+          },
+          {
+            "id": "MVI-D-05",
+            "command": "grep -E \"packNodePositions|SemanticSceneItem3D|NodePosition3D|graphCanvas3DSpike\" ui/src/shell/spaces/memory/graph/layout.worker.ts ui/src/shell/spaces/memory/graph/layoutSettle.ts && echo FAIL || echo PASS",
+            "expected_result": "PASS",
+            "description": "No 3D spike references in layout.worker.ts or layoutSettle.ts"
+          },
+          {
+            "id": "MVI-D-06",
+            "command": "cd ui && npm run typecheck 2>&1 | tail -5",
+            "expected_result": "Exit code 0, no TypeScript errors referencing deleted spike files",
+            "description": "TypeScript build passes after NO-GO deletion"
+          },
+          {
+            "id": "MVI-D-07",
+            "command": "git status --short ui/src/shell/spaces/memory/graph/ | grep '^??' | grep -E \"graphCanvas3DSpike|camera3D\\.ts|camera3D\\.test|culling3D|renderPolicy3D|profiling3D\" && echo FAIL || echo PASS",
+            "expected_result": "PASS",
+            "description": "No untracked spike files remain in git status"
+          }
+        ],
+        "inventory_ref": "preregistration.json#task_6_2_7.delta_mvi_checks"
+      },
+      {
+        "step": 10,
+        "action": "verify-build",
+        "description": "Run the TypeScript build check and (if Rust crates were changed) cargo check to verify the entire project compiles cleanly after deletion. This is a final build-level sanity check that the post-deletion state is buildable and consistent.",
+        "commands": [
+          {
+            "id": "BUILD-UI",
+            "command": "cd ui && npm run typecheck",
+            "expected_result": "Exit code 0, zero TypeScript errors",
+            "condition": "Always run — TypeScript build must pass after any source file deletion or revert."
+          },
+          {
+            "id": "BUILD-RUST",
+            "command": "cargo check -p kria-core",
+            "expected_result": "Exit code 0, zero Rust compilation errors",
+            "condition": "Run only if step 4 removed Rust crates. If step 4 was a no-op, this check is optional but recommended."
+          }
+        ]
+      }
+    ]
+  },
+
+  "mvi_checks_reference": {
+    "_comment": "The complete set of machine-verifiable inventory checks that must ALL pass before the NO-GO outcome can be recorded. Comprises the 13 original MVI checks from task_6_1_5 plus the 7 delta MVI checks added by task_6_2_7.",
+    "total_checks": 20,
+    "original_mvi_checks": {
+      "count": 13,
+      "source": "evidence/F6/run-001/study/preregistration.json#task_6_1_5.machine_verifiable_inventory",
+      "ids": ["MVI-1", "MVI-2", "MVI-3", "MVI-4", "MVI-5", "MVI-6", "MVI-7", "MVI-8", "MVI-9", "MVI-10", "MVI-11", "MVI-12", "MVI-13"],
+      "summary": [
+        "MVI-1: GraphCanvas3D.tsx source file absent",
+        "MVI-2: No live mount or import of GraphCanvas3D in the memory-graph Knowledge path",
+        "MVI-3: GraphScene.ts contains no F6-spike additions (reverted to F5 state or absent)",
+        "MVI-4: lensController.ts contains no F6-spike additions (reverted to F5 state or absent)",
+        "MVI-5: layout.worker.ts contains no F6-spike additions (reverted to F5 state or absent)",
+        "MVI-6: layoutSettle.ts contains no F6-spike additions (reverted to F5 state or absent)",
+        "MVI-7: No F6-specific 3D files exist anywhere under ui/src/shell/spaces/memory/",
+        "MVI-8: No F6-specific feature flag identifiers in the memory-graph space source",
+        "MVI-9: No F6-spike npm packages in package.json beyond F5 baseline",
+        "MVI-10: No F6-spike Rust crate additions in Cargo.toml/Cargo.lock beyond F5 baseline",
+        "MVI-11: No F6 study session or trial data artifacts present (except retained evidence files)",
+        "MVI-12: No 3D memory-graph marketing or documentation claims in shipped text",
+        "MVI-13: No conditional 3D mount in the Knowledge destination's path exploration rendering path"
+      ]
+    },
+    "delta_mvi_checks": {
+      "count": 7,
+      "source": "evidence/F6/run-001/study/preregistration.json#task_6_2_7.delta_mvi_checks",
+      "ids": ["MVI-D-01", "MVI-D-02", "MVI-D-03", "MVI-D-04", "MVI-D-05", "MVI-D-06", "MVI-D-07"],
+      "summary": [
+        "MVI-D-01: None of the 11 new spike source files exist in the working tree",
+        "MVI-D-02: All 4 modified files (GraphCanvas3D.tsx, layout.worker.ts, layoutSettle.ts, MemoryUniverse.tsx) have no uncommitted changes vs HEAD",
+        "MVI-D-03: No spike imports in MemoryUniverse.tsx",
+        "MVI-D-04: No spike imports in GraphCanvas3D.tsx",
+        "MVI-D-05: No spike-only types in layout.worker.ts or layoutSettle.ts",
+        "MVI-D-06: TypeScript build passes with zero errors after deletion",
+        "MVI-D-07: No untracked spike files remain in git status"
+      ]
+    },
+    "verification_rule": "All 20 MVI checks must pass before the deletion step is considered complete. Any failing check is an inventory miss and blocks recording the NO-GO outcome in the F6 evidence manifest. The delta checks (MVI-D-01 through MVI-D-07) run in step 9 of deletion_steps. The original checks (MVI-1 through MVI-13) run as a final sweep after all deletion steps complete."
+  },
+
+  "post_deletion_verification": {
+    "_comment": "Summary of what must be verified after all deletion steps are complete and before the NO-GO outcome is recorded in the F6 evidence manifest.",
+    "required_checks": [
+      {
+        "id": "PDV-1",
+        "name": "All 20 MVI checks pass",
+        "description": "Run all 13 original MVI checks (from task_6_1_5) and all 7 delta MVI checks (from task_6_2_7). Every check must return the expected result. Zero failures permitted.",
+        "ref": "mvi_checks_reference"
+      },
+      {
+        "id": "PDV-2",
+        "name": "TypeScript build passes",
+        "description": "cd ui && npm run typecheck exits with code 0 and zero errors. The post-deletion UI codebase must compile without any reference to deleted spike files or reverted module exports.",
+        "command": "cd ui && npm run typecheck"
+      },
+      {
+        "id": "PDV-3",
+        "name": "F5 E2E suite still passes",
+        "description": "The full F5 E2E test suite (CMD-GUI-E2E) must pass against the post-deletion build with zero regressions. The deletion must not have introduced any regression in the 7-destination F5 product. All workflows (find, inspect, explain, correct, merge, split, relate, path, goal, source, forget, restore, delete, offline, recovery) must pass.",
+        "command": "CMD-GUI-E2E",
+        "expected_result": "Zero test failures. Suite is identical to the F5 baseline suite — no tests added or removed to compensate for deletion."
+      },
+      {
+        "id": "PDV-4",
+        "name": "SBOM matches F5 baseline",
+        "description": "The post-deletion SBOM (regenerated in step 8) must match the F5 SBOM baseline with no new entries. No F6-exclusive npm package or Rust crate may appear in the dependency closure.",
+        "ref": "deletion_steps.steps[7]"
+      },
+      {
+        "id": "PDV-5",
+        "name": "No spike artifacts in git working tree",
+        "description": "git status --short must show no untracked spike files and no uncommitted modifications to the 4 reverted files. The working tree must be clean with respect to all F6 spike changes.",
+        "command": "git status --short ui/src/shell/spaces/memory/"
+      }
+    ],
+    "summary": "After NO-GO deletion: (1) all 20 MVI checks pass confirming no spike code, dependency, flag, or claim remains; (2) the TypeScript build passes cleanly; (3) the F5 E2E suite passes with zero regressions; (4) the SBOM matches the F5 baseline with no new entries; (5) the git working tree is clean. Only when all 5 verification groups are satisfied may the NO-GO outcome be recorded in the F6 evidence manifest and the F5→F6 manifest chain be annotated with a closed NO-GO outcome."
+  },
+
+  "retention_exceptions": {
+    "_comment": "The following files are explicitly retained on NO-GO. They are the permanent evidence record of the F6 study attempt and its NO-GO outcome. Retaining them does NOT constitute a protocol violation — the deletion_rule in task_6_1_5 explicitly excludes them from mandatory deletion.",
+    "retained_files": [
+      {
+        "path": "evidence/F6/run-001/study/preregistration.json",
+        "reason": "Frozen protocol record: contains the study protocol, z-axis definition, GO thresholds, deletion inventory, and spike inventory. The permanent NO-GO evidence record. Must be retained per task_6_1_5.deletion_rule.",
+        "status": "RETAIN — do not delete on NO-GO"
+      },
+      {
+        "path": "evidence/F6/run-001/no-go-branch-decision.json",
+        "reason": "This file — the fully-specified NO-GO deletion plan. Retained as the execution record of the NO-GO branch.",
+        "status": "RETAIN — do not delete on NO-GO"
+      },
+      {
+        "path": "evidence/F6/run-001/go-branch-decision.json",
+        "reason": "The GO branch schema that was evaluated and found not to have been triggered. Retained as evidence of the threshold structure that was used.",
+        "status": "RETAIN — do not delete on NO-GO"
+      },
+      {
+        "path": "evidence/F6/run-001/performance/profiling-protocol.json",
+        "reason": "Records that the performance profiling protocol was defined but the spike did not meet GO thresholds. Retained as evidence that profiling was planned and not executed/passed.",
+        "status": "RETAIN — do not delete on NO-GO"
+      },
+      {
+        "path": "evidence/F6/run-001/study/study-protocol-status.json",
+        "reason": "Records the study execution status at the time of NO-GO. Retained as part of the evidence audit trail.",
+        "status": "RETAIN — do not delete on NO-GO"
+      },
+      {
+        "path": "evidence/F6/run-001/study/analysis-schema.json",
+        "reason": "Defines the schema for study analysis outputs. Retained as part of the frozen protocol record.",
+        "status": "RETAIN — do not delete on NO-GO"
+      }
+    ],
+    "retention_rule": "These 6 files are the complete retention exception list. Every other F6 artifact created during the spike — source files, evidence subdirectories (session_logs, trial_data, analysis, performance, benchmarks, supply-chain, a11y), and the manifest.json if it does not record the NO-GO outcome — must be deleted per the mandatory_deletion_inventory in task_6_1_5."
+  },
+
+  "no_go_outcome_recording": {
+    "description": "After all deletion steps are executed and all post-deletion verification checks pass, the NO-GO outcome is recorded by updating the F6 evidence manifest (evidence/F6/run-001/manifest.json) with the NO-GO decision, the list of threshold verdicts that triggered NO-GO, the deletion completion timestamp, and hashes of the 6 retained evidence files. The F5 manifest predecessor hash is then annotated with a closed F6 NO-GO outcome.",
+    "required_before_recording": [
+      "All 20 MVI checks must pass",
+      "TypeScript build passes (PDV-2)",
+      "F5 E2E suite passes (PDV-3)",
+      "SBOM matches F5 baseline (PDV-4)",
+      "Git working tree clean (PDV-5)"
+    ],
+    "chain_ref": "go-branch-decision.json#no_go_fallback_ref"
+  }
+}

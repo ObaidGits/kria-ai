@@ -1,0 +1,83 @@
+{
+  "task": "5.5.2",
+  "suite": "V-POLICY-02 (paired-world non-interference scan)",
+  "verdict": "Pass",
+  "testsPassed": 9,
+  "testsTotal": 9,
+  "timestamp": "2026-07-29T13:58:10.106336794Z",
+  "nonNegotiables": [
+    "Zero world_b protected tokens appeared in world_a search results (16.1 — protected-token scan: 5 UUID-based world_b tokens × 5 world_a-scoped FTS queries = 0 cross-namespace hits)",
+    "Zero world_b record IDs appeared in world_a count/enumeration responses (16.2 — world_a count=4, world_b count=6, neither count encodes the other's cardinality)",
+    "Cursor/cache keys are namespace-isolated: world_a and world_b scopes produce distinct policy_hash, cache_key, cursor_key, and redacted_ref values (16.3 + 16.8)",
+    "Graph traversal from world_a root (a1→a2→a3 chain) reached 0 world_b node IDs — no cross-world path exists without an explicit cross-world edge (16.4)",
+    "Export packages are completely disjoint: world_a and world_b exports share no record IDs (16.6 — 0 shared IDs across both PolicyExportFilter passes)",
+    "Symmetric worlds return identical structural shape (5 hits each) but disjoint content (0 shared UUIDs) (16.5)",
+    "Export count non-interference: world_a count (2) ≠ world_b count (3), neither encodes the other's cardinality (16.7)"
+  ],
+  "tests": [
+    {
+      "id": "16.1",
+      "name": "paired_world_protected_token_scan_no_cross_namespace_results",
+      "description": "5 UUID-based world_b protected tokens queried against world_a namespace FTS filter — 0 hits returned; sanity check confirms tokens are indexed (found without namespace filter)",
+      "result": "Pass"
+    },
+    {
+      "id": "16.2",
+      "name": "paired_world_count_reveals_only_own_namespace_cardinality",
+      "description": "world_a count=4, world_b count=6 in same DB; namespace-scoped counts are disjoint; world_a IDs absent from world_b ID enumeration",
+      "result": "Pass"
+    },
+    {
+      "id": "16.3",
+      "name": "paired_world_cursor_and_cache_keys_are_namespace_isolated",
+      "description": "policy_hash_a ≠ policy_hash_b; cache_key_a ≠ cache_key_b; cursor_key_a ≠ cursor_key_b; redacted_ref(same_record_id) differs across namespaces",
+      "result": "Pass"
+    },
+    {
+      "id": "16.4",
+      "name": "paired_world_graph_traversal_stays_within_world",
+      "description": "BFS from world_a root a1 over chain a1→a2→a3 (via related_to edges); visited 2 nodes; b1 and b2 not reachable",
+      "result": "Pass"
+    },
+    {
+      "id": "16.5",
+      "name": "paired_world_symmetric_worlds_same_shape_disjoint_content",
+      "description": "5 records each world; same query returns 5 hits for world_a and 5 hits for world_b; intersection size=0",
+      "result": "Pass"
+    },
+    {
+      "id": "16.6",
+      "name": "paired_world_export_packages_are_completely_disjoint",
+      "description": "PolicyExportFilter applied to combined world_a+world_b fixture; world_a export=2 records, world_b export=2 records; shared record IDs=0",
+      "result": "Pass"
+    },
+    {
+      "id": "16.6b",
+      "name": "interchange_export_policy_paired_worlds_produce_disjoint_exports",
+      "description": "Pre-existing Section 11 test confirming world_a records fail scope_b filter and world_b records fail scope_a filter",
+      "result": "Pass"
+    },
+    {
+      "id": "16.7",
+      "name": "paired_world_export_counts_do_not_encode_foreign_cardinality",
+      "description": "world_a count=2, world_b count=3; world_a count ≠ world_b count ≠ total; no count equality that could leak cardinality",
+      "result": "Pass"
+    },
+    {
+      "id": "16.8",
+      "name": "paired_world_cache_key_isolation_different_namespace_different_key",
+      "description": "cache_key differs by namespace, query_hash, and revision; cursor_key differs by namespace; deterministic within same namespace",
+      "result": "Pass"
+    }
+  ],
+  "coverage": {
+    "searchIsolation": "Proven via FTS5 namespace filter — world_b UUID tokens return 0 hits under world_a scope",
+    "countIsolation": "Proven via namespace-scoped SQL COUNT — each world sees only its own cardinality",
+    "cursorCacheIsolation": "Proven via AuthorizedScope.cache_key / cursor_key — namespace hash is mixed into every key",
+    "graphPathIsolation": "Proven via SqliteGraphStore.neighbors BFS — no cross-world edges means no cross-world traversal",
+    "exportDisjointness": "Proven via PolicyExportFilter.passes_filter — namespace_filter gate excludes foreign records",
+    "exportCountNonInterference": "Proven by asymmetric world sizes — counts are independent and distinct",
+    "redactedRefIsolation": "Proven via AuthorizedScope.redacted_ref — same record_id hashes differently under different policy_hash"
+  },
+  "notes": "All 9 Section 16 tests pass (8 new + 1 pre-existing from Section 11.4 counted for completeness). Tests operate at Rust unit level against in-memory SQLite authority DBs and the FTS search/export interchange layer. No Tauri/HTTP stack required. The protected-token test uses UUID-based tokens (SECRETTOKEN + uuid_no_dashes) to ensure zero sub-word overlap between worlds in FTS5 tokenized queries. Graph isolation test uses the registered 'related_to' relation_name to satisfy relation_registry FK constraint. Owner self-review per dev-context.md."
+}

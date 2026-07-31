@@ -1,9 +1,10 @@
 # KRIA Presence UI — Architecture
 
 The presence experience is a **frontend-only, static-demo** HUD (deep-indigo base
-with cyan + violet accents). It runs behind the `home.command-center` flag and is
-composed of three top-level **surfaces** on one axis, orthogonal to the 7-Space
-Dock router. No backend, stores, or tool execution — every value is demo data.
+with cyan + violet accents). It is embedded inside the always-mounted `AppShell`.
+Four top-level **surfaces** share one shell-owned `NavigationRail`; the workspace
+surface hosts the canonical 7-Space router. No homepage value is treated as
+backend authority.
 
 ```
                  Context Engine  (context.ts)
@@ -16,22 +17,25 @@ Dock router. No backend, stores, or tool execution — every value is demo data.
   Presence Line                    Running Operations           Memory Insights
   Composer                         Mission Status
   Action Chips                     Upcoming
-  Context Surface (1)
-  Hidden Dock (overlay)
+  Context Surface (1)              Shared shell NavigationRail
 ```
 
 ## Surfaces (`app/surface.ts` + `app/SurfaceHost.tsx`)
 
-`Surface = "home" | "command-deck" | "developer"`, a local reactive signal.
-`SurfaceHost` renders the active one. These are **not** Dock Spaces (that would
-break the 7-Space `expansion-governance-lint` cap) — they are a separate axis.
+`Surface = "home" | "workspace" | "command-deck" | "developer"`, a local
+reactive signal. `SurfaceHost` renders the active middle region while `AppShell`
+keeps global runtime services, overlays, PresenceBar, status, and navigation
+mounted. Command Deck and Developer Observatory remain outside the seven-Space
+set.
 
 - **home** → `command-center/CommandCenter.tsx` — KRIA's resting presence.
+- **workspace** → `shell/SpaceRouter.tsx` — the last canonical Space/segment.
 - **command-deck** → `command-deck/CommandDeck.tsx` — Mission Control (operations).
 - **developer** → `developer/DeveloperObservatory.tsx` — diagnostics.
 
-Reachability: home top bar grid icon → Command Deck; Command Deck bar → Developer;
-both → Back to Home.
+The shared rail provides Home, all seven Spaces in `ALL_SPACES` order, Command
+Deck, Developer, Voice, and window-mode controls. Navigation is reactive and
+reload-free; leaving workspace never resets its last route.
 
 ## Context Engine (`command-center/context.ts`)
 
@@ -55,15 +59,14 @@ presentation (label, icon, preview `description`) and its Context Surface conten
 
 | Component | Role |
 |-----------|------|
-| `CommandCenter.tsx` | Composition + global keys (⌘K dock, Alt reveal, ⌥⇧C context, ESC) |
+| `CommandCenter.tsx` | Embedded Home composition + contextual keys (⌘K, ⌥⇧C, ESC) |
 | `Orbit.tsx` | Adaptive capability ring; reveals on Core hover/focus; opens one surface |
 | `PresenceLine.tsx` | One context-aware living sentence |
 | `HomeComposer.tsx` | Context-aware placeholder; the primary interaction point |
 | `ActionChips.tsx` | Low-weight suggestions |
 | `ContextSurface.tsx` | The single Adaptive Context Surface (dissolves when null) |
 | `ContextPanel.tsx` | The one contextual surface that emerges from the Core |
-| `HiddenDock.tsx` | Navigation overlay, invisible until summoned |
-| `homeNav.ts` | Shared state: `activeCapability`, dock open/pinned, focus restore |
+| `homeNav.ts` | Shared contextual-surface state and focus restore |
 
 **One-Surface Rule:** `activeCapability` is a single value — selecting a capability
 replaces any open surface; it never stacks. ESC / backdrop dismiss and restore focus

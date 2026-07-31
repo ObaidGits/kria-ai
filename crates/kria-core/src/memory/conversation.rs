@@ -6,6 +6,18 @@
 //! `MemoryStore` conversation/session/preference surface, backed by the same
 //! authority `Database` (unified backup/encryption). API is intentionally
 //! faithful to the legacy one so consumers swap with a one-line change.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::conversation_turn`](
+//! crate::memory::authority::CommandCandidate::conversation_turn) is the typed
+//! command-candidate scaffolding (task F1.5.1) this store's turn writes will
+//! route through once a concrete `TxSemanticStore` builder persists a
+//! conversation-turn semantic row (F2). Until that builder exists, cutting
+//! [`ConversationStore::store_turn`] over to the
+//! [`AuthorityCommandBus`](crate::memory::authority::AuthorityCommandBus) would
+//! silently stop persisting turn content — the bus's only available semantic
+//! store today (`DeferredSemanticStore`) writes no concrete row. This module
+//! therefore remains the live, real persistence path for chat history until
+//! F2 lands; see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 
@@ -170,6 +182,12 @@ impl ConversationStore {
                 params![session_id],
             )
             .ok(); // best-effort FTS cleanup
+        tx.conn()
+            .execute(
+                "DELETE FROM chat_media WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(StorageError::Sqlite)?;
         let n = tx
             .conn()
             .execute(

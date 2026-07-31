@@ -1,0 +1,127 @@
+{
+  "schema": "memory-graph.orphan-resolution/v1",
+  "task": "0.5.3 Run the ID/fixture/manifest commands and resolve every F0 orphan, schema error, checksum error, and misleading Current/Planned/Unavailable/Unknown claim.",
+  "gate": "F0",
+  "run_id": "f0-gate",
+  "generated_at_utc": "2026-07-22T20:09:17Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "spec_dir": ".kiro/specs/memory-graph-production-redesign",
+  "scope_note": "This artifact records the F0.5.3 orphan/schema/checksum/claim resolution run: the pre-fix mg-coverage result, the fixture-determinism check, the single defect (R-DATA-01) that was resolved, the misleading-runtime-label wording correction, and the post-fix clean gate result. Task 0.5.4 (generate + sign the F0 manifest) is explicitly NOT performed here.",
+  "commands_run": [
+    {
+      "id": "CMD-MG-COVERAGE (pre-fix)",
+      "invocation": "cargo run -p kria-eval --bin mg-coverage -- --out-dir .kiro/specs/memory-graph-production-redesign/evidence/F0/f0-gate/prefix --run-id f0-gate-prefix",
+      "exit_code": 1,
+      "verdict": "FAIL",
+      "totals": { "requirements": "48/48", "decisions": "46/46", "findings": "65/65", "opportunities": "31/31" },
+      "reverse_orphans": 0,
+      "total_diagnostics": 1,
+      "error_diagnostics": 1,
+      "diagnostics": [
+        {
+          "severity": "error",
+          "kind": "undefined_code",
+          "id": "R-DATA-01",
+          "file": "requirements.md",
+          "line": 457,
+          "reason": "R-DATA-01 (risk) is referenced but has no canonical definition"
+        }
+      ],
+      "artifacts": [
+        "evidence/F0/f0-gate/prefix/reports/coverage.json",
+        "evidence/F0/f0-gate/prefix/reports/id-inventory.json",
+        "evidence/F0/f0-gate/prefix/reports/reverse-orphans.json",
+        "evidence/F0/f0-gate/prefix/commands/CMD-MG-COVERAGE.json"
+      ]
+    },
+    {
+      "id": "CMD-MG-COVERAGE (post-fix)",
+      "invocation": "cargo run -p kria-eval --bin mg-coverage -- --out-dir .kiro/specs/memory-graph-production-redesign/evidence/F0/f0-gate/postfix --run-id f0-gate-postfix",
+      "exit_code": 0,
+      "verdict": "PASS",
+      "totals": { "requirements": "48/48", "decisions": "46/46", "findings": "65/65", "opportunities": "31/31" },
+      "reverse_orphans": 0,
+      "total_diagnostics": 0,
+      "error_diagnostics": 0,
+      "diagnostics": [],
+      "artifacts": [
+        "evidence/F0/f0-gate/postfix/reports/coverage.json",
+        "evidence/F0/f0-gate/postfix/reports/id-inventory.json",
+        "evidence/F0/f0-gate/postfix/reports/reverse-orphans.json",
+        "evidence/F0/f0-gate/postfix/commands/CMD-MG-COVERAGE.json"
+      ]
+    }
+  ],
+  "fixture_determinism": {
+    "command": "cargo test -p kria-eval memory_graph::fixtures",
+    "result": "pass",
+    "tests_passed": 105,
+    "tests_failed": 0,
+    "mechanism": "Each fixture family's `two_run_byte_and_hash_determinism` test generates the package twice and asserts (a) byte-identical `all_files()` and (b) identical `manifest.package_sha256`. Each family's `materializes_committed_package_to_repo` test materializes the frozen package into tests/fixtures/memory-graph/generated/<id>/<generator-version>/ and confirms deterministic output. The release family additionally freezes the full-corpus contract (sample_package_sha256) via `materializes_slice_and_frozen_contract_to_repo`.",
+    "checksum_drift": "none — SHA-256 manifest digests are identical across a second generation; no schema or checksum errors reported",
+    "note": "tests/fixtures/memory-graph/generated/ is materialized output (untracked in git); determinism is proven by the in-suite two-run byte+SHA-256 comparison, not by a committed golden tree."
+  },
+  "resolution": {
+    "primary_defect": {
+      "id": "R-DATA-01",
+      "class": "undefined_code / reverse orphan (defined-reference-without-definition)",
+      "location_before": "requirements.md:457 — MGR-019 Traceability line: '**Traceability:** MG-M13, MG-M14, MG-O03, MG-O12; risk R-DATA-01.'",
+      "root_cause": "requirements.md MGR-019 cited a risk code `R-DATA-01` that is never defined in risk-analysis.md's 27-entry risk register.",
+      "option_chosen": "(b) correct the requirements.md reference to already-defined risks",
+      "option_rejected": "(a) define a new R-DATA-01 risk entry in risk-analysis.md",
+      "rationale": "The traceability.md ledger row for MGR-019 already maps it to the DEFINED risks `R-WRONG-MERGE, R-POLICY-LEAK`. `R-WRONG-MERGE` ('name/fuzzy/vector auto-merge contaminates canonical identity, provenance, policy, links, and retrieval') is precisely the entity-resolution/mistaken-merge risk MGR-019 (Entity Provenance and Resolution) addresses. Defining a new `R-DATA-01` would duplicate/overlap `R-WRONG-MERGE` and introduce a second inconsistency with the ledger. Pointing the requirements reference at the existing defined risks makes requirements.md, traceability.md, and risk-analysis.md mutually consistent with no new risk entity.",
+      "change_applied": "requirements.md:457 changed from '...; risk R-DATA-01.' to '...; risks R-WRONG-MERGE, R-POLICY-LEAK.'",
+      "verification": "post-fix mg-coverage reports 0 undefined codes / 0 reverse orphans / 0 error diagnostics and exits 0; totals unchanged at 48/48, 46/46, 65/65, 31/31."
+    },
+    "misleading_claim_corrections": [
+      {
+        "id": "MM-2 (runtime label)",
+        "location": "design.md §6.1 (Exact FTS5 and vector contracts)",
+        "before": "The model target is FastEmbed **`all-MiniLM-L6-v2`, 384 dimensions**. ... `models/manifest` must pin ... reviewed license disposition, FastEmbed/runtime versions, maximum tokenization contract ...",
+        "after": "The model target is **`all-MiniLM-L6-v2`, 384 dimensions**, served through ONNX Runtime (the `ort` crate) with a WordPiece `tokenizers` pipeline — not the `fastembed` crate, which is used only by the separate intent-routing embedder. ... `models/manifest` must pin ... reviewed license disposition, ONNX Runtime (`ort`)/tokenizer runtime versions, maximum tokenization contract ...",
+        "evidence": "evidence/F0/f0-inventory/reports/model-license-inventory.json — the LIVE memory vector path (AnnVectorStore + OnnxEmbedder) uses raw ONNX Runtime (`ort` 2.0.0-rc.12) + `tokenizers` 0.20.4, NOT the `fastembed` crate. `fastembed` 5.13.3 is bound only to the separate MultilingualE5Small intent-routing embedder (M-routing-e5). Mismatch MM-2 flagged the 'FastEmbed' label as inaccurate for the memory runtime.",
+        "nature": "Wording-only truthfulness correction (A4 epistemic truth / MGD-018 Current-vs-Planned truth). No new capability claim; the model target and Planned framing are preserved. The manifest runtime PIN itself remains future work (F1/F3)."
+      }
+    ],
+    "claims_reviewed_no_change_needed": [
+      {
+        "claim": "design.md §1 Vectors row Planned target 'Pinned all-MiniLM-L6-v2, exact cosine, manifest-verified 384d partitions'",
+        "finding": "Correctly framed as a Planned target; no FastEmbed label present; no correction needed."
+      },
+      {
+        "claim": "F0.3 model artifact checksum/source/license marked 'Unknown'",
+        "finding": "Accurate: the MiniLM ONNX artifact is fetched out-of-band at runtime and is NOT vendored, so its bytes cannot be inspected under the F0 no-download constraint. 0.5.2 confirmed the model IS present at runtime though not vendored; the design makes no false 'Unavailable' runtime claim, so the 'Unknown' artifact facts are correct and left unchanged (resolution deferred to F1/F5 per U-1..U-7)."
+      }
+    ]
+  },
+  "linter_tests_updated": {
+    "reason": "F0.1 linter unit tests hard-coded the R-DATA-01 defect as the expected real-spec baseline. Resolving the defect (this task's goal) makes those assertions stale, so they were updated to assert the now-clean state.",
+    "files": [
+      "crates/kria-eval/src/memory_graph/integrity.rs — real_spec_catches_only_the_known_r_data_01_orphan -> real_spec_is_integrity_clean_after_r_data_01_resolution (asserts v.is_ok() and no R-DATA-01 issue)",
+      "crates/kria-eval/src/memory_graph/report.rs — real_spec_report_surfaces_only_the_known_orphan -> real_spec_report_is_clean_after_r_data_01_resolution (asserts 0 diagnostics)",
+      "crates/kria-eval/src/memory_graph/command.rs — real_spec_fails_closed_on_known_r_data_01_defect -> real_spec_passes_gate_after_r_data_01_resolution (asserts EXIT_SUCCESS, 0 error diagnostics)",
+      "crates/kria-eval/src/memory_graph/command.rs — run_emits_totals_and_returns_outcome now expects EXIT_SUCCESS",
+      "crates/kria-eval/src/memory_graph/command.rs — synthetic fixture id in fails_closed_on_non_orphan_error_even_with_exact_totals changed R-DATA-01 -> R-GHOST-01 (clearly synthetic; not the resolved real defect)",
+      "module doc-comments in command.rs / integrity.rs / forward.rs updated to describe R-DATA-01 as resolved by F0.5.3"
+    ]
+  },
+  "verification": {
+    "mg_coverage_post_fix_exit": 0,
+    "memory_graph_tests": { "command": "cargo test -p kria-eval memory_graph", "passed": 243, "failed": 0 },
+    "fixture_tests": { "command": "cargo test -p kria-eval memory_graph::fixtures", "passed": 105, "failed": 0 },
+    "lib_suite": {
+      "command": "cargo test -p kria-eval --lib",
+      "passed": 486,
+      "failed": 13,
+      "ignored": 9,
+      "failed_note": "All 13 failures are openclaw_eval tests requiring a live Docker daemon (names contain 'real_docker'/'real_container'); they are pre-existing environmental preconditions unrelated to this task. No memory_graph or spec-doc test failed."
+    }
+  },
+  "not_done_here": "0.5.4 — generate + sign the F0 manifest (out of scope for 0.5.3).",
+  "spec_docs_edited": [
+    "requirements.md (MGR-019 traceability risk reference)",
+    "design.md (§6.1 embedding runtime label wording)"
+  ],
+  "tasks_md_touched": false
+}

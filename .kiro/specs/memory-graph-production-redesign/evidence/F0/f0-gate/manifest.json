@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "memory-graph-evidence-manifest/v1",
+  "runId": "f0-gate",
+  "gate": "F0",
+  "status": "Pass",
+  "startedAt": "2026-07-22T20:21:04Z",
+  "endedAt": "2026-07-22T20:21:05Z",
+  "actor": "Obaidullah Zeeshan",
+  "git": {
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+    "branch": "main",
+    "dirty": true,
+    "dirtyDigest": "bcfdd9cc80991d478fcd072ca05a5bf70979741bc60e8359e2167a6e181a1c4f"
+  },
+  "commands": [
+    {
+      "commandId": "CMD-MG-COVERAGE",
+      "argv": [
+        "cargo",
+        "run",
+        "-p",
+        "kria-eval",
+        "--bin",
+        "mg-coverage",
+        "--",
+        "--out-dir",
+        ".kiro/specs/memory-graph-production-redesign/evidence/F0/f0-gate/postfix",
+        "--run-id",
+        "f0-gate-postfix"
+      ],
+      "workingDirectory": ".",
+      "exitCode": 0
+    }
+  ],
+  "requirementIds": [
+    "MGR-001",
+    "MGR-027",
+    "MGR-029",
+    "MGR-048"
+  ],
+  "decisionIds": [
+    "MGD-018",
+    "MGD-021",
+    "MGD-042"
+  ],
+  "suiteIds": [],
+  "fixtures": [],
+  "versions": {
+    "authoritySchema": "10",
+    "ontology": "Unknown",
+    "model": "all-MiniLM-L6-v2/384d (target; unpinned/unvendored at F0 — F1/F5)",
+    "rrf": "Unknown",
+    "scene": "Unknown"
+  },
+  "buildEnvironment": {
+    "os": "Ubuntu 24.04.4 LTS",
+    "kernel": "7.0.0-28-generic",
+    "webkitGtk": null,
+    "runtime": "rustup stable-x86_64-unknown-linux-gnu",
+    "buildProfile": "debug",
+    "lockfileHashes": {
+      "Cargo.lock": "f25c3e91fafb7f334a10db23f7a71cb0d9470c6d33d1174d17fc83c5e450fabf"
+    },
+    "binaryHashes": {}
+  },
+  "referenceHardware": {
+    "hardwareId": "mg-ref-hw-44fae14da88137d4",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13700HX",
+    "ram": "15.3 GiB",
+    "gpu": null,
+    "storage": null,
+    "display": null,
+    "dpi": null
+  },
+  "environmentState": {
+    "powerState": "AC",
+    "thermalState": null,
+    "networkState": "Unknown",
+    "protocol": "WarmAndCold"
+  },
+  "accessibility": {
+    "locale": "en_US.UTF-8",
+    "theme": null,
+    "input": null,
+    "assistiveTech": null
+  },
+  "artifacts": [
+    {
+      "path": "f0-gate/reports/orphan-resolution.json",
+      "mediaType": "application/json",
+      "sha256": "e01ebbea72c22a844c37688e07a10996aa1f86f30fb0fd7c6286ea892b378394",
+      "size": 9935
+    },
+    {
+      "path": "f0-gate/postfix/reports/coverage.json",
+      "mediaType": "application/json",
+      "sha256": "42e62ca5f44302507fd9d519dd7763477ee72c13c171d3cff8dd3dcc8d3edde9",
+      "size": 650
+    },
+    {
+      "path": "f0-gate/postfix/reports/id-inventory.json",
+      "mediaType": "application/json",
+      "sha256": "f71763679aa9567995b9069fe3f175756f581c22301e45731c68aede9f668b98",
+      "size": 620
+    },
+    {
+      "path": "f0-gate/postfix/reports/reverse-orphans.json",
+      "mediaType": "application/json",
+      "sha256": "ee35b7e2c8b797b3387c3c28cdbfff371c7b66461b51e6789e6af4a7b9fbd931",
+      "size": 95
+    },
+    {
+      "path": "f0-gate/postfix/commands/CMD-MG-COVERAGE.json",
+      "mediaType": "application/json",
+      "sha256": "5b84d43d050c569d2806f7a39d158f25fa9e0272ed06a4a230c5744d811dc18b",
+      "size": 664
+    },
+    {
+      "path": "baseline/reports/baseline.json",
+      "mediaType": "application/json",
+      "sha256": "be6822fc878fc315fb004649f2f8be3da4eac94b4bfd72f1ddaf67853dce6a78",
+      "size": 20600
+    },
+    {
+      "path": "f0-inventory/reports/write-paths.json",
+      "mediaType": "application/json",
+      "sha256": "1c192750ae20cddf481138a6b5ac81bda326b9f38caf43a8849197b92181121a",
+      "size": 39353
+    },
+    {
+      "path": "f0-inventory/reports/read-paths.json",
+      "mediaType": "application/json",
+      "sha256": "b731f26a832647d9d5d9c8f7164260a3b896bd66ef3e5912d2322a588b576dbf",
+      "size": 49405
+    },
+    {
+      "path": "f0-inventory/reports/schema-inventory.json",
+      "mediaType": "application/json",
+      "sha256": "b50fb87f2cf5b3f330ddb456a5cb1f9e095a4c6acd922c33426f45ab65f6f36f",
+      "size": 38143
+    },
+    {
+      "path": "f0-inventory/reports/ui-paths.json",
+      "mediaType": "application/json",
+      "sha256": "0777cef2d02ee3b784835d5af9f4ca1e965b1a9da39ea7896b6a98b338728a25",
+      "size": 49877
+    },
+    {
+      "path": "f0-inventory/reports/model-license-inventory.json",
+      "mediaType": "application/json",
+      "sha256": "6d0eebaec245c3f544a903482911c6a6364cc90f86df4f604c51c18ad7f7cb60",
+      "size": 19916
+    },
+    {
+      "path": "f0-inventory/reports/dependency-license-inventory.json",
+      "mediaType": "application/json",
+      "sha256": "a71023a2ea1bef0a2f358eb71ccd821773f5fa3f6989a56525bcbe03a8a8231e",
+      "size": 32639
+    }
+  ],
+  "assertions": {
+    "total": 190,
+    "passed": 190,
+    "failed": 0
+  },
+  "counterexamples": [],
+  "metrics": [],
+  "reviews": [
+    {
+      "role": "Spec owner",
+      "reviewerId": "Obaidullah Zeeshan",
+      "timestamp": "2026-07-22T20:21:05Z",
+      "manifestHash": "b851b1586d70a88a22e2cbffed3d0054983a875d937136f130fe54dfdc3b0279",
+      "reviewedArtifactHashes": [
+        "e01ebbea72c22a844c37688e07a10996aa1f86f30fb0fd7c6286ea892b378394",
+        "42e62ca5f44302507fd9d519dd7763477ee72c13c171d3cff8dd3dcc8d3edde9",
+        "f71763679aa9567995b9069fe3f175756f581c22301e45731c68aede9f668b98",
+        "ee35b7e2c8b797b3387c3c28cdbfff371c7b66461b51e6789e6af4a7b9fbd931",
+        "5b84d43d050c569d2806f7a39d158f25fa9e0272ed06a4a230c5744d811dc18b",
+        "be6822fc878fc315fb004649f2f8be3da4eac94b4bfd72f1ddaf67853dce6a78",
+        "1c192750ae20cddf481138a6b5ac81bda326b9f38caf43a8849197b92181121a",
+        "b731f26a832647d9d5d9c8f7164260a3b896bd66ef3e5912d2322a588b576dbf",
+        "b50fb87f2cf5b3f330ddb456a5cb1f9e095a4c6acd922c33426f45ab65f6f36f",
+        "0777cef2d02ee3b784835d5af9f4ca1e965b1a9da39ea7896b6a98b338728a25",
+        "6d0eebaec245c3f544a903482911c6a6364cc90f86df4f604c51c18ad7f7cb60",
+        "a71023a2ea1bef0a2f358eb71ccd821773f5fa3f6989a56525bcbe03a8a8231e"
+      ],
+      "verdict": "Approved. F0 evidence-reset gate: coverage/orphan linter clean (48/48 MGR, 46/46 MGD, 65/65 findings, 31/31 opportunities, 0 reverse orphans), deterministic fixtures frozen, F0.3 inventories and current-state baseline recorded with explicit limitations. This manifest makes NO Verified implementation claim; verified-implementation count remains zero. Single-developer pre-production repo (steering dev-context): recorded as the owner's self-attestation, not an independent third-party signature.",
+      "independent": false,
+      "signatureMethod": "ssh"
+    },
+    {
+      "role": "QA/evidence owner",
+      "reviewerId": "Obaidullah Zeeshan",
+      "timestamp": "2026-07-22T20:21:05Z",
+      "manifestHash": "b851b1586d70a88a22e2cbffed3d0054983a875d937136f130fe54dfdc3b0279",
+      "reviewedArtifactHashes": [
+        "e01ebbea72c22a844c37688e07a10996aa1f86f30fb0fd7c6286ea892b378394",
+        "42e62ca5f44302507fd9d519dd7763477ee72c13c171d3cff8dd3dcc8d3edde9",
+        "f71763679aa9567995b9069fe3f175756f581c22301e45731c68aede9f668b98",
+        "ee35b7e2c8b797b3387c3c28cdbfff371c7b66461b51e6789e6af4a7b9fbd931",
+        "5b84d43d050c569d2806f7a39d158f25fa9e0272ed06a4a230c5744d811dc18b",
+        "be6822fc878fc315fb004649f2f8be3da4eac94b4bfd72f1ddaf67853dce6a78",
+        "1c192750ae20cddf481138a6b5ac81bda326b9f38caf43a8849197b92181121a",
+        "b731f26a832647d9d5d9c8f7164260a3b896bd66ef3e5912d2322a588b576dbf",
+        "b50fb87f2cf5b3f330ddb456a5cb1f9e095a4c6acd922c33426f45ab65f6f36f",
+        "0777cef2d02ee3b784835d5af9f4ca1e965b1a9da39ea7896b6a98b338728a25",
+        "6d0eebaec245c3f544a903482911c6a6364cc90f86df4f604c51c18ad7f7cb60",
+        "a71023a2ea1bef0a2f358eb71ccd821773f5fa3f6989a56525bcbe03a8a8231e"
+      ],
+      "verdict": "Approved. F0 evidence-reset gate: coverage/orphan linter clean (48/48 MGR, 46/46 MGD, 65/65 findings, 31/31 opportunities, 0 reverse orphans), deterministic fixtures frozen, F0.3 inventories and current-state baseline recorded with explicit limitations. This manifest makes NO Verified implementation claim; verified-implementation count remains zero. Single-developer pre-production repo (steering dev-context): recorded as the owner's self-attestation, not an independent third-party signature.",
+      "independent": false,
+      "signatureMethod": "ssh"
+    }
+  ],
+  "waivers": [],
+  "predecessorHashes": []
+}

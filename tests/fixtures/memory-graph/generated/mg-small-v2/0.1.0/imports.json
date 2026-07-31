@@ -1,0 +1,74 @@
+[
+  {
+    "id": "8ebc3643-f7b7-2af1-c050-5d2493a24613",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "memory",
+    "external_id": "ca933379-b115-5f1d-c4a4-473b5d9464cc",
+    "proposed_label": "imported node 0",
+    "checksum": "3658d88bfb89f6d0c18545344b629ceb091eb69c7821694d5cc7d09e7c7d6fc7",
+    "status": "candidate",
+    "has_unknown_optional_fields": true,
+    "created_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "cd447276-2136-618a-f654-0a49a87d68ef",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "summary",
+    "external_id": "d8c35715-0a51-9fc9-371b-e221060470bc",
+    "proposed_label": "imported node 1",
+    "checksum": "56b541cf3d7a8594dde323ebf0abb432fcb6997867d434fa3032ef77c656e9eb",
+    "status": "accepted",
+    "has_unknown_optional_fields": false,
+    "created_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "eefe9de9-53ef-8673-b9bf-a0159246cced",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "skill",
+    "external_id": "ad35f8cd-ebeb-aac3-84a2-44439c5cf5fb",
+    "proposed_label": "imported node 2",
+    "checksum": "fa15dcde5a9a32d65158dd6083c8860db57063846895dcfb8f77df712bcb7cbd",
+    "status": "rejected",
+    "has_unknown_optional_fields": false,
+    "created_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "025a9ccb-5658-21b3-8c54-843dd9f99a1e",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "rule",
+    "external_id": "b1f96cfd-c633-5c81-fc0c-5725dc5c87a1",
+    "proposed_label": "imported node 3",
+    "checksum": "ada3b1f2e1943d15554e095178c522c0192bbbfc6d875d94ec26f73a41c362f4",
+    "status": "conflict",
+    "has_unknown_optional_fields": true,
+    "created_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "f87831df-41b4-2aa7-c987-f306cfacf43e",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "entity",
+    "external_id": "9eb76bb8-4b05-faea-8358-5072cecc00b3",
+    "proposed_label": "imported node 4",
+    "checksum": "5fc0d97963ef3ef322e999677f855eb5781688e647e45d3aa596bc5f54add4d7",
+    "status": "candidate",
+    "has_unknown_optional_fields": false,
+    "created_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "c43a4285-c8cb-fcd1-45b5-3e0d3885fe8e",
+    "package_id": "mg-interchange-000",
+    "schema_version": "memory-graph-interchange/v2",
+    "record_kind": "alias",
+    "external_id": "3402a600-e464-c785-c6bf-491041f468b1",
+    "proposed_label": "imported node 5",
+    "checksum": "526568ea1633b53e301976c4047d2669534451a7cdacafafed3b6c7c47be4556",
+    "status": "accepted",
+    "has_unknown_optional_fields": false,
+    "created_at": "2024-06-01T00:00:00Z"
+  }
+]

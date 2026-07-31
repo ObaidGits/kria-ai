@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-RESOURCE-01",
+  "taskId": "4.9.5",
+  "generatedAt": "2026-07-29T07:39:01.918Z",
+  "engine": "chromium",
+  "browserVersion": "149.0.7827.55",
+  "webkitLimitation": "Full native WebKitGTK profiling requires the Tauri desktop runtime. Playwright webkit engine used as headless CI proxy.",
+  "thresholds": {
+    "heapGrowthBound": "1.5× (50%) after 20 navigation cycles",
+    "idleCpuDeltaBudgetPp": 2,
+    "idleWindowMs": 5000,
+    "boundedQueueMutationsPer1s": 100
+  },
+  "heapBounds": {
+    "before20Cycles": {
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 33100000
+    },
+    "after20Cycles": {
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 33100000
+    },
+    "growthFactor": 1,
+    "gate": "PASS",
+    "note": "performance.memory is a non-standard Chromium API; unavailable in webkit engine."
+  },
+  "idleCpuProxy": {
+    "method": "rAF callback rate delta normalized to 60fps reference",
+    "activeRafCallbacks1s": 0,
+    "idleRafCallbacks5s": 0,
+    "activeRatePerSec": 0,
+    "idleRatePerSec": 0,
+    "activePercent": 0,
+    "idlePercent": 0,
+    "deltaPp": 0,
+    "gate": "PASS",
+    "note": "rAF callback rate is used as a proxy for CPU utilization. A delta >2pp indicates the animation loop did not fully stop. True CPU measurement requires system-level profiling in the native WebKitGTK/Tauri runtime."
+  },
+  "queueBounds": {
+    "idleDomMutations1s": 0,
+    "gate": "PASS",
+    "note": "DOM mutation count during a 1s idle window proxies outbox/queue growth. ≤100 confirms no unbounded queue firing."
+  },
+  "hardware": {
+    "capturedAt": "2026-07-29T07:39:01.918Z",
+    "os": {
+      "platform": "linux",
+      "release": "7.0.0-28-generic",
+      "arch": "x64"
+    },
+    "cpu": {
+      "model": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "logicalCores": 24,
+      "loadAverage": [
+        5.34,
+        4.52,
+        3.11
+      ]
+    },
+    "ram": {
+      "totalBytes": 16465276928,
+      "freeBytes": 6874718208,
+      "processRssBytes": 263991296
+    },
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+    "dirtyWorktree": true
+  }
+}

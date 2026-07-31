@@ -81,6 +81,15 @@ pub struct AppState {
     /// observations/outcomes and retrieves context through this, never bypassing
     /// the Write Policy. Shares the single authority DB with `conversation`.
     pub memory_system: Arc<kria_core::memory::api::MemorySystem>,
+    /// The authenticated caller identity this desktop (Tauri) adapter constructs
+    /// at its boundary (F1.2.4). Desktop is in-process / locally-trusted
+    /// (`CallerOrigin::LocalDesktop`); the server adapter builds its own
+    /// `AuthenticatedRemote` caller. Both adapters share the ONE memory
+    /// composition root (`memory_system`) — the caller is the distinct, per-
+    /// adapter fact. Held at the boundary now; threaded into the governed
+    /// write/read path when the caller/policy model lands (F1.4).
+    #[allow(dead_code)]
+    pub caller: kria_core::memory::model::CallerContext,
     /// Desktop cognition scheduler/UI bridge. Absent while Memory is disabled.
     pub memory_cognition_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Active cold-start import cancellation handle (AUD-03 / L4). Set for the

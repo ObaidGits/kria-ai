@@ -197,7 +197,10 @@ pub async fn memory_forget(
 ) -> Result<usize, String> {
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
     let scope = forget_scope(&kind, &value)?;
-    st.memory_system.forget(scope).map_err(|e| e.to_string())
+    // No preview token for desktop UI fast-forget (None = no stale-guard).
+    st.memory_system
+        .forget(scope, None)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -224,13 +227,10 @@ pub async fn memory_resolve_entities(
 ) -> Result<serde_json::Value, String> {
     use kria_core::memory::entity_resolution::{AliasType, Resolution};
     let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
-    let at = match alias_type.as_str() {
-        "email" => AliasType::Email,
-        "handle" => AliasType::Handle,
-        "url" => AliasType::Url,
-        "repo" => AliasType::Repo,
-        _ => AliasType::Name,
-    };
+    // Alias-taxonomy parsing is a domain decision owned by `kria_core`
+    // (`AliasType::from_str`, task F1.5.2) — this adapter only converts the
+    // caller-supplied wire tag through it.
+    let at = AliasType::from_str(&alias_type);
     let r = st
         .memory_system
         .resolve_entities(&display_name, &entity_type, &alias, at)
@@ -265,20 +265,12 @@ pub async fn memory_record_feedback(
             .map_err(|e| e.to_string());
     }
 
+    // Feedback-taxonomy parsing is a domain decision owned by `kria_core`
+    // (`FeedbackSignal::from_str`, task F1.5.2) — this adapter only converts
+    // the caller-supplied wire tag through it.
     let d = detail.unwrap_or_default();
-    let sig = match signal.as_str() {
-        "thumbs_up" => FeedbackSignal::ThumbsUp,
-        "thumbs_down" => FeedbackSignal::ThumbsDown,
-        "undo" => FeedbackSignal::Undo,
-        "cancel" => FeedbackSignal::Cancel,
-        "edit" => FeedbackSignal::Edit(d),
-        "overwrite" => FeedbackSignal::Overwrite,
-        "ignored_suggestion" => FeedbackSignal::IgnoredSuggestion,
-        "repeated_task" => FeedbackSignal::RepeatedTask,
-        "automation_success" => FeedbackSignal::AutomationSuccess,
-        "automation_failure" => FeedbackSignal::AutomationFailure,
-        other => return Err(format!("unknown feedback signal: {other}")),
-    };
+    let sig = FeedbackSignal::from_str(&signal, d)
+        .ok_or_else(|| format!("unknown feedback signal: {signal}"))?;
     st.memory_system
         .record_feedback(
             parse_uuid(&target_id)?,
@@ -826,15 +818,12 @@ pub async fn memory_graph_search(
 
 // ── Cold-start consent (onboarding) ───────────────────────────────────────
 
+// Scan-source-taxonomy parsing is a domain decision owned by `kria_core`
+// (`ScanSource::from_str`, task F1.5.2) — this adapter only converts the
+// caller-supplied wire tag through it.
 fn scan_source(s: &str) -> Result<kria_core::memory::cold_start::ScanSource, String> {
-    use kria_core::memory::cold_start::ScanSource;
-    match s {
-        "filesystem" => Ok(ScanSource::Filesystem),
-        "git" => Ok(ScanSource::Git),
-        "workspace" => Ok(ScanSource::Workspace),
-        "shell" => Ok(ScanSource::Shell),
-        other => Err(format!("unknown scan source: {other}")),
-    }
+    kria_core::memory::cold_start::ScanSource::from_str(s)
+        .ok_or_else(|| format!("unknown scan source: {s}"))
 }
 
 #[tauri::command]
@@ -1080,6 +1069,8 @@ pub async fn memory_health_report(
         "knowledge_gaps": r.knowledge_gaps,
         "enrichment_backlog": r.enrichment_backlog,
         "outbox_pending": r.outbox_pending,
+        // MGR-041: honest crypto capability — never falsely claims erasure.
+        "crypto_shred_capability": r.crypto_shred_capability,
     }))
 }
 
@@ -1104,4 +1095,313 @@ pub async fn memory_reasoning_replay(
         })
         .collect();
     Ok(serde_json::json!({ "traces": out, "count": out.len() }))
+}
+
+// ── v2 dispatch ───────────────────────────────────────────────────────────────
+
+/// Tauri adapter for the Memory API v2 unified dispatch endpoint (task 3.9.6 /
+/// 3.9.8, design §8).
+///
+/// Accepts the flat envelope that [`buildEnvelope`] in the UI client produces:
+///
+/// ```json
+/// {
+///   "operation":      "search",
+///   "params":         { … },
+///   "correlation_id": "uuid",
+///   "deadline_ms":    5000,
+///   "revision_base":  42,     // optional
+///   "cursor":         "…",    // optional
+///   "schema_version": "2.0"   // optional
+/// }
+/// ```
+///
+/// Builds a `CallerContext` (Tauri loopback — LocalDesktop, no auth required)
+/// and delegates to the `UnifiedRouter` stub which covers both query and command
+/// operations. Returns a serialized `GraphResponseV2` on success or an error
+/// string that the UI client maps to `UnsupportedCapabilityError` when the word
+/// "Unsupported" appears in the message.
+///
+/// **This is the v2 authority path. Do not delete it.**
+#[tauri::command]
+pub async fn memory_v2_dispatch(
+    operation: String,
+    params: Option<serde_json::Value>,
+    correlation_id: Option<String>,
+    deadline_ms: Option<u64>,
+    revision_base: Option<i64>,
+    cursor: Option<String>,
+    schema_version: Option<String>,
+    _state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    use kria_core::memory::api::v2::{
+        validate_adapter_request, AdapterContext, AdapterKind, CallerContext, GraphRequestV2,
+        UnifiedRouter,
+    };
+
+    // The desktop is always a local Tauri loopback caller — no authentication
+    // token required (AdapterLimits::requires_auth(Tauri) == false).
+    let caller: CallerContext = AdapterContext::build_caller_context(
+        AdapterKind::Tauri,
+        "local-desktop",
+        "personal", // default namespace for desktop
+        "",         // no scope restriction
+        0,          // max sensitivity ceiling (owner's own data)
+        "v2",
+    );
+
+    // Build the v2 request envelope.
+    let request = GraphRequestV2 {
+        operation: operation.clone(),
+        params_json: params.unwrap_or(serde_json::Value::Object(Default::default())),
+        revision: revision_base,
+        schema_version: schema_version.unwrap_or_else(|| "2.0".to_string()),
+        policy_hash: None,
+        cursor,
+        deadline_ms,
+    };
+
+    // Validate adapter-level capability constraints (e.g. local-only ops are
+    // allowed for Tauri, rejected for Axum).
+    validate_adapter_request(AdapterKind::Tauri, &request)
+        .map_err(|e| format!("Unsupported: {:?}", e))?;
+
+    // correlation_id is carried for trace / future use.
+    let _ = correlation_id;
+
+    // Delegate to the UnifiedRouter which tries OperationRouter first (query
+    // operations: search/neighborhood/path/…) then CommandRouter (command
+    // operations: command.preview/commit/undo/lifecycle/…).
+    let response = UnifiedRouter::dispatch(&caller, &request)
+        .map_err(|e| serde_json::to_string(&e).unwrap_or_else(|_| format!("{:?}", e)))?;
+
+    serde_json::to_value(&response).map_err(|e| format!("serialization error: {e}"))
+}
+
+// ── Dev / demo knowledge seeder ─────────────────────────────────────────────
+
+/// Seed a curated set of realistic demo memories and entities into the memory
+/// system so the Knowledge Graph UI has items to show on a fresh install.
+///
+/// Idempotent: calling it multiple times produces no duplicates because the
+/// Write Policy deduplicates by content hash. Safe to call from the UI "Seed
+/// demo data" button or on first launch.
+///
+/// The items mimic real conversational memories — what a user would have after
+/// a week of using KRIA. They cover a variety of namespaces, types, and
+/// relationship styles so the graph has interesting topology to display.
+#[tauri::command]
+pub async fn memory_seed_demo_knowledge(
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    use kria_core::memory::types::WriteCandidate;
+
+    let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
+
+    let ms = &st.memory_system;
+
+    // Demo memories — varied topics, realistic content, different sources.
+    let demo_items: &[(&str, &str)] = &[
+        // Personal preferences & context
+        ("core", "The user prefers dark mode in all applications and tools."),
+        ("core", "User's primary programming languages are Rust and TypeScript."),
+        ("core", "User works on KRIA — a local-first AI desktop assistant built with Tauri and SolidJS."),
+        ("core", "The user uses an Ubuntu Linux laptop with 16 GB RAM and an i7 processor."),
+        // Project knowledge
+        ("core", "KRIA uses SQLite as its sole transactional authority — no external database."),
+        ("core", "Memory architecture follows a production-grade design: authority store, write policy engine, and rebuild-safe derived indexes."),
+        ("core", "The memory graph uses frontier-level batch BFS to avoid N+1 query patterns during traversal."),
+        ("core", "KRIA's voice pipeline uses Whisper STT and Piper TTS for hands-free interaction."),
+        // Learning & research
+        ("core", "Rust's ownership model prevents data races at compile time — zero-cost abstraction over memory safety."),
+        ("core", "SolidJS uses fine-grained reactivity with signals — DOM updates are surgical, no virtual DOM diffing."),
+        ("core", "RRF (Reciprocal Rank Fusion) combines vector, FTS5, and graph retrieval scores without score normalization."),
+        ("core", "WAL mode in SQLite enables concurrent reads during writes, critical for KRIA's memory architecture."),
+        // Tool observations
+        ("core", "The memory_search Tauri command returns ranked results with provenance trace metadata."),
+        ("core", "cargo fmt enforces Rust code style; the KRIA validation hook runs it on every agent stop."),
+        ("core", "PropTest property-based testing found that BFS with cycles terminates correctly with visited-set guards."),
+        // Goals & plans
+        ("core", "Goal: Complete the Memory Graph Production Redesign spec — F0 through F5 gates."),
+        ("core", "Goal: Add GPU-accelerated local image generation via ComfyUI integration."),
+        ("core", "Goal: Implement wake-word detection for hands-free KRIA activation."),
+        // Factual knowledge
+        ("core", "The authorize_read gate enforces A5: policy precedes planning, counts, ranking, serialization, and caching."),
+        ("core", "Cryptographic shredding requires payload encryption and external key destruction — currently unavailable; relying on OS disk encryption."),
+    ];
+
+    let session = kria_core::memory::ids::new_id();
+    let mut stored = 0usize;
+    let mut skipped = 0usize;
+
+    for (_ns, content) in demo_items {
+        let candidate = WriteCandidate {
+            namespace_hint: Some("core".to_string()),
+            ..WriteCandidate::user(session, *content)
+        };
+        match ms.remember(candidate) {
+            Ok(_) => stored += 1,
+            Err(_) => skipped += 1,
+        }
+    }
+
+    // Flush enrichment so items are immediately searchable and indexed.
+    let _ = ms.flush().await;
+
+    // ── Seed graph entities + relationships so the graph has real topology ──
+    // Without edges the 3D/2D graph shows only disconnected nodes. These
+    // entities and `related_to` edges give the renderer actual structure.
+    let edges_created = seed_demo_graph(ms).unwrap_or(0);
+
+    // Return a summary so the UI can show feedback.
+    Ok(serde_json::json!({
+        "stored": stored,
+        "skipped": skipped,
+        "total": demo_items.len(),
+        "edges": edges_created,
+        "message": format!(
+            "Seeded {stored} demo memories and {edges_created} graph relationships \
+             ({skipped} skipped as duplicates). Knowledge Graph is ready."
+        )
+    }))
+}
+
+/// Seed a small connected entity graph so the Knowledge Graph renderer has
+/// visible topology (nodes + edges), not just isolated points.
+///
+/// Idempotent: uses `INSERT OR IGNORE` keyed on a deterministic identity hash,
+/// so repeated calls do not duplicate entities or edges.
+fn seed_demo_graph(
+    ms: &std::sync::Arc<kria_core::memory::api::MemorySystem>,
+) -> Result<usize, String> {
+    use kria_core::memory::stores::ports::GraphStore;
+    use kria_core::memory::stores::SqliteGraphStore;
+    use kria_core::memory::types::Entity;
+
+    let db = ms.database();
+    let graph = SqliteGraphStore::new(db.clone());
+
+    // A small realistic knowledge graph: KRIA's own architecture.
+    // Deterministic UUIDv5-style ids so re-seeding is idempotent.
+    let names: &[&str] = &[
+        "KRIA",
+        "Memory System",
+        "SQLite Authority",
+        "Retrieval Engine",
+        "Voice Pipeline",
+        "Rust",
+        "SolidJS",
+        "Tauri",
+        "Whisper STT",
+        "Piper TTS",
+        "FTS5 Index",
+        "Vector Index",
+    ];
+
+    // Stable ids derived from a deterministic hash of the name so seeding twice
+    // reuses the same rows (the `uuid` v5 feature is not enabled in this crate).
+    fn stable_id(seed: u128, key: &str) -> Uuid {
+        // FNV-1a 64-bit over the key, mixed into a fixed namespace constant.
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in key.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Uuid::from_u128(seed ^ ((h as u128) << 32) ^ (h as u128))
+    }
+
+    let ns_seed: u128 = 0x4D47_5220_0000_0000_0000_0000_0000_0001;
+    let ids: Vec<Uuid> = names.iter().map(|n| stable_id(ns_seed, n)).collect();
+
+    // Insert entities.
+    {
+        let mut tx = db.begin().map_err(|e| e.to_string())?;
+        for (i, name) in names.iter().enumerate() {
+            let entity = Entity {
+                id: ids[i],
+                canonical_id: ids[i],
+                entity_type: "concept".to_string(),
+                display_name: (*name).to_string(),
+                created_at: chrono::Utc::now(),
+            };
+            graph
+                .add_entity(&mut tx, &entity)
+                .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    // Edges by index pair — a connected architecture graph.
+    let edge_pairs: &[(usize, usize)] = &[
+        (0, 1),  // KRIA → Memory System
+        (0, 3),  // KRIA → Retrieval Engine
+        (0, 4),  // KRIA → Voice Pipeline
+        (0, 5),  // KRIA → Rust
+        (0, 6),  // KRIA → SolidJS
+        (0, 7),  // KRIA → Tauri
+        (1, 2),  // Memory System → SQLite Authority
+        (1, 3),  // Memory System → Retrieval Engine
+        (2, 10), // SQLite Authority → FTS5 Index
+        (2, 11), // SQLite Authority → Vector Index
+        (3, 10), // Retrieval Engine → FTS5 Index
+        (3, 11), // Retrieval Engine → Vector Index
+        (4, 8),  // Voice Pipeline → Whisper STT
+        (4, 9),  // Voice Pipeline → Piper TTS
+        (7, 5),  // Tauri → Rust
+        (7, 6),  // Tauri → SolidJS
+    ];
+
+    let mut created = 0usize;
+    let now = chrono::Utc::now().to_rfc3339();
+    for (a, b) in edge_pairs {
+        let src = ids[*a];
+        let tgt = ids[*b];
+        // Deterministic identity so re-seeding is a no-op.
+        let identity = format!("{src}-{tgt}-related_to");
+        let rel_id = stable_id(ns_seed ^ 0x0EDE_0000, &identity);
+        let tx = db.begin().map_err(|e| e.to_string())?;
+        let n = tx
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO relationships_v2(
+                     id, source_kind, source_id, target_kind, target_id,
+                     relation_name, relation_version, direction_class,
+                     valid_from, valid_until, truth_state,
+                     namespace, owner_id, scope, sensitivity,
+                     policy_source_id, policy_version, identity_hash)
+                 VALUES (?1,'entity',?2,'entity',?3,'related_to',1,'directed',?4,NULL,NULL,
+                         'core','','global',0,'core','demo-seed',?5)",
+                rusqlite::params![
+                    rel_id.to_string(),
+                    src.to_string(),
+                    tgt.to_string(),
+                    now,
+                    identity,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        created += n;
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    Ok(created)
+}
+
+/// Return all active memories for Knowledge Graph display.
+/// Searches with an empty query to get recent/relevant memories, then
+/// returns them shaped as KnowledgeItem DTOs for the UI.
+#[tauri::command]
+pub async fn memory_knowledge_items(
+    limit: Option<usize>,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let st = state.get().ok_or_else(|| INIT_MSG.to_string())?;
+    require_memory_enabled(st)?;
+    let projection = st
+        .memory_system
+        .knowledge_projection(limit.unwrap_or(30))
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(projection).map_err(|error| error.to_string())
 }

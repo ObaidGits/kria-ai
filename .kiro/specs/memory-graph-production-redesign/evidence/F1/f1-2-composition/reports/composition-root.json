@@ -1,0 +1,212 @@
+{
+  "schema": "memory-graph.composition-root/v1",
+  "task": "1.2.1 Map current MemoryManager, runtime backend, SQLite stores, policy, lifecycle, retriever, scheduler, and adapter construction; choose one existing root to evolve.",
+  "gate": "F1",
+  "parent_task": "1.2 F1.2 — Consolidate one memory composition root and typed value objects",
+  "run_id": "f1-2-composition",
+  "generated_at_utc": "2026-07-22T21:25:46Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": ["MGR-017", "MGR-020", "MGR-032", "MGR-033", "MGR-034", "MGR-035", "MGR-043"],
+  "design_refs": [
+    "design.md §3 Backend-First Ownership and Planned Files (target module layout memory/{api/v2,authority,policy,model,graph,retrieval,cognition,lifecycle,stores})",
+    "design.md §19.1 Module dependency direction and composition — 'Only kria-core::memory::composition may construct concrete implementations'; adapters depend on api/v2 only, must not own SQL/policy/ranking/graph semantics",
+    "design.md §4/§4.1 Planned SQLite Authority Schema v2 (single authority, authority_meta singleton, synchronous=FULL)",
+    "tasks.md 1.2 invariants: 'One connection/configuration owner; validated IDs/... cannot be raw unchecked strings at boundaries; adapters have no domain SQL'"
+  ],
+  "predecessor_artifacts": [
+    "evidence/F0/f0-inventory/reports/write-paths.json (0.3.1 — store/handle map, governed vs direct AuthorityTx writers, competing_handles: mobile_gateway second Database handle)",
+    "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2 — MemorySystem::assemble live retriever composition api.rs:273-328; AnnVectorStore LIVE vs SqliteVectorStore dormant)",
+    "evidence/F0/f0-inventory/reports/schema-inventory.json (0.3.3 — 42 tables over migrations 0001-0010; legacy memory_facts/document_chunks competing authority; 5 durable SQLite files)"
+  ],
+  "method": "Static source trace of the LIVE memory composition/startup wiring: the MemorySystem cognitive root (api.rs assemble), the KriaMemoryRuntime runtime-trait backend (runtime_backend.rs), the single Database authority (db/mod.rs + F1.1 db/lifecycle.rs), the WritePolicy governed boundary, Lifecycle, Retriever, CognitiveScheduler + SlowPath blocking worker, and every adapter construction site (desktop commands/runtime.rs + mobile_gateway.rs, server main.rs). Each component records the defining file/type and every observed construction call-site (file:line). Duplicate/independent store openings and any global mutable singletons are enumerated with the sibling task that will consolidate or delete them. Line numbers are those observed at commit 765654d8. No secrets or row data copied. Mapping-only: no production Rust behavior was modified.",
+  "invariants_applied": [
+    "One connection/configuration owner (tasks.md 1.2): the authority Database must be opened once and injected; adapters receive ports, not construct stores.",
+    "Adapters have no domain SQL (core.md, design §19.1): SQL/policy/ranking/graph semantics live only in kria-core.",
+    "design §19.1: only a single kria-core::memory composition module may construct concrete implementations.",
+    "Dormant code/comments/tests are not capability proof — construction sites classified from LIVE startup wiring (desktop runtime.rs, server main.rs) and the actual struct constructors."
+  ],
+
+  "components": {
+    "memory_manager": {
+      "role": "Runtime-facing semantic write/read trait surface (legacy runtime-compat facts/conversation/snippets/document-chunk model over migration 0005 tables).",
+      "trait_file": "crates/kria-core/src/memory/manager.rs",
+      "traits": [
+        {"name": "MemoryManager", "defined_at": "crates/kria-core/src/memory/manager.rs:28", "notes": "write surface: store_turn/delete_session/store_fact/update_fact_*/delete_fact/store_media/store_snippet/store_document_chunk/set_preference"},
+        {"name": "MemoryReader", "defined_at": "crates/kria-core/src/memory/manager.rs:52", "notes": "read surface: fetch_memories/get_recent_turns/search_conversations/search_facts/all_facts_with_decay/get_preference/list_sessions/list_documents/..."},
+        {"name": "MemoryRuntime", "defined_at": "crates/kria-core/src/memory/manager.rs:76", "notes": "blanket = MemoryManager + MemoryReader"}
+      ],
+      "production_implementor": {"type": "KriaMemoryRuntime", "file": "crates/kria-core/src/memory/runtime_backend.rs:33"},
+      "constructed_at": [
+        "crates/kria-desktop/src/commands/runtime.rs:368 — Arc::new(KriaMemoryRuntime::open(&paths.data_dir.join(\"kria_memory.db\"))) — the desktop primary; this is where the authority DB is physically opened first",
+        "test-only: crates/kria-core/src/memory/api.rs open_for_test/open paths"
+      ],
+      "notes": "MemoryManager/KriaMemoryRuntime is a SECOND orchestrator over the same authority DB, but it exposes the legacy facts/snippets/document_chunks model (schema-inventory CA-1/CA-3). It is a cutover target to fold behind the single root, NOT the root to evolve."
+    },
+
+    "runtime_backend": {
+      "type": "KriaMemoryRuntime",
+      "file": "crates/kria-core/src/memory/runtime_backend.rs:33",
+      "holds": {
+        "db": "Arc<Database> (owned)",
+        "conversation": "ConversationStore (built over the same Arc<Database>)"
+      },
+      "constructors": [
+        {"fn": "KriaMemoryRuntime::open", "at": "crates/kria-core/src/memory/runtime_backend.rs:39", "opens_db": "Database::open(path) -> Arc<Database> — an INDEPENDENT authority open"},
+        {"fn": "KriaMemoryRuntime::from_db", "at": "crates/kria-core/src/memory/runtime_backend.rs:47", "opens_db": "reuses an existing Arc<Database>; builds ConversationStore::new(db.clone()) at :48"}
+      ],
+      "exposes_db_handle": "KriaMemoryRuntime::database() at crates/kria-core/src/memory/runtime_backend.rs:53 — the Arc<Database> that is then handed to MemorySystem::open_with_db (runtime.rs:977-979) and to a second ConversationStore (runtime.rs:2273).",
+      "constructed_at": ["crates/kria-desktop/src/commands/runtime.rs:368"],
+      "notes": "Directly executes domain SQL over document_chunks/chunks_fts/memory_facts/snippets (runtime_backend.rs store_fact/store_snippet/store_document_chunk/search_chunks). It opens the authority (Database::open) BEFORE MemorySystem, so today the runtime backend — not the cognitive root — is the physical DB owner on desktop."
+    },
+
+    "authority_database": {
+      "type": "Database",
+      "file": "crates/kria-core/src/memory/db/mod.rs:33",
+      "role": "The single SQLite authority (kria_memory.db). Serialized single writer behind Mutex<Connection> + round-robin read pool (WAL). AuthorityTx via begin().",
+      "constructors": [
+        {"fn": "Database::open", "at": "crates/kria-core/src/memory/db/mod.rs:58", "notes": "open-or-create + migrate; L14 local-fs guard"},
+        {"fn": "Database::open_in_memory", "at": "crates/kria-core/src/memory/db/mod.rs:64", "notes": "test authority"},
+        {"fn": "Database::fresh_create", "at": "crates/kria-core/src/memory/db/lifecycle.rs:166", "notes": "F1.1 deterministic fresh v2 authority (refuses existing)"},
+        {"fn": "Database::hard_reset", "at": "crates/kria-core/src/memory/db/lifecycle.rs:198", "notes": "F1.1 destroy+recreate v2 authority"},
+        {"fn": "Database::reconciliation_report", "at": "crates/kria-core/src/memory/db/lifecycle.rs:217", "notes": "F1.1 read-only legacy-vs-v2 row account"}
+      ],
+      "write_boundary": "Database::begin() -> AuthorityTx (BEGIN IMMEDIATE, holds write Mutex) at crates/kria-core/src/memory/db/mod.rs:236",
+      "read_boundary": "Database::with_read() at crates/kria-core/src/memory/db/mod.rs:222",
+      "independent_open_sites": [
+        "crates/kria-core/src/memory/runtime_backend.rs:41 (via KriaMemoryRuntime::open) — desktop primary",
+        "crates/kria-core/src/memory/api.rs open_with_embedder (Database::open / open_in_memory) — used when MemorySystem opens standalone (tests); NOT used on desktop (desktop injects via open_with_db)",
+        "crates/kria-server/src/main.rs:209 — server opens its own Database::open for the session ConversationStore",
+        "crates/kria-desktop/src/commands/mobile_gateway.rs:116 — SECOND independent Database::open to the SAME kria_memory.db within the desktop process (competing connection pool; write-paths.json competing_handles)"
+      ]
+    },
+
+    "stores": [
+      {"port": "EventStore", "impl": "SqliteEventStore", "constructed_at": "crates/kria-core/src/memory/api.rs assemble (~277) SqliteEventStore::new(db.clone())", "notes": "events table append"},
+      {"port": "RelationalStore", "impl": "SqliteRelationalStore", "constructed_at": "crates/kria-core/src/memory/api.rs assemble (~278) SqliteRelationalStore::new(db.clone())", "notes": "memories/entities/etc."},
+      {"port": "VectorStore", "impl": "AnnVectorStore (LIVE)", "constructed_at": "crates/kria-core/src/memory/api.rs assemble (~279) AnnVectorStore::new(db.clone())", "notes": "in-RAM HNSW over mem_vectors; SqliteVectorStore is dormant (read-paths R-vector-search-dormant)"},
+      {"port": "SearchStore", "impl": "SqliteSearchStore", "constructed_at": "crates/kria-core/src/memory/api.rs assemble (~280) SqliteSearchStore::new(db.clone())", "notes": "memories_fts FTS5"},
+      {"port": "ConversationStore", "impl": "ConversationStore", "constructed_at": [
+        "crates/kria-core/src/memory/runtime_backend.rs:48 (KriaMemoryRuntime::from_db)",
+        "crates/kria-desktop/src/commands/runtime.rs:2273 (second, independent, over memory_backend.database())",
+        "crates/kria-server/src/main.rs:212 (server, over its own Database::open)",
+        "crates/kria-desktop/src/commands/mobile_gateway.rs:118 (over the SECOND Database handle)"
+      ], "notes": "constructed independently at least 4 times; a store the single root should vend rather than let adapters build"},
+      {"port": "RetrievalWeightStore", "impl": "RetrievalWeightStore", "constructed_at": "crates/kria-core/src/memory/api.rs assemble (~333) RetrievalWeightStore::new(db.clone())", "notes": "adaptive RRF weights"},
+      {"port": "graph store (reads)", "impl": "SqliteGraphStore", "constructed_at": "built on demand by MemorySystem graph methods / relational_store()", "notes": "graph_neighbors/relationships/search_entities (read-paths R-graph-*)"}
+    ],
+
+    "policy": {
+      "type": "WritePolicy (WritePolicyEngine, the governed write gate — A3/MGR-035.1)",
+      "file": "crates/kria-core/src/memory/write_policy/mod.rs",
+      "submit_entry": "crates/kria-core/src/memory/write_policy/mod.rs:118 WritePolicy::submit",
+      "commit_point": "crates/kria-core/src/memory/write_policy/mod.rs:167 (single AuthorityTx: events + memory_audit)",
+      "collaborators": ["Admission (write_policy/admission.rs)", "ModeManager (modes.rs)", "SlowPath (write_policy/slow.rs)"],
+      "constructed_at": ["crates/kria-core/src/memory/api.rs assemble (~293) WritePolicy::new(db, events, relational, modes, admission, device_id, slow_tx).with_change_notifier(...)"],
+      "held_by": "MemorySystem.write_policy (Arc<WritePolicy>) — api.rs:176",
+      "notes": "Owned solely by MemorySystem. F0 finding: many services bypass submit() and open their own AuthorityTx (goals/truth/merge/lifecycle/feedback/library/conversation/entity_resolution/graph_intel/runtime_backend) — MGR-035 governed-boundary consolidation is F1.3/F1.4, not 1.2.1."
+    },
+
+    "lifecycle": {
+      "type": "Lifecycle",
+      "file": "crates/kria-core/src/memory/lifecycle.rs",
+      "constructed_at": ["crates/kria-core/src/memory/api.rs:1310 MemorySystem::lifecycle() -> Lifecycle::new(db.clone(), relational_store(), vectors, search, ...)"],
+      "held_by": "built on demand by MemorySystem (not a stored field)",
+      "notes": "forget/restore/hard_delete/shred_subject open their own AuthorityTx (write-paths W-lifecycle). Constructed only through MemorySystem — already single-owner."
+    },
+
+    "retriever": {
+      "type": "Retriever",
+      "file": "crates/kria-core/src/memory/retriever.rs",
+      "constructed_at": ["crates/kria-core/src/memory/api.rs assemble (~319) Retriever::new(relational, vectors, search, embedder).with_weight_store(RetrievalWeightStore::new(db))"],
+      "held_by": "MemorySystem.retriever (Arc<Retriever>) — api.rs:178",
+      "notes": "Single live retriever (read-paths R-retriever-search). Owned solely by MemorySystem."
+    },
+
+    "scheduler": {
+      "cognitive_scheduler": {
+        "type": "CognitiveScheduler",
+        "file": "crates/kria-core/src/memory/scheduler.rs",
+        "constructed_at": ["crates/kria-core/src/memory/api.rs:1212 MemorySystem::cognitive_scheduler(monitor, llm) — registers ConsolidationJob(session_end/idle_micro/daily_reflection/weekly_dreaming) + ActiveLearningJob/SelfImprovementJob/DreamJob/EntityExtractionJob (jobs.rs), each given self.db.clone() and (DreamJob) self.write_policy.clone()"],
+        "held_by": "constructed on demand; caller (desktop runtime) owns the run loop",
+        "notes": "Jobs receive Arc<Database> and Arc<WritePolicy> directly from MemorySystem — the root already threads the single handle to background cognition."
+      },
+      "blocking_worker": {
+        "type": "SlowPath enrichment worker (post-commit derived-index convergence)",
+        "file": "crates/kria-core/src/memory/write_policy/slow.rs",
+        "constructed_at": ["crates/kria-core/src/memory/api.rs assemble (~311) SlowPath::new(db, events, relational, vectors, embedder, device_id)"],
+        "spawned_at": ["crates/kria-core/src/memory/api.rs assemble (~326) tokio::spawn(sp.run(rx, catchup_interval, worker_enabled))"],
+        "held_by": "MemorySystem.slow (Arc<SlowPath>) + MemorySystem.worker (Mutex<Option<JoinHandle>>) — api.rs:179,186",
+        "notes": "The single blocking/background worker; owned by MemorySystem and gated by the shared `enabled` AtomicBool."
+      }
+    },
+
+    "adapters": {
+      "desktop": {
+        "file": "crates/kria-desktop/src/commands/runtime.rs",
+        "construction_sequence": [
+          "runtime.rs:368 — memory_backend = Arc::new(KriaMemoryRuntime::open(kria_memory.db))  [opens the authority Database]",
+          "runtime.rs:977 — memory_system = MemorySystem::open_with_db(memory_backend.database(), MemoryConfig{..}, OnnxEmbedder::from_model(embeddings), true)  [shares the same Arc<Database>]",
+          "runtime.rs:2273 — conversation = Arc::new(ConversationStore::new(memory_backend.database()))  [third construction over the shared handle]"
+        ],
+        "config_owner_smell": "runtime.rs:979-994 still passes MemoryConfig.db_path (kria_memory.db string) into open_with_db even though the DB is injected via memory_backend.database(); two places name/own the path/config.",
+        "sibling_authorities_opened_in_same_startup": [
+          "runtime.rs:943 WorldModelStore (world_facts, kria.db) — competing semantic-fact authority (schema-inventory CA-2)",
+          "runtime.rs:1698 rusqlite::Connection::open(&paths.db_path) + AuditLogger (safety audit_log, kria.db)",
+          "runtime.rs:2291 QuarantineRegistry (quarantine, kria.db)"
+        ],
+        "has_domain_sql": true,
+        "domain_sql_note": "The desktop adapter constructs Database/KriaMemoryRuntime/ConversationStore directly (domain store construction in an adapter) — violates 'adapters have no domain SQL / one owner' (design §19.1). Cutover to receive ports from the single root is 1.2.4/1.2.5."
+      },
+      "server": {
+        "files": ["crates/kria-server/src/main.rs", "crates/kria-server/src/memory_routes.rs", "crates/kria-server/src/auth.rs", "crates/kria-server/src/routes.rs"],
+        "construction": [
+          "main.rs:209 — kria_core::memory::db::Database::open(kria_memory.db)  [server opens its OWN authority handle]",
+          "main.rs:212 — ConversationStore::new(Arc::new(db))  [server session store]",
+          "main.rs:207 — session_store bound into server state (write-paths W-server-persist-turn)"
+        ],
+        "routes": "memory_routes.rs memory_routes() mounts GET/POST /memory/* under CorsLayer::permissive() with auth.rs pass-through for missing Authorization header (write-paths security_note; MGR-003 F1.6, out of scope for 1.2.1).",
+        "has_domain_sql": true,
+        "domain_sql_note": "Server main.rs opens Database + builds ConversationStore directly. Server is a separate process (its own kria_memory.db handle is expected in single-laptop mode), but per design §19.1 the adapter must still go through api/v2 rather than constructing core stores."
+      }
+    }
+  },
+
+  "duplicate_constructors": [
+    {"what": "SECOND independent Database handle to the SAME kria_memory.db inside the desktop process (competing connection pool, no shared serialized writer)", "file": "crates/kria-desktop/src/commands/mobile_gateway.rs", "line": 116, "kind": "independent Database::open", "cutover_task": "1.2.5"},
+    {"what": "ConversationStore constructed independently in the desktop adapter (a third instance over the shared handle) instead of being vended by the root", "file": "crates/kria-desktop/src/commands/runtime.rs", "line": 2273, "kind": "duplicate store constructor", "cutover_task": "1.2.4/1.2.5"},
+    {"what": "ConversationStore constructed independently in mobile_gateway over the second DB handle", "file": "crates/kria-desktop/src/commands/mobile_gateway.rs", "line": 118, "kind": "duplicate store constructor", "cutover_task": "1.2.5"},
+    {"what": "KriaMemoryRuntime::open opens the authority Database independently, then hands the handle to MemorySystem — two orchestrators, one opens for the other", "file": "crates/kria-core/src/memory/runtime_backend.rs", "line": 39, "kind": "independent Database::open + second orchestrator", "cutover_task": "1.2.4/1.2.5"},
+    {"what": "MemorySystem's own Database::open path (open/open_with_embedder) is a second way to open the authority distinct from open_with_db; only one entry should remain post-cutover", "file": "crates/kria-core/src/memory/api.rs", "line": 260, "kind": "alternate Database open entry", "cutover_task": "1.2.3/1.2.5"},
+    {"what": "Server opens its own Database + ConversationStore in the adapter rather than through a core composition root", "file": "crates/kria-server/src/main.rs", "line": 209, "kind": "adapter store construction", "cutover_task": "1.2.4"},
+    {"what": "MemoryConfig.db_path is still passed on desktop even though the DB handle is injected (dual config/path ownership)", "file": "crates/kria-desktop/src/commands/runtime.rs", "line": 979, "kind": "duplicate configuration owner", "cutover_task": "1.2.3/1.2.4"}
+  ],
+
+  "global_singletons": [
+    {"what": "No process-global mutable singleton holds the memory system, runtime backend, or authority Database.", "evidence": "grep for static/Lazy/OnceCell/OnceLock across crates/kria-core/src/memory, kria-desktop/src/commands, kria-server/src found NONE binding MemorySystem/KriaMemoryRuntime/Database. The memory graph is threaded through Tauri managed AppState (desktop) and ServerState (server), not a global.", "status": "clean_for_memory_core"},
+    {"what": "Unrelated desktop process-globals exist (not memory authority): OpenClaw log ring buffer OnceLock (kria-desktop/src/commands/openclaw.rs:1634), CPP/DISCOVERY/JOBS OnceCell (kria-desktop/src/commands/capability.rs:67,71,91), n8n broker port AtomicU16 (kria-desktop/src/commands/n8n.rs:49), test_runner ACTIVE_RUN (kria-desktop/src/commands/test_runner.rs:111). These are out of scope for the memory composition root but noted for completeness.", "status": "out_of_scope"}
+  ],
+
+  "chosen_root": {
+    "root": "MemorySystem",
+    "file": "crates/kria-core/src/memory/api.rs (struct at :171; single constructor path assemble at :267; DB-injection entry open_with_db at :216)",
+    "rationale": "MemorySystem is already self-declared as 'the memory system composition root and public API' and is the closest existing structure to design §19.1's single kria-core::memory composition owner. It already (1) owns the single Arc<Database> authority handle and vends it via database(); (2) owns the governed WritePolicy, the live Retriever, ModeManager, the SlowPath blocking worker + its spawned task, the shared AnnVectorStore, and the embedder as struct fields; (3) constructs every store port (Event/Relational/Vector/Search/RetrievalWeight) in one place (assemble); (4) builds Lifecycle and the CognitiveScheduler (with its jobs) on demand, threading self.db/self.write_policy into background cognition; and (5) ALREADY demonstrates the 'inject one database handle' pattern via open_with_db (the seed for 1.2.3). Evolving it means promoting assemble() into the design's `memory::composition` module and routing adapters through it — an incremental consolidation rather than a greenfield rewrite. By contrast, KriaMemoryRuntime (runtime_backend.rs) is a legacy runtime-trait backend over migration-0005 competing tables (memory_facts/snippets/document_chunks) that merely happens to open the DB first on desktop; it should be folded behind the single root and its facts surface is a cutover/deletion target (F1.9), not the root to evolve.",
+    "why_not_alternatives": {
+      "KriaMemoryRuntime": "Legacy runtime-compat facts/snippets/document-chunk orchestrator (competing authority CA-1/CA-3); narrower than MemorySystem; would require rebuilding the cognitive graph it lacks.",
+      "build_new_root": "Rejected — MemorySystem already contains ~all of the owned services; a greenfield root would duplicate assemble() and increase cutover risk for a single-dev pre-production codebase (dev-context: prefer incremental reuse).",
+      "adapter-level_root_(runtime.rs)": "Rejected — an adapter must not own domain SQL/store construction (design §19.1); the current adapter-level wiring is exactly the violation this gate consolidates."
+    },
+    "evolution_plan_refs": [
+      {"task": "1.2.2", "action": "Introduce validated value objects (RecordId/EventId/InvocationId/PolicyPartition/GraphRevision/UtcTimestamp/ValidInterval/IdempotencyKey/schema-version) so boundaries stop passing raw unchecked strings."},
+      {"task": "1.2.3", "action": "Define narrow authority command/query/outbox/integrity ports in kria-core; inject exactly ONE Database handle + configuration + blocking-worker/scheduler into the MemorySystem-derived composition module (collapse the open/open_with_embedder vs open_with_db split into one injected entry)."},
+      {"task": "1.2.4", "action": "Wire desktop (runtime.rs) and server (main.rs) startup to the SAME core root; adapters receive ports/handles (ConversationStore, MemoryManager surface) from the root instead of constructing Database/ConversationStore; preserve distinct authenticated caller construction at the adapter boundary; retire the redundant MemoryConfig.db_path ownership."},
+      {"task": "1.2.5", "action": "Delete duplicate store constructors / independent authority opens after startup+reference tests pass: mobile_gateway.rs:116/118 second Database+ConversationStore, runtime.rs:2273 independent ConversationStore, and the KriaMemoryRuntime::open-then-share pattern (fold runtime_backend behind the single root)."}
+    ]
+  },
+
+  "notes": [
+    "This artifact is mapping + decision only. No production Rust was modified; no build was required (see verification).",
+    "Governed-write-boundary consolidation (many services bypass WritePolicy via direct AuthorityTx) is MGR-035 work for F1.3/F1.4, not 1.2.1.",
+    "Competing sibling authorities (world_facts kria.db, skills.db, cpp_grants.db, devices.db) are catalogued in schema-inventory.json; single-authority reconciliation across files is F1 schema/cutover scope, referenced here only where an adapter opens them during the same startup."
+  ]
+}

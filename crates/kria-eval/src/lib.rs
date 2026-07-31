@@ -4,6 +4,7 @@ pub mod integration_eval;
 pub mod judge;
 pub mod llm_fixture;
 pub mod memory_bench;
+pub mod memory_graph;
 pub mod openclaw_eval;
 pub mod report;
 pub mod runner;

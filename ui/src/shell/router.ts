@@ -8,6 +8,7 @@
  * Requirements: 1.3 (≤1 interaction switch), 1.4 (restore on relaunch), 1.5 (deep-linkable)
  */
 import { createSignal, createEffect, createRoot, batch } from "solid-js";
+import { currentSurface, setSurface } from "../app/surface";
 
 // ─── Route Types ───────────────────────────────────────────────────────────────
 
@@ -228,7 +229,16 @@ export function navigate(space: Space, segment?: string, entityId?: string): voi
       route.entityId = entityId;
     }
   }
-  setCurrentRoute(route);
+  batch(() => {
+    setCurrentRoute(route);
+    setSurface("workspace");
+  });
+  if (typeof window !== "undefined") {
+    const nextHash = `#/${routeToPath(route)}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(window.history.state, "", nextHash);
+    }
+  }
 }
 
 /**
@@ -238,7 +248,16 @@ export function navigate(space: Space, segment?: string, entityId?: string): voi
 export function navigateToPath(path: string): boolean {
   const route = parseRoute(path);
   if (!route) return false;
-  setCurrentRoute(route);
+  batch(() => {
+    setCurrentRoute(route);
+    setSurface("workspace");
+  });
+  if (typeof window !== "undefined") {
+    const nextHash = `#/${routeToPath(route)}`;
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(window.history.state, "", nextHash);
+    }
+  }
   return true;
 }
 
@@ -359,22 +378,29 @@ export function initHashSync(): () => void {
   if (typeof window === "undefined") return () => undefined;
   if (activeHashSyncDispose) return activeHashSyncDispose;
 
-  const hashRoute = parseRoute(window.location.hash.replace(/^#\/?/, ""));
-  if (hashRoute && !routesEqual(hashRoute, currentRoute())) {
-    setCurrentRoute(hashRoute);
-  }
-
-  const onHashChange = () => {
-    const route = parseRoute(window.location.hash.replace(/^#\/?/, ""));
-    if (route && !routesEqual(route, currentRoute())) {
-      setCurrentRoute(route);
+  const applyHash = () => {
+    const path = window.location.hash.replace(/^#\/?/, "").replace(/^\/+|\/+$/g, "");
+    if (path === "home" || path === "command-deck" || path === "developer") {
+      setSurface(path);
+      return;
     }
+    const route = parseRoute(path);
+    if (!route) return;
+    batch(() => {
+      if (!routesEqual(route, currentRoute())) setCurrentRoute(route);
+      setSurface("workspace");
+    });
   };
-  window.addEventListener("hashchange", onHashChange);
+
+  applyHash();
+  window.addEventListener("hashchange", applyHash);
 
   const disposeEffect = createRoot((dispose) => {
     createEffect(() => {
-      const nextHash = `#/${routeToPath(currentRoute())}`;
+      const surface = currentSurface();
+      const nextHash = surface === "workspace"
+        ? `#/${routeToPath(currentRoute())}`
+        : `#/${surface}`;
       if (window.location.hash !== nextHash) {
         window.history.replaceState(window.history.state, "", nextHash);
       }
@@ -386,7 +412,7 @@ export function initHashSync(): () => void {
   const dispose = () => {
     if (disposed) return;
     disposed = true;
-    window.removeEventListener("hashchange", onHashChange);
+    window.removeEventListener("hashchange", applyHash);
     disposeEffect();
     if (activeHashSyncDispose === dispose) activeHashSyncDispose = null;
   };

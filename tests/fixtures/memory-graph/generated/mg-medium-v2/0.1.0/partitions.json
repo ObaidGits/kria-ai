@@ -1,0 +1,54 @@
+[
+  {
+    "partition_id": "all-MiniLM-L6-v2@r1",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r1",
+    "model_hash": "ec0644226350697ec6ac68945b2f5c7243df067836473819076d2909997ba072",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "e19c459f60595cc4b068df83ce95e30d2e83e17594d06e7930602561130212e6",
+    "status": "active",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "9fa2ee6ce95961fe7f282349cccd4cb562b9955bfd40f142f83ea09b70aae033"
+  },
+  {
+    "partition_id": "all-MiniLM-L6-v2@r2",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r2",
+    "model_hash": "4f93e5df395c7b831bbd760bdc8b7b74ad21079f5dd5e844b06432255fcef16f",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "f2e8516d512e789c89140529e1d0d6449f48db151f3b8a76c6884141bac2af24",
+    "status": "building",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "7403a9d33b3d6121cd244796e3992fcef415af8e376610608ae1a708736e5600"
+  },
+  {
+    "partition_id": "all-MiniLM-L6-v2@r3",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r3",
+    "model_hash": "02378fc99d318e920733a6cb5551a252410bf1bc403c321f64e6f5a44f9f62b1",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "cf8d60bc6b3f86d5e29aced0f5264715f8de9b84086afcee14945f8d760b9158",
+    "status": "retired",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "ceb398f0f91cbd1a24bbbfa8a2915694875a5707e5bb8b0e4bce0a28a0ef055e"
+  },
+  {
+    "partition_id": "all-MiniLM-L6-v2@r4",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r4",
+    "model_hash": "0705cc6e46d8eea213e5e915919c5263271c8e818988f8de3ac68c7bfbddc259",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "8d0fac28c7f1a2da17bc442a01712c1533ed44f342a7f89609cba2090b7dcc04",
+    "status": "active",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "cd0a7beecf8cc2e2879e0201ec9fec986f9d606b258a06abc2622bb00e20eca4"
+  }
+]

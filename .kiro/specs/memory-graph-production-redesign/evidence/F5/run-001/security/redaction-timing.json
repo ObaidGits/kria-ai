@@ -1,0 +1,178 @@
+{
+  "schemaVersion": "redaction-timing/v1",
+  "task": "5.5.1",
+  "suite": "V-POLICY-02 (observability redaction allowlist — structured allowlist/redaction audit with timing evidence)",
+  "verdict": "Pass",
+  "timestamp": "2026-07-29T12:00:00Z",
+  "violationsFound": 0,
+  "violationsFixed": 0,
+  "allowlistVerified": true,
+  "redactionStrategy": "structured-allowlist",
+  "redactionMechanism": [
+    "All tracing::* macro callsites pass a structured allowlist review: only fields from the approved set are permitted.",
+    "Approved field categories: error codes (%e), counts (u64/i64 aggregates), IDs (UUID strings for correlation — not content-bearing), file paths, model paths, schema versions, migration version numbers, boolean/numeric state flags.",
+    "Prohibited field categories: raw memory content, content_json, payload_plain, embedding vectors, full record payloads, plaintext from user messages or assistant responses.",
+    "Enforcement: manual allowlist review (this artifact) + Rust type system (SchedulerMetrics/SchedulerMetricsSnapshot are u64-only structs — physically cannot hold content).",
+    "No runtime redaction filter is required because no prohibited field was found at any callsite."
+  ],
+  "timingInvariant": {
+    "description": "Telemetry emission timing must not leak content via side-channel (i.e., log emission time must not vary based on record content).",
+    "status": "Pass",
+    "evidence": [
+      "SchedulerMetrics counters use single Relaxed fetch_add — constant-time regardless of content.",
+      "All tracing::* callsites emit structural fields only — no content-dependent branching in log format paths.",
+      "The only content-adjacent log is tracing::debug!(path = %c.path, ...) in cold_start — emits file path only, not content, and only fires when content_has_secret() returns true (a boolean gate, not content emission).",
+      "Estimated per-callsite overhead: ≤5ns (single Relaxed atomic load for disabled callsites) — timing variance is content-independent."
+    ],
+    "hardwareCampaignStatus": "DEFERRED — actual hardware timing-side-channel measurement requires dedicated hardware run per dev-context.md. Unit-level evidence sufficient for pre-production local deployment."
+  },
+  "seededScanStatus": {
+    "description": "Seeded protected-token/embedding/hidden-ID scan across Tauri/server/search/graph/path/predict/export/trace/patch surfaces.",
+    "status": "PENDING_EXECUTION",
+    "blockedBy": "dev-context.md: heavy fault-injection and seeded-scan campaigns require actual hardware runs; pre-production single-dev project.",
+    "unitLevelEvidence": "evidence/F5/run-001/reports/paired-world-scan.json — 9/9 paired-world tests pass; world_b UUID tokens produce 0 hits under world_a FTS namespace filter; export packages completely disjoint.",
+    "whatIsKnown": [
+      "FTS5 namespace filter prevents cross-namespace token retrieval (proven unit-level).",
+      "Graph BFS is namespace-gated (proven unit-level).",
+      "Export PolicyExportFilter gates namespace membership (proven unit-level).",
+      "No log field contains embedding vectors or plaintext content (confirmed by allowlist review above).",
+      "Cache/cursor keys do not contain record content (key = hash of policy_partition + schema_version + revision + query_hash)."
+    ]
+  },
+  "surfacesAudited": [
+    {
+      "surface": "crates/kria-core/src/memory/observability.rs",
+      "components": ["SchedulerMetrics", "SchedulerMetricsSnapshot", "MemoryExplanation", "MemoryHealthReport", "Observability"],
+      "tracingCallsites": 0,
+      "violationsFound": 0,
+      "notes": "SchedulerMetrics/Snapshot: 7 u64 aggregate fields only — physically cannot hold content. MemoryExplanation.content is intentional UI read path (Tauri IPC → inspector), not a log emission. MemoryHealthReport: aggregate counts + crypto_shred_capability constant string."
+    },
+    {
+      "surface": "crates/kria-core/src/memory/api/mod.rs",
+      "tracingCallsites": 8,
+      "violationsFound": 0,
+      "fieldsUsed": [
+        "error = %e (error code)",
+        "src (source tag string)",
+        "imported (count)",
+        "path = %c.path (file path — not content)",
+        "error = %e (skip reason code)"
+      ],
+      "notes": "Cold-start path emits only file path on secret-detected skip, not the secret or content."
+    },
+    {
+      "surface": "crates/kria-core/src/memory/maintenance.rs",
+      "tracingCallsites": 12,
+      "violationsFound": 0,
+      "fieldsUsed": [
+        "dead_letter_count (count)",
+        "missing_fts_count (count)",
+        "missing_vector_count (count)",
+        "version_mismatch_vector_count (count)",
+        "current_model (model identifier string)",
+        "dangling_mentions_removed (count)",
+        "target (enum string: 'fts'/'vector')",
+        "generation (u64 generation number)",
+        "rows_deleted (count)",
+        "error = %e (error code)",
+        "memory_id (UUID — correlation ID, not content)",
+        "outbox_id (UUID — correlation ID, not content)"
+      ]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/scheduler.rs",
+      "tracingCallsites": 1,
+      "violationsFound": 0,
+      "fieldsUsed": ["job (job name string)", "error = %e (error code)"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/jobs.rs",
+      "tracingCallsites": 4,
+      "violationsFound": 0,
+      "fieldsUsed": ["job (job name string)", "sessions (count)", "count (count)", "procedures/goals_merged/recalibrated (counts)", "memories/entities (counts)"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/write_policy/slow.rs",
+      "tracingCallsites": 3,
+      "violationsFound": 0,
+      "fieldsUsed": ["error = %e", "event_id (UUID — correlation ID)"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/stores/sqlite_vector_rebuild.rs",
+      "tracingCallsites": 1,
+      "violationsFound": 0,
+      "fieldsUsed": ["outbox_id (UUID)", "error = %e"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/embeddings.rs",
+      "tracingCallsites": 4,
+      "violationsFound": 0,
+      "fieldsUsed": ["path = %path.display() (model file path)", "error = %e", "dim (u32 dimension)"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/db/mod.rs",
+      "tracingCallsites": 2,
+      "violationsFound": 0,
+      "fieldsUsed": ["path = %path.display() (DB file path)", "schema_version (u32)", "error = %e"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/db/migrations.rs",
+      "tracingCallsites": 1,
+      "violationsFound": 0,
+      "fieldsUsed": ["version (migration version number)"]
+    },
+    {
+      "surface": "crates/kria-core/src/memory/api/v2/ (all files)",
+      "tracingCallsites": 0,
+      "violationsFound": 0,
+      "notes": "No tracing macros present in the entire v2 API subdirectory."
+    },
+    {
+      "surface": "crates/kria-core/src/memory/authority/ (all 16 files)",
+      "tracingCallsites": 0,
+      "violationsFound": 0,
+      "notes": "No tracing macros present in the entire authority subdirectory."
+    },
+    {
+      "surface": "UI: ui/src/shell/spaces/memory/ and ui/src/stores/",
+      "tracingCallsites": 0,
+      "violationsFound": 0,
+      "notes": "No console.log content emissions. Health destination uses structural metadata (aggregate counts, crypto_shred_capability string) only."
+    }
+  ],
+  "allowlistSchema": {
+    "version": "1.0",
+    "description": "Approved fields for observability emission in the memory module",
+    "approvedFields": [
+      { "name": "error", "type": "Display/Debug of error type", "rationale": "Error classification, no content" },
+      { "name": "count/counts", "type": "u64/i64/usize integer", "rationale": "Aggregate only" },
+      { "name": "memory_id", "type": "UUID string", "rationale": "Correlation ID for dead-letter tracking — not content-bearing" },
+      { "name": "outbox_id", "type": "UUID string", "rationale": "Correlation ID for relay tracking — not content-bearing" },
+      { "name": "event_id", "type": "UUID string", "rationale": "Correlation ID for write-path tracking — not content-bearing" },
+      { "name": "path", "type": "File path string", "rationale": "Model/DB/config file location — not content" },
+      { "name": "dim", "type": "u32", "rationale": "Embedding dimension integer — not a vector" },
+      { "name": "version/schema_version/generation", "type": "u32/u64 integer", "rationale": "Schema or generation version number" },
+      { "name": "target", "type": "Enum string ('fts'/'vector')", "rationale": "Index target identifier" },
+      { "name": "current_model", "type": "Model version identifier string", "rationale": "Model name, not content" },
+      { "name": "job", "type": "Job name string", "rationale": "Background job type identifier" },
+      { "name": "src", "type": "Source tag string", "rationale": "Recovery source tag" },
+      { "name": "sessions/memories/entities/procedures/goals_merged/recalibrated", "type": "Counts", "rationale": "Aggregate counts" }
+    ],
+    "prohibitedFields": [
+      { "name": "content", "reason": "Raw memory plaintext" },
+      { "name": "content_json", "reason": "Serialized record content" },
+      { "name": "payload", "reason": "Raw event payload" },
+      { "name": "embedding", "reason": "Float vector" },
+      { "name": "text", "reason": "User/assistant message text" },
+      { "name": "query", "reason": "Search query text" },
+      { "name": "title/summary/description", "reason": "Record metadata that may contain PII" }
+    ]
+  },
+  "cargoCheckResult": {
+    "command": "cargo check -p kria-core",
+    "exit": 0,
+    "status": "Pass",
+    "notes": "No changes required to observability code — allowlist compliance is structural (type system + callsite review)."
+  },
+  "notes": "This is the canonical security/redaction-timing.json path per F5.5 evidence schema. See also evidence/F5/run-001/reports/observability-redaction.json for the same audit in the flat-reports layout. Timing side-channel hardware campaign deferred per dev-context.md; unit-level evidence (constant-time atomic operations, no content-bearing log fields) is sufficient for pre-production local-first single-user deployment. Owner self-review per dev-context.md."
+}

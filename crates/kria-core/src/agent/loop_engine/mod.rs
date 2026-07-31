@@ -5119,6 +5119,13 @@ impl AgentLoop {
     /// Record a completed turn/tool outcome through the Write Policy so
     /// procedural/episodic/capability knowledge accrues from real executions
     /// (design §46.1). Best-effort; no-op without an attached memory system.
+    ///
+    /// `source_label` is the invoked tool's registry name (`call.name`); it is
+    /// classified into the real invoking [`Source`](crate::memory::types::Source)
+    /// variant (native/MCP/OpenClaw/sidecar — task **F1.5.4**, MGR-043 AC1) via
+    /// [`classify_tool_outcome_source`] rather than uniformly tagged
+    /// `Source::Tool`, so the outcome carries its source-specific trust class,
+    /// namespace, and injection-wall gating (see that function's doc comment).
     pub fn record_agent_outcome(&self, session_id: &str, source_label: &str, outcome: &str) {
         let Some(memory_system) = self.memory_system.as_ref() else {
             return;
@@ -5127,7 +5134,7 @@ impl AgentLoop {
             return;
         }
         let session_uuid = stable_session_uuid(session_id);
-        let source = crate::memory::types::Source::Tool(source_label.to_string());
+        let source = classify_tool_outcome_source(source_label);
         if let Err(e) = memory_system.record_tool_outcome(session_uuid, source, outcome.to_string())
         {
             tracing::debug!(error = %e, "AgentLoop record_agent_outcome skipped");

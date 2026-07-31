@@ -10,6 +10,13 @@
 //! The planner queries [`PlanStore::recommend`] before a cycle and injects the
 //! historically best sequence as a hint; every executed sequence is recorded via
 //! [`PlanStore::record_outcome`], closing the planning learning loop.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::plan_outcome`](
+//! crate::memory::authority::CommandCandidate::plan_outcome) is the typed
+//! command-candidate scaffolding (task F1.5.1) this store's outcome writes will
+//! route through once a concrete `TxSemanticStore` builder persists the
+//! plan-outcome semantic row (F2). This store remains the live persistence
+//! path until then — see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 

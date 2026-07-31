@@ -1,0 +1,37 @@
+[
+  {
+    "id": "441cc2a9-a664-0ffa-49d0-8eaf43e4b012",
+    "link_type": "derived_from",
+    "source_id": "bcd4c084-5ebb-bfb3-40e6-57aca93f59a8",
+    "target_id": "6165c383-7160-af88-aed8-586477287bc5",
+    "truth_state": "Current"
+  },
+  {
+    "id": "11108b72-5f2a-1ba4-c089-93a4923c5169",
+    "link_type": "supports",
+    "source_id": "a858f9e1-4cc1-78ca-4f2e-00950d7a0bc0",
+    "target_id": "15010e7d-0556-09f4-c2d2-08199b0bdc6d",
+    "truth_state": "Current"
+  },
+  {
+    "id": "e3d204a3-f220-86aa-da8f-937d1f234778",
+    "link_type": "contradicts",
+    "source_id": "2cd5d841-0ffc-1d12-63a7-0292cbe1563a",
+    "target_id": "04ddca26-fc42-55b3-324f-fa722e89a1ee",
+    "truth_state": "Current"
+  },
+  {
+    "id": "5a367b3e-b72b-3933-3e6d-3bd9a9a9c296",
+    "link_type": "mentions_entity",
+    "source_id": "58c41683-0fcd-815e-0800-72d89923fb56",
+    "target_id": "76808fc8-a0e3-a51a-afb6-40181e1fe235",
+    "truth_state": "Current"
+  },
+  {
+    "id": "7042824b-3849-e21e-9c16-f61541a5c673",
+    "link_type": "superseded_by",
+    "source_id": "4694e77b-5bef-e34e-e7f1-52dcad20a532",
+    "target_id": "d2ca536c-eae2-941c-d9f5-4107f33d0e5f",
+    "truth_state": "Current"
+  }
+]

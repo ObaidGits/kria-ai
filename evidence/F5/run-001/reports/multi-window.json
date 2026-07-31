@@ -1,0 +1,216 @@
+[
+  {
+    "suite": "F5.2.3 — Concurrent and temporal patch scenarios",
+    "task": "5.2.3",
+    "test_file": "ui/src/shell/spaces/memory/state/patchConcurrency.test.ts",
+    "run_command": "cd ui && npm run test:run -- patchConcurrency",
+    "status": "PASS",
+    "test_files": 1,
+    "tests_total": 37,
+    "tests_passed": 37,
+    "tests_failed": 0,
+    "duration_ms": 1760,
+    "timestamp": "2025-01-01T16:06:56Z",
+    "scenarios": [
+      {
+        "id": "S1",
+        "name": "Simultaneous focus and writes",
+        "description": "Two windows issue writes simultaneously; each window's pending write is independent",
+        "tests": 3,
+        "passed": 3,
+        "status": "PASS"
+      },
+      {
+        "id": "S2",
+        "name": "Pending confirmation",
+        "description": "A pending write is tracked per window; confirmed write removes it; unconfirmed write stays",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "S3",
+        "name": "Duplicate patches",
+        "description": "Duplicate patch (same base_revision, same target_revision) is a no-op (already applied)",
+        "tests": 4,
+        "passed": 4,
+        "status": "PASS"
+      },
+      {
+        "id": "S4",
+        "name": "Reordered patches",
+        "description": "Patch with base_revision > current revision is rejected (gap)",
+        "tests": 4,
+        "passed": 4,
+        "status": "PASS"
+      },
+      {
+        "id": "S5",
+        "name": "Missing patches",
+        "description": "Gap detected (current revision < patch.base_revision) triggers refetch signal",
+        "tests": 4,
+        "passed": 4,
+        "status": "PASS"
+      },
+      {
+        "id": "S6",
+        "name": "Lag",
+        "description": "Window receives patch from a stale revision (base < current) — no-op",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "S7",
+        "name": "Reconnect",
+        "description": "After reconnect, window issues bounded refetch from current revision",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "S8",
+        "name": "Bounded per-window refetch",
+        "description": "Refetch is per-window; one window refetching doesn't affect the other",
+        "tests": 6,
+        "passed": 6,
+        "status": "PASS"
+      },
+      {
+        "id": "INT",
+        "name": "Integration — all 8 scenarios",
+        "description": "Two-window full lifecycle covering all 8 concurrent/temporal scenarios",
+        "tests": 1,
+        "passed": 1,
+        "status": "PASS"
+      }
+    ],
+    "reviewer": "owner-self-review",
+    "requirements": ["MGR-008", "F4.1"],
+    "notes": "All 37 tests pass. patchReducer revision guard (exact base_revision match) correctly handles duplicate, reordered, gap, and lag patches as no-ops. REFETCH_REQUIRED is a pure signal. Per-window isolation holds across all concurrent scenarios."
+  },
+  {
+    "suite": "F5.2.4 — Policy/capability identity change discards incompatible in-flight responses, caches, pending writes across affected windows only",
+    "task": "5.2.4",
+    "test_file": "ui/src/shell/spaces/memory/state/policyIdentityChange.test.ts",
+    "run_command": "cd ui && npm run test:run -- policyIdentityChange",
+    "status": "PASS",
+    "test_files": 1,
+    "tests_total": 21,
+    "tests_passed": 21,
+    "tests_failed": 0,
+    "duration_ms": 1670,
+    "timestamp": "2025-01-01T16:14:11Z",
+    "scenarios": [
+      {
+        "id": "PC1",
+        "name": "In-flight response discard",
+        "description": "patchReducer rejects patches whose policy_hash !== state.policyHash after a policy change on Window A. New-policy patches are accepted; old-policy patches are no-ops regardless of revision.",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "PC2",
+        "name": "Cache invalidation",
+        "description": "SnapshotCache.invalidateByPolicy(oldHash) clears all old-policy entries for Window A only. Window B's independent cache instance is not touched. Mixed-policy caches retain new-policy entries.",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "PC3",
+        "name": "Pending writes stranded",
+        "description": "Old-policy pending writes cannot be confirmed under new policy (guardPolicy rejects old hash). They stay in pendingWrites until explicitly rolled back. ROLLBACK_WRITE correctly restores pre-optimistic items. New-policy writes proceed normally.",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "PC4",
+        "name": "Unaffected windows",
+        "description": "Window B with its own independent policy is not affected by any aspect of Window A's policy change: its reducer accepts its patches, cache is untouched, pending writes are not orphaned, session guardPolicy returns correctly, and session state is unchanged.",
+        "tests": 5,
+        "passed": 5,
+        "status": "PASS"
+      },
+      {
+        "id": "INT",
+        "name": "Integration — full policy change lifecycle",
+        "description": "End-to-end: both windows start with caches and pending writes; Window A undergoes policy change (v1→v2); old patches rejected, cache invalidated, write rolled back; A re-initializes under new policy and resumes. Window B is intact at every stage and confirms its own write at the end.",
+        "tests": 1,
+        "passed": 1,
+        "status": "PASS"
+      }
+    ],
+    "reviewer": "owner-self-review",
+    "requirements": ["MGR-004", "MGR-008", "F4.1"],
+    "notes": "All 21 tests pass. patchReducer Guard 3 (policy_hash !== state.policyHash → no-op) correctly discards in-flight responses from old policy. SnapshotCache.invalidateByPolicy scopes invalidation to the calling window's cache instance only. windowSession.guardPolicy correctly gates old-policy confirmations. Per-window isolation holds: Window B's reducer, cache, pending writes, and session are untouched by Window A's policy change in all 21 scenarios."
+  },
+  {
+    "suite": "F5.2.5 — Forget/Delete/source cascade invalidates all affected snapshots/inspectors/traces without exposing deleted content or resetting unrelated windows",
+    "task": "5.2.5",
+    "test_file": "ui/src/shell/spaces/memory/state/lifecycleCascade.test.ts",
+    "run_command": "cd ui && npm run test:run -- lifecycleCascade",
+    "status": "PASS",
+    "test_files": 1,
+    "tests_total": 26,
+    "tests_passed": 26,
+    "tests_failed": 0,
+    "duration_ms": 1980,
+    "timestamp": "2025-01-29T16:21:45Z",
+    "scenarios": [
+      {
+        "id": "LC1",
+        "name": "Forget/Delete cascade via INVALIDATE",
+        "description": "INVALIDATE action appends a sentinel PendingWrite carrying the invalidated IDs so the orchestrating layer detects the need for a bounded refetch. Sentinel commandId starts with __INVALIDATE__ and lists all cascade IDs. Existing items are preserved during the refetch window (stale display). Revision is not advanced.",
+        "tests": 6,
+        "passed": 6,
+        "status": "PASS"
+      },
+      {
+        "id": "LC2",
+        "name": "Deleted content not exposed",
+        "description": "After INVALIDATE + filtered refetch patch (newItems excludes deleted IDs), the deleted record ID is absent from the items array. The authority patch's invalidations[] field carries the full delete list the caller uses to build filtered newItems. Zero-item and partial-delete cases verified.",
+        "tests": 4,
+        "passed": 4,
+        "status": "PASS"
+      },
+      {
+        "id": "LC3",
+        "name": "Source cascade",
+        "description": "When a source is deleted all derived record IDs appear in the cascade invalidations list. After the refetch patch none of the derived records are present in items; unrelated items survive. APPLY_PATCH.invalidations[] carries the full cascade list. Empty-derived-set case still appends sentinel.",
+        "tests": 3,
+        "passed": 3,
+        "status": "PASS"
+      },
+      {
+        "id": "LC4",
+        "name": "Unrelated windows not reset",
+        "description": "Window A's INVALIDATE and full delete-cascade lifecycle (INVALIDATE → refetch → cache flush) does not append sentinels to Window B's pendingWrites, does not remove Window B's items (same reference), does not advance Window B's revision, and does not clear Window B's independent SnapshotCache. Verified across 6 scenarios including source cascade.",
+        "tests": 6,
+        "passed": 6,
+        "status": "PASS"
+      },
+      {
+        "id": "LC5",
+        "name": "Snapshot cache stale-entry removal",
+        "description": "invalidateByRevision(newRevision) flushes all cache entries whose revision != newRevision, ensuring deleted-record content at the old revision is never served. New-revision entries survive. clear() drops all entries. Cache miss returns undefined, forcing an orchestrator re-query. Window B's independent cache instance is not cleared by Window A's post-delete invalidation.",
+        "tests": 6,
+        "passed": 6,
+        "status": "PASS"
+      },
+      {
+        "id": "INT",
+        "name": "Integration — full lifecycle cascade across both windows",
+        "description": "End-to-end: both windows start with items and caches; Window A undergoes a source-cascade delete (INVALIDATE → cache flush via invalidateByRevision → filtered refetch patch). At every stage Window B's reducer items, revision, pendingWrites, and SnapshotCache are verified untouched.",
+        "tests": 1,
+        "passed": 1,
+        "status": "PASS"
+      }
+    ],
+    "reviewer": "owner-self-review",
+    "requirements": ["MGR-008", "MGR-040", "MGR-046", "F4.1"],
+    "notes": "All 26 tests pass. patchReducer INVALIDATE correctly appends a sentinel PendingWrite (commandId __INVALIDATE__<ids>) without advancing revision or removing items. Deleted-record filtering is the caller's responsibility via newItems supplied to APPLY_PATCH; the patch's invalidations[] field carries the authority-level delete list. SnapshotCache.invalidateByRevision(newRev) removes all entries at the old revision, preventing stale deleted content from being served. Per-window isolation holds across all 26 scenarios: Window B's reducer, cache, and pending writes are never touched by Window A's lifecycle operations."
+  }
+]

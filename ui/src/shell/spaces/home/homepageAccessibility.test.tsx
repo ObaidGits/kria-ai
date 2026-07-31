@@ -6,7 +6,7 @@
  * suite is the HOMEPAGE-WIDE audit that ties them together and guards the
  * cross-cutting invariants of Req 21 against the composed surface:
  *
- *   • 21.1 — Core, Voice Line, Composer, Chips, Orbit, ACS, Hidden Dock, Trust,
+ *   • 21.1 — Core, Voice Line, Composer, Chips, Orbit, ACS, Navigation Rail, Trust,
  *     and Companion ember are keyboard-operable with visible focus and a sane
  *     tab order (no positive tabindex anywhere; live regions never take focus).
  *   • 21.2 — every Core emotional state has a TEXT equivalent; meaning is never
@@ -61,7 +61,7 @@ import { TrustIndicator } from "./TrustIndicator";
 import { PermissionSurface } from "./PermissionSurface";
 import { CompanionEmber } from "./CompanionEmber";
 import { CorePresence, CORE_STATE_LABELS } from "../../../components/CorePresence";
-import { Dock } from "../../Dock";
+import { NavigationRail as Dock } from "../../NavigationRail";
 import { navigate } from "../../router";
 import type { CoreState } from "../../../stores/coreStore";
 import type { FocusVoiceLine, FocusAcs, Chip, OrbitPoint } from "../../../stores/homeFocusStore";
@@ -276,7 +276,7 @@ describe("Req 21.3 — polite live regions + labelled roles + aria-current", () 
   it("the Dock labels every Space and marks the current one with aria-current", () => {
     navigate("memory");
     const { container } = render(() => <Dock />);
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".kria-dock__button")];
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".kria-navrail__button")];
     expect(buttons.length).toBeGreaterThan(0);
     for (const b of buttons) expect(accessibleName(b)).not.toBe("");
     const current = container.querySelectorAll('[aria-current="page"]');

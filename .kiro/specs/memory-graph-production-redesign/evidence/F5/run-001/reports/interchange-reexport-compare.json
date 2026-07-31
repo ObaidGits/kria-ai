@@ -1,0 +1,74 @@
+{
+  "task": "5.4.4",
+  "suite": "V-IO-01 (interchange re-export round-trip comparison)",
+  "verdict": "Pass",
+  "testsPassed": 9,
+  "testsTotal": 9,
+  "timestamp": "2026-07-29T13:12:18.478328511Z",
+  "nonNegotiables": [
+    "Export → import → re-export produces identical package_checksum (proven for both ByKindThenId and ByRevision orderings)",
+    "All semantic IDs preserved after round-trip: record_id, record_kind, and 'id'/'kind' inside content_json show zero drift",
+    "All links/edges preserved: source_id, target_id, relation_name in relationship content_json are bit-identical after round-trip",
+    "Provenance fields preserved: revision, policy_namespace, policy_scope, source_refs, created_at, session_id all survive round-trip",
+    "Truth states preserved for all 10 fixture states (current, unverified, stale, contradicted, superseded, inferred, confirmed, forgotten, deleted, unavailable)",
+    "Content bit-identity: content_json and content_hash are byte-for-byte identical before and after import cycle",
+    "Optional extension fields that survived import also survive re-export: all extra JSON keys and values are intact in re-export"
+  ],
+  "tests": [
+    {
+      "id": "14.1",
+      "name": "reexport_semantic_ids_preserved",
+      "result": "pass",
+      "description": "All 7 record kinds: record_id, record_kind, and id/kind inside content_json unchanged after round-trip; package_checksum identical"
+    },
+    {
+      "id": "14.2a",
+      "name": "reexport_ordering_preserved_kind_then_id",
+      "result": "pass",
+      "description": "ByKindThenId: position-by-position sequence identical in re-export; package_checksum identical"
+    },
+    {
+      "id": "14.2b",
+      "name": "reexport_ordering_preserved_by_revision",
+      "result": "pass",
+      "description": "ByRevision: 5 records with distinct revisions [1,2,3,4,5]; sequence preserved in re-export; package_checksum identical"
+    },
+    {
+      "id": "14.3",
+      "name": "reexport_links_preserved",
+      "result": "pass",
+      "description": "cyclic_graph fixture (3 entities + 3 relationships A→B→C→A): source_id, target_id, relation_name all preserved; package_checksum identical"
+    },
+    {
+      "id": "14.4",
+      "name": "reexport_provenance_preserved",
+      "result": "pass",
+      "description": "revision, policy_namespace, policy_scope, source_refs, created_at, session_id all preserved for 2 provenance-rich records; package_checksum identical"
+    },
+    {
+      "id": "14.5",
+      "name": "reexport_truth_states_preserved",
+      "result": "pass",
+      "description": "all 10 FixtureTruthState variants preserved; every truth_state string present and correct in re-export; package_checksum identical"
+    },
+    {
+      "id": "14.6",
+      "name": "reexport_content_bit_identical",
+      "result": "pass",
+      "description": "7 records (all_record_kinds): content_json and content_hash byte-for-byte identical; re-exported hashes pass verify_hash(); package_checksum identical"
+    },
+    {
+      "id": "14.7",
+      "name": "reexport_package_checksums_match",
+      "result": "pass",
+      "description": "8-record mixed-kind package: package_checksum identical for both ByKindThenId and ByRevision orderings; two independent exports produce the same checksum (determinism)"
+    },
+    {
+      "id": "14.8",
+      "name": "reexport_optional_extensions_preserved",
+      "result": "pass",
+      "description": "with_unknown_optional_fields fixture (2 records): future_v2_field, another_extension, nested_unknown, v3_extension_flag, experimental_score all intact; content_json and content_hash bit-identical; package_checksum identical"
+    }
+  ],
+  "notes": "All 9 Section-14 tests pass in crates/kria-core/tests/memory_graph_v2.rs. Round-trip strategy: sort records by ordering → compute package_checksum (original export) → run InterchangeImportValidator::validate (pre-import gate) → re-sort imported records → compute package_checksum (re-export) → assert equality. All 7 non-negotiables verified. FixtureTruthState import added alongside InterchangeFixtureBuilder. Owner self-review per dev-context.md."
+}

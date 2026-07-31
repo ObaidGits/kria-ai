@@ -51,6 +51,41 @@ impl ScanSource {
     fn pref_key(&self) -> String {
         format!("coldstart_consent:{}", self.as_str())
     }
+
+    /// Parse the wire-format source tag write-surface adapters (desktop
+    /// `memory_cold_start_*` commands, and any future server route) accept
+    /// from the caller into a [`ScanSource`]. Returns `None` for an
+    /// unrecognized tag — cold-start scope must never silently default to a
+    /// source the caller did not name (mirrors the historical inline adapter
+    /// match exactly; task F1.5.2: adapters construct caller/command only and
+    /// carry no standalone scan-source-taxonomy decision).
+    pub fn from_str(s: &str) -> Option<ScanSource> {
+        match s {
+            "filesystem" => Some(ScanSource::Filesystem),
+            "git" => Some(ScanSource::Git),
+            "workspace" => Some(ScanSource::Workspace),
+            "shell" => Some(ScanSource::Shell),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod scan_source_tests {
+    use super::ScanSource;
+
+    #[test]
+    fn from_str_round_trips_every_known_tag() {
+        for src in ScanSource::all() {
+            assert_eq!(ScanSource::from_str(src.as_str()), Some(src));
+        }
+    }
+
+    #[test]
+    fn from_str_rejects_unknown_tags() {
+        assert_eq!(ScanSource::from_str("bogus"), None);
+        assert_eq!(ScanSource::from_str(""), None);
+    }
 }
 
 /// A previewable candidate the scanner proposes before any commit — shown to

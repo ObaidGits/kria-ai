@@ -1,0 +1,116 @@
+{
+  "gate": "F2",
+  "runId": "run-001",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "generatedAt": "2026-07-28T17:07:33Z",
+  "overallStatus": "Pass",
+  "totalPass": 1741,
+  "totalFail": 0,
+  "preExistingNonF2Failures": 1,
+  "modules": [
+    {
+      "suite": "f2_1_5_record_roundtrip_properties",
+      "description": "SQL↔Rust↔API round-trip PBT for all 14 cognitive record types (Record, Entity, Alias, Mention, Evidence, Episode, Goal, GoalProgress, Source, ToolObservation, ConsolidationRun, RetrievalTrace, RetrievalTraceItem, Feedback). Extreme Unicode, empty optionals, time boundaries, malformed-row isolation (MGR-034).",
+      "f2Suites": ["V-SEM-01"],
+      "requirementIds": ["MGR-002", "MGR-034"],
+      "status": "Pass",
+      "pass": 18,
+      "fail": 0,
+      "durationSeconds": 80.59,
+      "notes": "128 proptest cases per type. PBT confirms forward-compatible TruthState::Other and StalenessClass::Other round-trip correctly (design §40 unknown-field preservation)."
+    },
+    {
+      "suite": "memory::model (lib unit tests)",
+      "description": "Unit tests for all memory model modules: relation_registry (canonical 5-link seed, direction/reflexivity/endpoint enforcement, alias resolution), record/entity/truth/temporal/provenance types, source ingestion, graph revision.",
+      "f2Suites": ["V-SEM-01", "V-TRUTH-01", "V-ENTITY-01", "V-GRAPH-01"],
+      "requirementIds": ["MGR-018", "MGR-019", "MGR-032"],
+      "status": "Pass",
+      "pass": 540,
+      "fail": 0,
+      "durationSeconds": 0.46,
+      "notes": "Covers: relation_registry DB tests (canonical row attributes, duplicate-name PK enforcement, all five canonical links directed/non-reflexive/non-writable, direction class CHECK constraint). All model invariants hold."
+    },
+    {
+      "suite": "memory (full lib unit tests)",
+      "description": "All memory library unit tests: model, stores (sqlite_vectors, sqlite_graph cycle-termination), write_policy (incognito, injection-rejection, policy modes), authority (AuthorityTx, event log, idempotency, revisions), graph_intel, truth, semantic_parser, retriever, entity_resolution.",
+      "f2Suites": ["V-SEM-01", "V-TRUTH-01", "V-ENTITY-01", "V-GRAPH-01", "V-REG-01"],
+      "requirementIds": ["MGR-002", "MGR-018", "MGR-019", "MGR-032", "MGR-034"],
+      "status": "Pass",
+      "pass": 1668,
+      "fail": 0,
+      "durationSeconds": 37.08,
+      "notes": "Includes sqlite_graph::tests::neighbors_terminates_on_cyclic_graphs — confirms BFS cycle-safety. Includes sqlite_vectors v2 tests: NaN/zero-norm/wrong-dimension rejection, cosine ranking correctness."
+    },
+    {
+      "suite": "f1_9_1_authority_properties",
+      "description": "100-case authority property tests: atomicity, idempotency (same key replays), policy-mode rejection (incognito, disabled), Recovery_Mode write block, and 200-case cross-property sweep.",
+      "f2Suites": ["V-AUTH-03"],
+      "requirementIds": ["MGR-032", "MGR-034"],
+      "status": "Pass",
+      "pass": 6,
+      "fail": 0,
+      "durationSeconds": 25.86,
+      "notes": "Each numbered test case counts as one (each exercises 100–200 generated inputs internally)."
+    },
+    {
+      "suite": "f1_9_2_evidence_slices",
+      "description": "Gate correctness hash summary, paired-world core filter, paired-world plugin filter, concurrent authority bus writes (10 tasks).",
+      "f2Suites": ["V-AUTH-01", "V-POLICY-01"],
+      "requirementIds": ["MGR-032"],
+      "status": "Pass",
+      "pass": 4,
+      "fail": 0,
+      "durationSeconds": 0.10
+    },
+    {
+      "suite": "batch1_authority_tests",
+      "description": "Policy engine, session manager, verifier, and transparency layer unit tests.",
+      "f2Suites": ["V-AUTH-01", "V-POLICY-01"],
+      "requirementIds": ["MGR-032"],
+      "status": "Pass",
+      "pass": 22,
+      "fail": 0,
+      "durationSeconds": 0.11
+    },
+    {
+      "suite": "memory_recovery",
+      "description": "Authority survives restart with zero data loss; incognito leaves no trace across restart.",
+      "f2Suites": ["V-REC-01"],
+      "requirementIds": ["MGR-032"],
+      "status": "Pass",
+      "pass": 2,
+      "fail": 0,
+      "durationSeconds": 0.12
+    },
+    {
+      "suite": "fts5_validation_tests",
+      "description": "FTS5 offline operation, Unicode (CJK, RTL, Spanish diacritics), injection-shaped text, corruption recovery (content table survives FTS damage), no-results-with-filters, and query plan validation (FTS5 index — no full table scan).",
+      "f2Suites": ["V-SEM-01"],
+      "requirementIds": ["MGR-046"],
+      "status": "Pass",
+      "pass": 21,
+      "fail": 0,
+      "durationSeconds": 1.22,
+      "notes": "query_plan_uses_fts5_index_not_full_table_scan and query_plan_unfiltered_uses_fts5_index both pass — confirms F2 FTS5 index is used correctly for semantic search."
+    },
+    {
+      "suite": "memory_invariants (partial — pre-existing non-F2 failure)",
+      "description": "i1a_single_authority_connection FAILS: raw Connection::open found in policy/read_authorization.rs and authority/integrity.rs. This is a pre-existing invariant gap logged as NBW-F1-03 in the F1 manifest. Two other invariant cases pass. No new F2 regression introduced.",
+      "f2Suites": [],
+      "requirementIds": [],
+      "status": "PreExistingFailure",
+      "pass": 2,
+      "fail": 1,
+      "preExisting": true,
+      "notes": "Not a F2 semantic model failure. Will be resolved in F3 retrieval-on-v2 cleanup."
+    }
+  ],
+  "f2CoverageNotes": {
+    "V-SEM-01": "Pass — typed records/links/provenance serialize and round-trip; canonical link types enforced via relation_registry; duplicate observation model (evidence append, not edge duplication) confirmed.",
+    "V-TRUTH-01": "Pass — truth/temporal model types round-trip; TruthState variants including forward-compatible Other round-trip correctly; supersession lineage preserved in unit tests.",
+    "V-ENTITY-01": "Partial — SQL↔Rust entity/alias/mention round-trip proven by PBT (f2_1_5). Full merge/split/preview/reversal (CMD-MG-EVAL) is a planned target.",
+    "V-GRAPH-01": "Pass — BFS cycle-termination confirmed (sqlite_graph::tests); direction/reflexivity/endpoint checks enforced by relation_registry. 3-hop depth enforcement and hidden-intermediary path suppression are in graph_intel and confirmed by unit tests.",
+    "V-IO-01": "Partial — Interchange type round-trips proven by PBT (f2_1_5 RecordPayload/PolicyPartition/ValidInterval). Full export→import→export package test requires CMD-MG-EVAL (planned target, NBW-F2-01).",
+    "V-REG-01": "Pass — existing memory lib tests all pass (1668); no regression introduced by F2 work."
+  }
+}

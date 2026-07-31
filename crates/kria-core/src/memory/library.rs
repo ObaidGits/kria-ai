@@ -5,6 +5,14 @@
 //! provenance (`library:{item}:chunk:{idx}`), versioning, and per-item cascade
 //! delete. Extracted facts flow through the Write Policy like any other write
 //! (L3); this module owns the item/chunk records + filesystem originals.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::library_chunk`](
+//! crate::memory::authority::CommandCandidate::library_chunk) is the typed
+//! command-candidate scaffolding (task F1.5.1) chunk ingestion will route
+//! through once a concrete `TxSemanticStore` builder persists a `records` v2
+//! row per chunk (F2). Item/chunk bookkeeping here (`library_items`/
+//! `library_chunks`, SHA dedup, versioning, cascade delete) remains the live
+//! path until then — see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 

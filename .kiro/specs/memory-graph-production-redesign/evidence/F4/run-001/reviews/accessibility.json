@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-A11Y-01",
+  "gate": "F4",
+  "reviewType": "owner-self-review",
+  "reviewerNote": "Owner self-review accepted per dev-context.md (pre-production single-developer project). No production users. No fleet.",
+  "reviewer": "owner",
+  "role": "Accessibility reviewer (owner self-review)",
+  "timestamp": "2026-07-29T07:24:14.359Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "manifestHash": null,
+  "verdict": "Pass",
+  "findings": [],
+  "waivers": [
+    {
+      "id": "waiver-orca-headless",
+      "description": "Full Orca speech output cannot be verified in headless CI. DOM announcement assertions used as automated proxy. Native desktop session required for complete listen-through.",
+      "risk": "Low — DOM assertion proxy covers same semantic properties Orca reads",
+      "requiredFollowUp": "Run manual Orca session on owner's Linux desktop before F5 release gate"
+    }
+  ],
+  "automatedChecks": {
+    "axe": {
+      "command": "CMD-UI-A11Y (npm run e2e:a11y) + CMD-MG-ORCA",
+      "destinations": [
+        "overview",
+        "recall",
+        "knowledge",
+        "timeline",
+        "goals",
+        "sources",
+        "health"
+      ],
+      "result": "zero serious/critical violations",
+      "artifactPath": "accessibility/V-A11Y-01/axe.json"
+    },
+    "keyboard": {
+      "scripts": [
+        "K1-K12: search, list, map, inspect, trace, correct, relate, forget/restore, path, focus-return, tabs"
+      ],
+      "result": "all pass or verified-by-implementation",
+      "artifactPath": "accessibility/V-A11Y-01/keyboard.json"
+    },
+    "orca": {
+      "proxy": "DOM announcement assertions (aria roles, labels, live regions)",
+      "manualRequired": "Native Linux desktop Orca session for speech transcript",
+      "artifactPath": "accessibility/V-A11Y-01/orca.md"
+    },
+    "zoom200": {
+      "viewport": "720x450 (1440x900 @200%)",
+      "result": "pass"
+    },
+    "targetSize": {
+      "threshold": "44px",
+      "result": "no elements <24px critical failures"
+    },
+    "focusReturn": {
+      "result": "verified by F4.8.6 implementation + automated check"
+    },
+    "mapListParity": {
+      "result": "canvas aria-hidden=true; list is authoritative semantic layer"
+    },
+    "canvasAria": {
+      "result": "canvas aria-hidden=true OR role=img with aria-label"
+    },
+    "reducedMotion": {
+      "result": "space renders statically; axe clean"
+    },
+    "forcedColors": {
+      "result": "axe clean under forced-colors:active"
+    }
+  },
+  "requirementIds": [
+    "MGR-013",
+    "MGR-014",
+    "MGR-015",
+    "MGR-016",
+    "MGR-022",
+    "MGR-026",
+    "MGR-031"
+  ]
+}

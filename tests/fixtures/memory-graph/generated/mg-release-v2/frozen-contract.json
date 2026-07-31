@@ -1,0 +1,195 @@
+{
+  "schema_version": "memory-graph-release-contract/v1",
+  "fixture_id": "mg-release-v2",
+  "generator": {
+    "name": "memory_graph::fixtures::release_v2",
+    "version": "0.1.0",
+    "algorithm": "splitmix64",
+    "seed_hex": "0x4D475204",
+    "seed": 1296519684
+  },
+  "full_total_records": 100000,
+  "full_total_links": 256118,
+  "full_counts": {
+    "total_records": 100000,
+    "total_links": 256118,
+    "valid_records": 99997,
+    "invalid_records": 3,
+    "valid_links": 256117,
+    "invalid_links": 1,
+    "records_by_kind": {
+      "alias": 9088,
+      "entity": 9089,
+      "episode": 9088,
+      "evidence": 9088,
+      "goal": 9088,
+      "memory": 9108,
+      "mention": 9088,
+      "relationship": 9088,
+      "rule": 9089,
+      "skill": 9089,
+      "summary": 9094
+    },
+    "records_by_truth_state": {
+      "Current": 99997
+    },
+    "records_by_memory_mode": {
+      "Permanent": 99997
+    },
+    "records_by_sensitivity": {
+      "0": 25000,
+      "1": 24999,
+      "2": 24999,
+      "3": 24999
+    },
+    "links_by_kind": {
+      "contradicts": 44641,
+      "derived_from": 100100,
+      "mentions_entity": 22335,
+      "superseded_by": 22335,
+      "supports": 66706
+    },
+    "idempotency_collisions": 0
+  },
+  "full_membership_hash": "816906bd94226ac4af44a0000461d498f504ef05f34bd162b1ad1cfb2140f97e",
+  "membership_hash_method": "sha256(hex) over newline-joined lexicographically-sorted valid record IDs",
+  "degree_distribution_spec": "bulk out-degree drawn uniformly from buckets [0,1,1,1,2,2,3,5,8] (mean 2.55, hubs at 5/8); special region uses exact planted degrees",
+  "full_oracle": {
+    "full_total_records": 100000,
+    "materialized_full": true,
+    "hop_limit": 3,
+    "degree_distribution": {
+      "0": 11114,
+      "1": 33390,
+      "2": 22065,
+      "3": 11092,
+      "4": 1,
+      "5": 11121,
+      "8": 11214
+    },
+    "path_anchors": [
+      {
+        "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "target_id": "a2ca5f60-02b0-7c3d-c208-e22f68f14465",
+        "hop_distance": 1,
+        "reachable_within_limit": true,
+        "path_ids": [
+          "ea387b4b-fee9-583c-78b5-f0a438708273",
+          "a2ca5f60-02b0-7c3d-c208-e22f68f14465"
+        ]
+      },
+      {
+        "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "target_id": "4ad4b12c-8c16-a2bb-e561-20f66bce079d",
+        "hop_distance": 2,
+        "reachable_within_limit": true,
+        "path_ids": [
+          "ea387b4b-fee9-583c-78b5-f0a438708273",
+          "df608cc4-5c75-43ce-445a-e30dbb52cf1e",
+          "4ad4b12c-8c16-a2bb-e561-20f66bce079d"
+        ]
+      },
+      {
+        "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "target_id": "b117fb12-838a-6306-db65-bd7f64a3098d",
+        "hop_distance": 3,
+        "reachable_within_limit": true,
+        "path_ids": [
+          "ea387b4b-fee9-583c-78b5-f0a438708273",
+          "6abbd1a7-0531-3246-4ad5-d4eb66e408cf",
+          "44c2c1c6-1ff4-aadf-787e-0b923c0a1b4a",
+          "b117fb12-838a-6306-db65-bd7f64a3098d"
+        ]
+      },
+      {
+        "source_id": "ea387b4b-fee9-583c-78b5-f0a438708273",
+        "target_id": "7b0e0023-167b-f45d-2c29-96962a5ef960",
+        "hop_distance": 4,
+        "reachable_within_limit": false,
+        "path_ids": [
+          "ea387b4b-fee9-583c-78b5-f0a438708273",
+          "faf651c3-f9f5-6bbf-da2b-fa3bf841a23b",
+          "fa2fa0e1-ae82-eb23-5d4a-ce1918690996",
+          "db45420f-4d04-d347-3610-e2799411e540",
+          "7b0e0023-167b-f45d-2c29-96962a5ef960"
+        ]
+      }
+    ],
+    "hidden_intermediary_cases": [
+      {
+        "source_id": "547508a2-a579-df74-5bec-1b0e02a29e68",
+        "target_id": "8f692362-e7b3-f038-0358-27368d249cbf",
+        "hidden_intermediary_id": "77233a01-1b53-0d6c-d9d8-f60b8222c7ee",
+        "topological_hop_distance": 2,
+        "reachable_ignoring_policy": true,
+        "reachable_with_policy": false
+      }
+    ],
+    "temporal_cases": [
+      {
+        "record_id": "362eb505-2c89-7956-a8c0-d8e2c3aeaa6f",
+        "case": "valid_from_inclusive_boundary",
+        "valid_from": "2024-06-01T00:00:00Z",
+        "valid_until": "2025-01-01T00:00:00Z",
+        "current_at_query_instant": true
+      },
+      {
+        "record_id": "48bab5a7-50d6-50c8-a331-f41a4ccfb874",
+        "case": "valid_until_exclusive_boundary",
+        "valid_from": "2023-01-01T00:00:00Z",
+        "valid_until": "2024-06-01T00:00:00Z",
+        "current_at_query_instant": false
+      },
+      {
+        "record_id": "68f7f5b4-5688-87ae-6791-68907de651b9",
+        "case": "open_ended_current",
+        "valid_from": "2023-01-01T00:00:00Z",
+        "valid_until": null,
+        "current_at_query_instant": true
+      },
+      {
+        "record_id": "60fc7c37-cb46-e9ae-95b8-99fc8941f357",
+        "case": "future_not_yet",
+        "valid_from": "2025-01-01T00:00:00Z",
+        "valid_until": null,
+        "current_at_query_instant": false
+      },
+      {
+        "record_id": "b17278dc-1188-af73-0447-4e9f4526e6db",
+        "case": "empty_instant",
+        "valid_from": "2024-06-01T00:00:00Z",
+        "valid_until": "2024-06-01T00:00:00Z",
+        "current_at_query_instant": false
+      },
+      {
+        "record_id": "dee9a80e-c75a-d9ba-f035-35a20f196ee8",
+        "case": "past_closed",
+        "valid_from": "2023-01-01T00:00:00Z",
+        "valid_until": "2023-06-01T00:00:00Z",
+        "current_at_query_instant": false
+      }
+    ],
+    "cycle_probes": [
+      {
+        "source_id": "2e5ee75f-b498-864e-eb9e-c615c1b17e2e",
+        "ring_ids": [
+          "e6841dab-61b6-5413-8083-ba3aa26336a2",
+          "2c0a5ad5-3479-e4df-074b-f551387cde1a",
+          "c1f9ff88-ad87-afb2-e0f2-737036e907ba"
+        ],
+        "reachable_within_limit": [
+          "e6841dab-61b6-5413-8083-ba3aa26336a2",
+          "2c0a5ad5-3479-e4df-074b-f551387cde1a",
+          "c1f9ff88-ad87-afb2-e0f2-737036e907ba"
+        ]
+      }
+    ],
+    "cycle_edges": 21,
+    "temporal_query_instant": "2024-06-01T00:00:00Z"
+  },
+  "sample_total_records": 2000,
+  "sample_package_sha256": "a71b3bc163689de3484cc6cd8a3ffa3631247adde14042cf0ffff1cc592bf171",
+  "full_data_materialized": false,
+  "deferred_to": "F3/F5",
+  "note": "Full 100k data files (~60 MB) are deferred to F3/F5; the generator and its membership/hash contract are frozen here. Materialize with release_v2::build(&FULL_PARAMS) and verify against this contract."
+}

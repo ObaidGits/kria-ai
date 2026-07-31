@@ -1,0 +1,1844 @@
+[
+  {
+    "doc_id": "491fd896-c973-18d4-eca2-24f30e553124",
+    "token": "tok-a625",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8334d58b-5750-4761-0dae-97452f5163fd",
+    "token": "tok-e56d",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ffc1eef8-9508-6ba5-dae7-3a5ac7239129",
+    "token": "tok-d803",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "79679d66-a677-e3c6-6e5e-9371d1aed656",
+    "token": "tok-8800",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0a0585d8-d6de-a59d-aa39-644d1d64cbd3",
+    "token": "tok-8ff4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6e19b177-fc17-2174-63eb-f1497f528ee9",
+    "token": "tok-20a5",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6fecb8a1-5e7c-1d68-f95b-37fe774edb7c",
+    "token": "tok-1be7",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "95d7ac29-9900-b4f6-c755-4d1878723ed3",
+    "token": "tok-8dbf",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8c6f819b-d511-24bb-9520-f9750465fea5",
+    "token": "tok-978d",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "03a4f1a5-747e-a800-e3c2-12cebb5c34ce",
+    "token": "tok-699c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1c7dbb3e-01b3-f824-6c56-4eaf40e73c6f",
+    "token": "tok-9932",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "79394f2f-9670-e215-1a4a-79b206e37266",
+    "token": "tok-c954",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5b5ea63c-cc63-5b06-0fb9-c77ba1230037",
+    "token": "tok-3cb4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e659ec4e-23ba-fecd-293a-914e6aacca1e",
+    "token": "tok-6cc8",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "567f0b4f-b231-8c8a-f60b-848cd0060e54",
+    "token": "tok-adc9",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9bea0b09-acb1-4904-cb6d-2a7d2ea80cd6",
+    "token": "tok-778e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "58ce62aa-21cd-d867-13e1-572296dc9840",
+    "token": "tok-02b2",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "03c4e6f4-f1cf-efa5-fce6-27aabb2316a6",
+    "token": "tok-3c36",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ffe9036f-ea7f-61b3-92a5-d24d1f222450",
+    "token": "tok-c37c",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "061b0a5a-d29d-d1cf-4654-ba097e4eede8",
+    "token": "tok-56ee",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9d57a393-0244-9cde-6287-c24183ea9e02",
+    "token": "tok-6e1c",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "caec6e4a-e2bb-f22a-315c-da23cbc5cb81",
+    "token": "tok-d084",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3760bbc8-554b-0543-1fb2-93cc43242b83",
+    "token": "tok-bfde",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e3a13b7a-4881-f94a-5f8c-f868f67f6d01",
+    "token": "tok-5daa",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2bccec07-ccf7-a90f-9861-3c090b33de5b",
+    "token": "tok-6e56",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "06535877-850f-4f7f-13b3-365725c9752a",
+    "token": "tok-318d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "602619e3-5074-41ad-08a2-8bdedcb4306a",
+    "token": "tok-8d50",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e7ab7de3-289f-ec9e-90b0-f1482f6f32a6",
+    "token": "tok-ecf2",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "ecefb522-944d-bd81-79c9-d161ef0894e2",
+    "token": "tok-878e",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b666f094-208c-7e0b-583f-305b46377000",
+    "token": "tok-7ff1",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "251c6340-acfa-f06d-c030-98a9961ee7c0",
+    "token": "tok-8c12",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "00712a0d-ce28-ae63-2ee1-093614f9575a",
+    "token": "tok-53f2",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f89a23b8-2b89-1233-3713-e07c3de58bb8",
+    "token": "tok-b181",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "917b5b44-4a9d-c0d6-bbb7-74f3902497e2",
+    "token": "tok-227a",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bbf7b035-2032-2bc4-ce42-a8473e126711",
+    "token": "tok-e8f3",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "e9dea40b-9ef6-d222-9ece-878ab6459c2d",
+    "token": "tok-604a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6c71d3c0-aa28-62fa-c551-d942900ed549",
+    "token": "tok-474a",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "751b9990-8a78-8426-dd6e-863dd3fb347f",
+    "token": "tok-4418",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "116e3e63-064d-df1a-e79f-09fee01e5935",
+    "token": "tok-8fa5",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9ea546bb-1316-17de-3368-a09fb9026da6",
+    "token": "tok-4b47",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "94c8ea5d-65b4-df55-8ce7-7ad9a1fd57e2",
+    "token": "tok-5161",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6ddd8397-e7a9-6870-3cff-bd68970b795e",
+    "token": "tok-233f",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "61225e83-3acb-d2fd-6274-020e8bc0aee7",
+    "token": "tok-1a1c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "11fe7c69-3696-e929-9023-96f0b58d3d33",
+    "token": "tok-86db",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e28490d5-5189-cbae-54ea-f8046b60a76e",
+    "token": "tok-71cb",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3c954ab0-ddfc-3b69-8852-035f3c78c4cc",
+    "token": "tok-0e58",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "92d08e61-2421-e48b-f896-d65ca576c21a",
+    "token": "tok-cfb5",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f72fc586-f031-53fd-34bd-84fb218b9c12",
+    "token": "tok-10b8",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "dfa8a375-73af-1549-124d-fdfb254a6201",
+    "token": "tok-a416",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "ce15c57b-0235-398f-253b-5b7f9ac81a2e",
+    "token": "tok-b02d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "be55c2b2-16d1-2f1e-f78a-5ca3998d0a28",
+    "token": "tok-bbd4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a8344619-2290-123e-b997-4f394c4dfa75",
+    "token": "tok-67fc",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c092e292-2d68-aef5-4159-efbd6e54f663",
+    "token": "tok-e53d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e3ab98ba-6b62-5588-ff2d-0aff086d1888",
+    "token": "tok-d878",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fa95585f-23e7-7759-ac43-a4a72b6add6c",
+    "token": "tok-815e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "df179076-86d5-9842-a999-24a8dd977a4b",
+    "token": "tok-eaaf",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "d075e247-93d7-730b-7d2d-e2f53df1cfce",
+    "token": "tok-83b8",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0ceed4a3-5d76-2d4d-6065-c5d549ffaf1c",
+    "token": "tok-6969",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "d137fc18-a366-9699-bf2a-9a46266bf36e",
+    "token": "tok-e976",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ff69b189-251d-316a-4cda-807e649f49d2",
+    "token": "tok-fb12",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ee2360b1-ef44-2f13-561f-02a78e785202",
+    "token": "tok-8617",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3385c557-3c46-4649-42f9-c2e23bdbc9e8",
+    "token": "tok-4411",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "df73e2e1-40b2-fd41-46cd-a6ab7f20aa99",
+    "token": "tok-579f",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "6720e72b-7af7-30d1-c049-36a021a45aff",
+    "token": "tok-714b",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9abf8db8-ac4b-80e3-9e27-6ac1893d5312",
+    "token": "tok-686d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "dde0a5d0-aa1f-a565-6d46-df4b7d82b49c",
+    "token": "tok-7f43",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9402a80f-2eaf-111b-d353-f66d5e9c66df",
+    "token": "tok-cfd0",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4e3e8f32-d70c-4919-1b03-ae655174beec",
+    "token": "tok-1042",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bc64dc91-3f63-4af4-de57-5bbc3f05d5c2",
+    "token": "tok-5d51",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5453d426-a5e9-265b-f6d5-638c838760f7",
+    "token": "tok-15f2",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "b2d5ee52-1b79-9e91-4ed4-3e3db4ceac65",
+    "token": "tok-3309",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7588e3e5-a11d-7b3a-3940-8ccb5faba51a",
+    "token": "tok-3583",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9bfc0c5a-0605-0eda-aa41-6c090d0550eb",
+    "token": "tok-d508",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e53c0ed0-3078-fa6b-5dfc-57cd40134a6a",
+    "token": "tok-009c",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "cd1c64ac-054d-9c61-cc6c-b2ede78ac1f6",
+    "token": "tok-17d7",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c8420202-1d97-92f5-0779-3fd7a37354be",
+    "token": "tok-51af",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e9c9218a-5fec-7d8d-8829-55db755a470b",
+    "token": "tok-b295",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "1ff6d050-5990-670c-8b9d-c4f57de7ba92",
+    "token": "tok-0b8e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "90fa08b8-2bfb-8316-d315-a12b503bc350",
+    "token": "tok-2507",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9647d651-c2ee-9d21-f906-33810afe1efc",
+    "token": "tok-b9d1",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b1fc5af0-0d7b-4c76-d6c2-bdf77f7fc703",
+    "token": "tok-6668",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "74dbbbce-b33e-3d99-704a-72ad6ff3491f",
+    "token": "tok-f2f0",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f898accc-de30-04bf-126d-473d977fc949",
+    "token": "tok-048e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "af22eeee-e1c5-d5f7-5dbc-08c259c41871",
+    "token": "tok-d988",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "5d176b20-5a49-27c8-ef52-813ad6fd82bb",
+    "token": "tok-10df",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "315dbcd8-3fbd-196b-cb53-13d06565d772",
+    "token": "tok-d789",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2e2b768f-63d5-d359-0f26-43db8b8aabeb",
+    "token": "tok-6e9d",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "61fdd521-bbf9-dcf6-b560-5949c195040f",
+    "token": "tok-a2ed",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0a914b21-a0a4-b1d1-a03b-1eb9d6f98abd",
+    "token": "tok-0e87",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4323dca8-a416-999f-bb7d-a4d4b29309f0",
+    "token": "tok-dfe7",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b8b02851-22e5-593c-6b3c-bc6873fe2d84",
+    "token": "tok-148b",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "8a7fa7ce-6e0e-cf4a-aef1-3303249335d5",
+    "token": "tok-f2f2",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "35385f0d-3ee7-1e94-d068-af2e3ea9a542",
+    "token": "tok-6bee",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4e63cf0f-d42b-19ef-080a-dd7193f76b90",
+    "token": "tok-3b7b",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "d92c2030-4f87-ba58-01c3-2cd12fd99535",
+    "token": "tok-068c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b880efe9-1333-f01e-a370-6c62e0b4c210",
+    "token": "tok-230a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fa56e1e7-a212-17fb-cc27-0ae22eb5cbb5",
+    "token": "tok-3752",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "86f51ee0-1c27-953c-fca2-50ca6a4771c4",
+    "token": "tok-b53a",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "0fe6668d-4a39-44df-3f85-6fe1696d1fed",
+    "token": "tok-0d96",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e89078e9-e521-72c8-9ed6-041f3e3d3874",
+    "token": "tok-4ed3",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e60a610d-5dac-f39a-3155-0678ef235335",
+    "token": "tok-747c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ad24416e-4c47-6194-7785-06459f5ff541",
+    "token": "tok-9c9e",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2d2b06e4-5240-0c4e-806f-3b0e19f3b662",
+    "token": "tok-7546",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c3fefd83-1c8b-3b1e-5b40-4d9c5e7e805e",
+    "token": "tok-2cb0",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3a344332-2962-1489-65e4-ccd4a166cf4d",
+    "token": "tok-779b",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "62e24af7-40d2-dd5a-1ebf-d7cea2de1a82",
+    "token": "tok-098c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bc35b2c7-a82b-8c54-f7d8-4bba7dc98b15",
+    "token": "tok-e801",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1deaea91-1e18-ae30-930c-a4708f6f2616",
+    "token": "tok-e2bc",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9ce0280d-d855-5691-f5ac-487d53b14c4a",
+    "token": "tok-4993",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "df2286a8-0bdd-1572-207b-4caa4442d91e",
+    "token": "tok-0047",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c2143107-ce06-5c19-ccf4-21deb4b99675",
+    "token": "tok-84d6",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "66ce6e13-a408-4796-943d-ff6cfc46432d",
+    "token": "tok-eb87",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "87c495a3-7f9d-79ec-f3ac-5415f1c1367d",
+    "token": "tok-0480",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "65f84d2a-f223-b3cf-c7ba-a4ec08cb0a4c",
+    "token": "tok-8b29",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b6d6fd86-3ea1-8623-38a7-4a318be36b42",
+    "token": "tok-d520",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c4eb785e-25e4-cca6-a730-af1b1161880f",
+    "token": "tok-33eb",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "127fb33e-8b37-945d-9baa-b39b1c4dd7b5",
+    "token": "tok-ccf5",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f12b5cc6-8e34-81ee-5cc5-aa6adaa4afed",
+    "token": "tok-3769",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c4c96551-78d0-f3db-3df3-3d5d0648e496",
+    "token": "tok-c574",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "9ab0ad71-d004-19ee-0bd5-75e903fdf767",
+    "token": "tok-08f8",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "eecfd4ec-5981-37b3-a3ca-7927a9215044",
+    "token": "tok-60df",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "30690f51-d7fe-221e-44a5-d3575c74f0f2",
+    "token": "tok-c5c5",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "30b7304d-f937-158e-4b97-9ee1826e9c43",
+    "token": "tok-9d76",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "380b7f62-87b1-6a34-1b44-a795755feea7",
+    "token": "tok-6155",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "211c547d-f0ed-a10f-a85a-99bf7968fbb4",
+    "token": "tok-df9c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c8e9ec2b-0bd9-4280-840d-55ed32be77b7",
+    "token": "tok-8977",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "53cb8437-5a74-5ba9-465a-3a31c70d4588",
+    "token": "tok-2efc",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "523c019a-3b0b-214b-eaca-e055fccec4a0",
+    "token": "tok-986a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "184f6d79-2b67-eb39-cb4e-6675a91c272c",
+    "token": "tok-1420",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3bfdd317-9ed4-294b-5a30-504722265ca9",
+    "token": "tok-07e8",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "062f6d6d-03d4-edc1-4dca-e638ecdfda96",
+    "token": "tok-209b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a543c2fb-af27-ec86-3168-40543b516c91",
+    "token": "tok-279d",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "9e196e7a-490f-5ecc-996f-f35ad660b4b6",
+    "token": "tok-be55",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "1bfb689d-1c5f-cb59-9dfa-a6b129c0ce1c",
+    "token": "tok-c084",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c414fb26-4c49-09fa-4d6d-2e5c0bdf113b",
+    "token": "tok-443e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e3349d07-d3c8-8d04-78aa-87872a891710",
+    "token": "tok-7873",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "969926b2-8064-622c-c292-a66633dcac36",
+    "token": "tok-0948",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b33f5cc1-a629-2849-4bea-47803220adac",
+    "token": "tok-3c59",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c103fab3-a9fa-2e6e-db7a-8dea78059676",
+    "token": "tok-8ff9",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "dea0c860-342c-d802-46d3-395659b2a8a9",
+    "token": "tok-6684",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "e71e1504-6a68-d0cb-1c7f-70c535dba860",
+    "token": "tok-558a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "722e046f-2d3a-f5c4-187f-a2dba3793ded",
+    "token": "tok-9c9c",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "d8d85a5a-d4be-5da5-4e44-c0b03f122ebb",
+    "token": "tok-13c6",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bdf57d02-5b96-b6de-cbd9-35604e1649a6",
+    "token": "tok-a253",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "789909f9-23b5-f8f0-0f42-bf620e82e2ac",
+    "token": "tok-962f",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c7d8ef99-f52f-add5-4421-e87cba661133",
+    "token": "tok-73b7",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "61dece8c-122e-6d17-b719-ed71dcef1998",
+    "token": "tok-7dda",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "c287b7e1-5ee2-de19-4f31-9ff1703d5013",
+    "token": "tok-905e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4a1d1ea3-a32a-9cb7-5a25-d71ff2127299",
+    "token": "tok-9be0",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1b9a06cb-1b52-195c-24ee-3f146b113b99",
+    "token": "tok-3f76",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8a072576-5489-6819-996f-198baa3f5274",
+    "token": "tok-b337",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "661855d2-87ea-e36f-d56d-7abc68111918",
+    "token": "tok-3d78",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "934e82d0-7a15-4b4b-1cef-02c4c3993591",
+    "token": "tok-fc16",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f44a16f7-56ee-081c-9586-52c10f8bc0b4",
+    "token": "tok-164b",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "77288296-0991-6dfc-2f47-0e2c2439f9f6",
+    "token": "tok-3258",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "397261c1-041d-1f07-d5ae-db9ac221baef",
+    "token": "tok-5fa4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f87ce668-066e-3e3b-b76a-9807b7b56c32",
+    "token": "tok-b644",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f19e319c-7056-f320-6ab5-89c59e831f38",
+    "token": "tok-6da3",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "94f49da8-1616-fbf8-1287-31e23b63e000",
+    "token": "tok-71c1",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "cdc75e2a-efff-8034-d37a-08e0a4b42ba4",
+    "token": "tok-ab63",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "568fb1c7-6cc6-4bd5-df79-eb0d600c7159",
+    "token": "tok-bb23",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "0e8813db-b866-b730-29cf-b7c2cf549cd5",
+    "token": "tok-e6c6",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a2ba67bb-1764-cc8a-85ae-69ee5a922fa5",
+    "token": "tok-0081",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "76808c4c-0d7b-7763-7f00-70de713a15e8",
+    "token": "tok-1029",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bbf5becb-3d70-855b-70a9-a64f1d4fec48",
+    "token": "tok-46c0",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c45a74c3-3a34-a623-a131-910a9fb0f208",
+    "token": "tok-68b0",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2ea66014-38c4-5ae6-952b-e8150d7f4d44",
+    "token": "tok-c747",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ed4a7327-0f5b-545c-81fe-2d9695ef74e0",
+    "token": "tok-d430",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "fba0f4d1-5c89-28e3-a9fd-17ce780b8d06",
+    "token": "tok-b0b2",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5ba8522a-aeb7-f750-43b7-32961d7c7515",
+    "token": "tok-353b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c2ca5de9-15cf-f44f-a710-e7fc61b66335",
+    "token": "tok-27de",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6069d943-7947-00cd-d919-f057bc7b982f",
+    "token": "tok-5b0e",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5271d9ab-3f61-db55-32ee-94fa68cc7092",
+    "token": "tok-8e1b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0e8a2009-185d-2be5-0d92-22c51a687e6f",
+    "token": "tok-7f7a",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0c7f9c8a-6b9b-b5e9-3a95-71456cf58ee9",
+    "token": "tok-431b",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "1a36e373-59df-6944-a17c-6182528734a7",
+    "token": "tok-8c7f",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e62b163b-d35d-ad52-8283-0923c5f0d8d5",
+    "token": "tok-bc78",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "32b4209f-28d8-b323-b4e2-f8ace4ca7bef",
+    "token": "tok-cf3e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "511b2266-121c-c1ef-5915-749548fb31bd",
+    "token": "tok-24fc",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1d1b75e3-8556-039e-3373-f9f57063a684",
+    "token": "tok-f45a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a2169961-2b01-e8e5-4249-d26c097b01b6",
+    "token": "tok-455d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5111fad0-93c6-0420-deaa-5d0b3379aecc",
+    "token": "tok-3986",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "45a498e9-b412-4f89-5426-d6dbff17b86b",
+    "token": "tok-951e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ab9fac74-533f-3eed-2464-2a6517a29c48",
+    "token": "tok-c177",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "73fe0309-1694-7d07-ba86-52e68d8eae7d",
+    "token": "tok-f4c6",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c24b08e6-d5e0-0f56-c811-acf9414a4faf",
+    "token": "tok-ad03",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ea840b66-a6be-1559-6d89-ed0229ed3387",
+    "token": "tok-08e3",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "86e571d3-2452-59db-f55f-ed58412662d6",
+    "token": "tok-5fad",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4d84b6ae-ce04-2da4-d014-e33896b96dcd",
+    "token": "tok-be8e",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "9d3b054f-5cce-d1f4-2271-21e794bb19c6",
+    "token": "tok-0a2b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "abf0d200-32bd-3e60-690d-9c6319cb4dea",
+    "token": "tok-da4c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fdfcd252-fc84-9d2a-3b5a-e9bdcaf3ff13",
+    "token": "tok-4c7a",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7b7f8436-7b5b-0f0e-bc36-17235012c222",
+    "token": "tok-2820",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a8dced2b-3b26-53ee-fd27-048e5927d730",
+    "token": "tok-3f4c",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "59e86cf5-8b7a-3032-a33a-262d1d91620b",
+    "token": "tok-3876",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f2fe9d1f-75e1-d594-e249-c27e2199e355",
+    "token": "tok-592d",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "0a3585e8-6f75-9ff4-868c-242b23d93ce7",
+    "token": "tok-0371",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8fb500cd-fff1-a8d2-cabf-93751ebf9657",
+    "token": "tok-6ab0",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a233d21d-491e-a876-2426-3ff076d4a4b9",
+    "token": "tok-b143",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7947fb77-fe90-0db5-b8e4-d644d3ee93f0",
+    "token": "tok-bb90",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4a34ec5d-29d8-05d5-19d7-4dfa0303c56a",
+    "token": "tok-4dda",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "54eee3b8-3ba4-50bb-ae1d-fd841fe047d8",
+    "token": "tok-139d",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c7c73880-5af9-5701-b5eb-aa344e5df1f1",
+    "token": "tok-f512",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "81eaffe5-ff0b-ceac-280b-53b910f4835b",
+    "token": "tok-ecd5",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fcb8844e-a2f3-96c9-eb32-1fd8f246bbc4",
+    "token": "tok-5421",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a8111459-5a0c-52f4-bb54-e7805e567059",
+    "token": "tok-0ad8",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0787c5ad-f645-0fc2-c7fd-b39986083194",
+    "token": "tok-19d5",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7075f057-7438-4441-2a3e-2d160485abe1",
+    "token": "tok-d362",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "d183abc9-5776-d13e-3864-20d8ce392a7a",
+    "token": "tok-bf37",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2564c3ee-fbb6-3205-ec2e-0e1f913c78ae",
+    "token": "tok-65d4",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "4f0b6d04-9e66-5b0a-c3bf-416a3c5a4756",
+    "token": "tok-d4c1",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "4f425642-f1a3-204f-7ef6-94b054cd0878",
+    "token": "tok-7c33",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7bfb1c79-d122-b965-cae9-e80dd7043c7b",
+    "token": "tok-2ecf",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8df4d712-b33f-552d-faee-31dd9743642b",
+    "token": "tok-6dd3",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "eaf86cda-3678-c38b-de3b-b4ee1be8a43b",
+    "token": "tok-bb79",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "676ba3dc-a668-9436-4cec-7058dc3bde44",
+    "token": "tok-a5cd",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "88013e94-6971-9ca2-e25c-86f0ac956d88",
+    "token": "tok-11e7",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "2cb60afd-5cee-b2de-80d0-703fdf0e102b",
+    "token": "tok-3e7e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7218af07-73e7-bb85-83d3-33e18c8c2cec",
+    "token": "tok-4038",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8d28ca47-2c86-6d1b-e190-cdd636043dfa",
+    "token": "tok-eb01",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a9751866-fc54-0adb-419d-fc74c78c3647",
+    "token": "tok-656d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f634dad4-2645-caef-0e28-7e6f0ef4a87f",
+    "token": "tok-4d24",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "871199bd-f33c-53e1-3206-17822ac8ae77",
+    "token": "tok-1175",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "534e7732-5274-54dd-c403-ecfa9aa1061f",
+    "token": "tok-62e1",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "3da07c8b-85d6-28db-2a53-2a95c01e3ef3",
+    "token": "tok-e119",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bd63f4bd-f874-8ae9-ba3a-b76a23f8fe79",
+    "token": "tok-fbe3",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "f0a8b02d-3fb5-fcad-e7ad-48d595c7999d",
+    "token": "tok-e167",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1981e975-9440-f15f-35d2-af7eca706ffc",
+    "token": "tok-df0a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "838c9007-19d5-823e-f456-e024e5ef8d18",
+    "token": "tok-e8bc",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "3285c5ca-a50d-8385-da48-e7504549ea67",
+    "token": "tok-929b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "019e2544-4a12-5598-cd8c-d91e87a61968",
+    "token": "tok-be2c",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "552b5612-45eb-8daf-a70e-9a5c927755d7",
+    "token": "tok-1fb8",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "df8d5d0e-c77e-24a3-4950-90e046915957",
+    "token": "tok-a33e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8496f03a-8005-5ac3-ccd0-3b75d08459ef",
+    "token": "tok-cd7d",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6f224bc6-3283-5497-1984-5e10ed8bfafd",
+    "token": "tok-0425",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "7f6eda8a-bea6-247f-8191-ceb31c494564",
+    "token": "tok-29ae",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "bb352fe3-5c23-49b8-07d0-7abc4602bd07",
+    "token": "tok-d425",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1ce839dd-de28-8fe4-d61a-181d222716b5",
+    "token": "tok-ca9b",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "7f8545df-0584-bae2-5dbd-37f55b5794d3",
+    "token": "tok-e91b",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "28dba046-bded-dafc-e745-d13eb45b82ec",
+    "token": "tok-a821",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1f8af457-0dbb-6e07-73d6-2aa4f73b6eee",
+    "token": "tok-2f32",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fc26acc9-a193-e548-5c16-584b37353272",
+    "token": "tok-87bf",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "693d673b-46c7-c2d1-9dbb-ac7850612820",
+    "token": "tok-5fbe",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "37886d9b-ca2a-9f51-e9ae-7767d6d075ab",
+    "token": "tok-c4f7",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "af057d33-c30a-4a14-e6ce-9e8149192a6d",
+    "token": "tok-52ae",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "24599302-0523-d9a8-717c-c0b83dcd1101",
+    "token": "tok-48a7",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2727f723-1ac5-5dd9-e4b6-16b0957efd71",
+    "token": "tok-68a3",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fd27871c-a4f3-804e-0041-16012b01460f",
+    "token": "tok-1de9",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e303c53d-52d5-b916-3e2e-eb31c7a7b93d",
+    "token": "tok-657a",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5239aae2-27cf-66c3-b842-ae849d5f8b10",
+    "token": "tok-ca3a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "c631a616-0938-ef24-f7b4-6ab5a5caa5b4",
+    "token": "tok-e053",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5da8e57b-3180-22dd-c344-a3ac072f89a9",
+    "token": "tok-7610",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "a888b1de-9352-7721-62de-74bc970fc706",
+    "token": "tok-7600",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "15b441fb-70a6-e217-1f83-81d4f48ab8a2",
+    "token": "tok-4d7d",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "394981a8-2169-cc3c-2771-88222598f883",
+    "token": "tok-1c67",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "14728e20-b963-1221-2605-0fc8289c02bf",
+    "token": "tok-ed96",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "00a11b26-a9a1-3d4a-b1d5-5e5eac521b8e",
+    "token": "tok-27c4",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "92edd7b4-1dfa-579f-5f7c-d994cb2b9ea2",
+    "token": "tok-38f5",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "e7b3db26-b618-df7e-0610-014f6f6fc1ec",
+    "token": "tok-41fe",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "5f03aee5-aeb2-bf1b-4dc6-f9b2079fc624",
+    "token": "tok-8c78",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "945c8953-44af-08dd-e3d0-f4061c0036c8",
+    "token": "tok-1b1a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "33e7c180-9195-a1de-68cf-ef0dfa1318a0",
+    "token": "tok-7b29",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8b3da9eb-6ced-941a-ce43-fe8f15382ad1",
+    "token": "tok-e04c",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2f0397e1-215e-0fb4-206b-f486fd10a135",
+    "token": "tok-6ead",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "59c9da0f-806a-fb96-de79-77d55ea94de4",
+    "token": "tok-2f7b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6c27dbc0-9c7e-3504-19de-087d4a194470",
+    "token": "tok-40e0",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "dd1d9a15-20a0-692c-a51f-c79004b6b8c3",
+    "token": "tok-8616",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "fcc28e54-f64c-7e5d-b1e0-dbdf0cd161cb",
+    "token": "tok-db05",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "ef2f5001-a131-33ab-c747-c647d04024b5",
+    "token": "tok-f615",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8bbea53d-4424-7934-3909-d9a26ef0d73d",
+    "token": "tok-f774",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5b375868-50bf-a559-9c12-890ba1ace6c7",
+    "token": "tok-6250",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "48df31fb-1998-25d5-5c59-614fb06d271e",
+    "token": "tok-f6de",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6a72985c-2fe7-c11c-7138-50ea754e91a1",
+    "token": "tok-0b5e",
+    "truth_state": "Current",
+    "forbidden": true,
+    "forbidden_reason": "policy_hidden"
+  },
+  {
+    "doc_id": "2da1b195-383f-5fcc-5c69-815cbc8fff58",
+    "token": "tok-111a",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a8ccf50b-9fd2-5f6a-e5ae-f0d91ab61ab5",
+    "token": "tok-96f9",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2e71479a-ccc2-c3f1-d0ab-7e1259b229f0",
+    "token": "tok-a27d",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "433b6a95-20cc-2620-4f03-ddcdabb83cf9",
+    "token": "tok-5995",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "cd911120-e109-f2d8-ec79-408ec68f58c7",
+    "token": "tok-56e4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8db7861f-c963-676f-1069-ac0e6b31ef9e",
+    "token": "tok-8b40",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "843a0e2f-0a2e-86fe-eb2e-8b4e50b2c598",
+    "token": "tok-2024",
+    "truth_state": "Superseded",
+    "forbidden": true,
+    "forbidden_reason": "superseded"
+  },
+  {
+    "doc_id": "d5f7999e-a004-0931-1f73-016ccee2ba60",
+    "token": "tok-2c9b",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1d9e12ef-9aab-99c5-ddf9-c52da86191d7",
+    "token": "tok-3b41",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "be18657e-4511-53f9-c6ff-4202e104a128",
+    "token": "tok-799e",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "66de7579-6924-618b-87f5-e06014b666ee",
+    "token": "tok-b5f6",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6d90bb82-c678-c747-7b94-98ca3c785303",
+    "token": "tok-7f4a",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "1cebfa46-5c24-db59-14a3-d262148c3e9e",
+    "token": "tok-2ad3",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "36ca9a26-5f0a-bb09-0542-b5682b09164c",
+    "token": "tok-a7aa",
+    "truth_state": "Deleted",
+    "forbidden": true,
+    "forbidden_reason": "deleted"
+  },
+  {
+    "doc_id": "1802464a-b181-2add-6d12-57af3bd73ee1",
+    "token": "tok-58f0",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "33f8b410-9c2b-7c21-bce5-756e56168bd4",
+    "token": "tok-4068",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "5d175e66-64e7-1365-3f50-d501b1fd51a0",
+    "token": "tok-ccc4",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "2b5f6338-9ea9-f11f-d969-085578058d01",
+    "token": "tok-fbab",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "52b224ed-8ea8-6b88-24e9-4a837392b09c",
+    "token": "tok-5bbb",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "81b8e2bd-5acc-62df-e131-9a7ea6e2c45d",
+    "token": "tok-5695",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "a3ac067a-0d89-5764-b37c-03f95f1553fd",
+    "token": "tok-5d74",
+    "truth_state": "Forgotten",
+    "forbidden": true,
+    "forbidden_reason": "forgotten"
+  },
+  {
+    "doc_id": "e66fe261-aa5f-2bd7-6753-15f5b114a87f",
+    "token": "tok-7d70",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "b6a66366-3d2a-37b5-de90-c71f30e11265",
+    "token": "tok-3135",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "8b415e62-d3ef-fa7a-014e-cf62be8d364b",
+    "token": "tok-3c17",
+    "truth_state": "Confirmed",
+    "forbidden": false
+  },
+  {
+    "doc_id": "0ba3e91d-3d28-12b0-9f29-e1bcee3303db",
+    "token": "tok-9bad",
+    "truth_state": "Current",
+    "forbidden": false
+  },
+  {
+    "doc_id": "be856800-4e67-733b-e748-5fcc566ab774",
+    "token": "tok-d634",
+    "truth_state": "Inferred",
+    "forbidden": false
+  },
+  {
+    "doc_id": "6b85f795-72e9-01f0-08d6-bc309f84c900",
+    "token": "tok-5535",
+    "truth_state": "Current",
+    "forbidden": false
+  }
+]

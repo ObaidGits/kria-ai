@@ -1,0 +1,268 @@
+{
+  "schema": "memory-graph.dependency-license-inventory/v1",
+  "task": "0.3.6 Reconcile Cargo/npm/Python/model/asset/project license facts and record every conflict, missing lock/checksum, reachability owner, and F1/F5 disposition.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T18:42:47Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "completes_parent": "0.3 (F0.3 inventory) — this is the FINAL 0.3.x subtask.",
+  "scope_note": "Reconciles the project's dependency + license facts as OBSERVABLE in the repository WITHOUT downloading anything or copying secrets. Covers five ecosystems (Cargo, npm, Python, models, non-code assets) plus the PROJECT license reconciliation (root LICENSE vs Cargo metadata vs README/docs). Records every license conflict, every missing lock/checksum, every reachability owner, every Unknown, and a target F1/F5 disposition per item. This EXTENDS the 0.3.5 model-license-inventory.json, which pinned the embedding-model facts and explicitly DEFERRED this broader reconciliation here (see model-license-inventory.json `deferred_to_0_3_6`).",
+  "requirements_in_scope": ["MGR-047", "MGR-048", "MGR-042"],
+  "steering_refs": [
+    "core.md invariants: 'Pin exact dependency versions; no open ranges. 100% FOSS.'",
+    "dev-context.md: single-user pre-production laptop reality (does NOT relax license/SBOM correctness for release)."
+  ],
+  "design_refs": [
+    "design.md §1 (Current-vs-Target Licensing row): 'Cargo declares MIT while root LICENSE text is Apache-2.0; model/license/SBOM facts are incomplete' -> target 'Release-blocking exact locks/checksums, approved FOSS dispositions, SBOM, vulnerability report; no inferred license claims'.",
+    "design.md §10.1/§15/§19.10 (exact-lock/license/SBOM gate; renderer FOSS/license/SBOM evidence).",
+    "design.md §19 typography: 'shipped, license-reviewed application font stack'.",
+    "requirements.md MGR-047.1-.11 (pin locks/checksums, SBOM, approved FOSS policy, block unknown/incompatible-copyleft/missing license, distinguish project license from dependency/model/font/icon/asset licenses, every shipped artifact has exact lock/checksum + reviewed FOSS disposition)."
+  ],
+  "predecessor_artifacts": [
+    "evidence/F0/f0-inventory/reports/model-license-inventory.json (0.3.5 — pinned LIVE memory embedder facts; deferred broad dependency/license reconciliation to THIS task; flagged LICENSE-vs-Cargo mismatch).",
+    "evidence/F0/f0-inventory/reports/write-paths.json (0.3.1), read-paths.json (0.3.2), schema-inventory.json (0.3.3), ui-paths.json (0.3.4)."
+  ],
+  "method": "Static inventory of committed manifests and lockfiles plus on-disk artifact listing, no network. Read: root Cargo.toml (workspace) + all 8 member-crate Cargo.toml; Cargo.lock (resolved closure); vendor/piper-rs/Cargo.toml (patched path crate); ui/package.json + ui/package-lock.json; all sidecar requirements.txt (kria-tts/kria-vision/kria-stt) + kria-modules/pyproject.toml; openclaw-substrate/package.json + ancillary package.json manifests; root LICENSE and README license section; design.md §1 + requirements MGR-047; .gitignore (to determine committed vs local-only artifacts); `models/` tree listing + on-disk LICENSE/metadata files. Each fact is Known (with an in-repo evidence locator) or Unknown. NO license is inferred from a package name, upstream reputation, or code comment.",
+  "invariants_applied": [
+    "No license is inferred from package name, upstream reputation, or repository comment. A license is Known ONLY with an in-repo license field/file/metadata; otherwise Unknown.",
+    "Do NOT download anything. Model/asset artifacts absent from the repo cannot have their bytes hashed in F0; their checksums are Unknown/missing.",
+    "Dormant code/comments/tests are not capability proof.",
+    "Secrets are never copied into reports (.env family read-avoided).",
+    "MGR-047.11: every shipped model/runtime/asset/font/icon/crate/package MUST have an exact lock/checksum AND a reviewed FOSS license disposition — every gap is recorded as a release blocker.",
+    "MGR-047.1: exact locks/checksums must be COMMITTED (a lockfile that is git-ignored or absent does not satisfy the gate)."
+  ],
+
+  "ecosystems": {
+    "cargo": {
+      "workspace_manifest": "Cargo.toml [workspace.package] license = \"MIT\", version = 0.1.0, edition 2021, authors = [\"KRIA Contributors\"].",
+      "lockfile": {
+        "path": "Cargo.lock",
+        "present": true,
+        "committed": true,
+        "committed_evidence": ".gitignore ignores /target/ but NOT Cargo.lock; file tracked at repo root.",
+        "format_version": 4,
+        "resolved_package_count": 1096,
+        "coverage": "Locks the ENTIRE resolved dependency closure to exact versions and source hashes. Satisfies MGR-047.1 for Rust crates (committed exact lock).",
+        "note": "Cargo.toml declares SEMVER RANGES for most direct deps (e.g. tokio=\"1\", serde=\"1\", reqwest=\"0.12\", rusqlite=\"0.32\") rather than exact '=' pins; only hnsw_rs=\"=0.3.4\" is exact-pinned. The RESOLVED closure is exact via Cargo.lock, but the MANIFEST range style is in tension with the steering rule 'pin exact dependency versions; no open ranges'. Recorded as an F1/F5 policy decision (tighten manifest pins vs rely on committed lock)."
+      },
+      "member_crate_licenses": [
+        {"crate": "kria-core", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (domain authority; memory/routing/voice/vision orchestration)", "value": "MIT"},
+        {"crate": "kria-desktop", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (Tauri v2 desktop app)", "value": "MIT"},
+        {"crate": "kria-server", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (Axum HTTP/WS server)", "value": "MIT"},
+        {"crate": "kria-connection-control", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (connection control-plane; dep of core/desktop/server)", "value": "MIT"},
+        {"crate": "kria-uinput-daemon", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (privileged GUI-automation helper)", "value": "MIT"},
+        {"crate": "kria-wake-daemon", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "shipped (optional always-on wake daemon)", "value": "MIT"},
+        {"crate": "kria-test-app", "license_field": "license.workspace = true (=> MIT)", "status": "Known-declared", "reachability": "dev/test-only (disposable E2E GUI stand-in)", "value": "MIT"},
+        {"crate": "kria-eval", "license_field": "MISSING — no `license` and no `license.workspace = true`; explicit `version = 0.1.0`/`edition = 2021` override without a license", "status": "MISSING", "reachability": "dev/eval tooling (kria-eval + mg-coverage bins); not shipped in the desktop bundle", "value": null, "gap": "Only crate with NO license declaration. MGR-047.11 gap even for dev tooling if distributed with the repo."}
+      ],
+      "vendored_crate": {
+        "crate": "piper-rs",
+        "path": "vendor/piper-rs (patch.crates-io in root Cargo.toml)",
+        "license_field": "vendor/piper-rs/Cargo.toml license = \"MIT\"",
+        "status": "Known-declared (in-repo Cargo.toml metadata)",
+        "value": "MIT",
+        "reachability": "shipped when voice-piper-rs / native-audio feature enabled (TTS runtime)",
+        "own_lockfile": "vendor/piper-rs/Cargo.lock present.",
+        "transitive_note": "Pulls espeak-rs, sonic-rs-sys, flume, rayon, riff-wave etc.; their licenses are resolved via the workspace Cargo.lock closure + SBOM at F5 (not enumerated here)."
+      },
+      "dev_only_deps": "proptest 1.5.0, wiremock 0.6, serial_test 3, tempfile 3, dotenvy 0.15, glob 0.3, tokio-tungstenite 0.24 (server dev), reqwest(dev) — dev/test surface; SBOM should mark dev-only per MGR-047.6.",
+      "cargo_summary": "Rust closure is fully version-LOCKED via committed Cargo.lock (1096 pkgs). License gaps: (1) kria-eval has NO license field; (2) all crate `license = MIT` conflicts with root LICENSE Apache-2.0 (see project_license conflict PL-1). Per-crate transitive license roll-up and SBOM = F5."
+    },
+
+    "npm": {
+      "ui_app": {
+        "manifest": "ui/package.json — name kria-ui, version 0.1.0, private: true, NO `license` field (private app).",
+        "lockfile": {
+          "path": "ui/package-lock.json",
+          "present": true,
+          "committed": true,
+          "committed_evidence": ".gitignore ignores node_modules/ but NOT package-lock.json.",
+          "format_version": 3,
+          "coverage": "lockfileVersion 3 pins the full transitive npm closure to exact versions + integrity hashes. Satisfies MGR-047.1 for the shipped UI JS closure (committed exact lock)."
+        },
+        "manifest_range_note": "Direct deps mix exact pins (@kobalte/core 0.13.12, three 0.169.0, uplot 1.6.32, ngraph.graph 20.0.1, ngraph.forcelayout 3.3.1, @tanstack/solid-virtual 3.13.33) with caret ranges (^) for @tauri-apps/* , solid-js, chart.js, dompurify, highlight.js, marked. Ranges are pinned by the lockfile but violate the 'no open ranges' steering at the manifest layer (F1/F5 policy decision).",
+        "shipped_font_assets": [
+          {"pkg": "@fontsource/ibm-plex-sans", "version": "5.2.6", "role": "shipped application body font (design §19 'license-reviewed application font stack')", "license_status": "Unknown-here (resolve from package-lock license metadata at SBOM; NOT inferred from name)"},
+          {"pkg": "@fontsource/jetbrains-mono", "version": "5.2.6", "role": "shipped monospace/tabular font", "license_status": "Unknown-here (SBOM extract)"},
+          {"pkg": "@fontsource/space-grotesk", "version": "5.2.10", "role": "shipped display/heading font", "license_status": "Unknown-here (SBOM extract)"}
+        ],
+        "shipped_icon_assets": [
+          {"pkg": "lucide-static", "version": "0.544.0", "role": "shipped icon set (scripts/build-icons.mjs -> assets:build)", "license_status": "Unknown-here (SBOM extract; MGR-047.8 requires distinct icon-license attribution)"}
+        ],
+        "notable_runtime_deps": "three 0.169.0 (dormant GraphCanvas3D / F6-only per design §15 — WebGL renderer is NOT a selected production path; MGR-047.5/.7 deletion-ownership candidate if F6 not pursued), chart.js/uplot (viz), dompurify (sanitize), marked/highlight.js (markdown), ngraph.* (graph layout).",
+        "license_disposition": "Per-package licenses for the ~full npm closure are resolvable from package-lock metadata and MUST be extracted by the SBOM tool (F5). Not inferred here."
+      },
+      "own_shipped_node_code": {
+        "pkg": "openclaw-substrate/package.json",
+        "license_field": "\"UNLICENSED\"",
+        "private": true,
+        "dependencies": "{} (none)",
+        "role": "Air-gapped MCP bridge that RUNS INSIDE KRIA OpenClaw skill containers (shipped runtime code, not a third-party dep).",
+        "status": "CONFLICT",
+        "conflict": "This is KRIA's OWN shipped code but is marked npm `UNLICENSED` (= proprietary / no distribution grant), which contradicts BOTH the project license intent (MIT per Cargo / Apache-2.0 per root LICENSE) AND the '100% FOSS' steering. See conflict PL-4.",
+        "lock": "No package-lock (deps: {} — nothing to lock). No transitive risk."
+      },
+      "ancillary_manifests_dev_only": [
+        {"path": "testing/suites/playwright/package.json", "lock": "testing/suites/playwright/package-lock.json present", "role": "E2E test harness — dev-only", "disposition": "SBOM dev-only marking (F5)"},
+        {"path": "tests/gui-cognition-e2e/package.json", "lock": "tests/gui-cognition-e2e/package-lock.json present", "role": "GUI-cognition E2E — dev-only", "disposition": "SBOM dev-only marking (F5)"},
+        {"path": "crates/kria-desktop/vscode-extension/kria-focus-authority/package.json", "lock": "not verified here", "role": "ancillary VS Code extension tooling", "disposition": "SBOM (F5); confirm shipped vs dev"}
+      ],
+      "npm_summary": "Shipped UI JS closure is version-LOCKED via committed package-lock.json (v3). Gaps: (1) shipped fonts (@fontsource x3) and icons (lucide-static) need per-package FOSS license extraction + MGR-047.8 attribution (F5); (2) openclaw-substrate own code is marked UNLICENSED — conflict PL-4; (3) three.js is an F6-only/dormant WebGL dep and a deletion-ownership candidate (MGR-047.5/.7)."
+    },
+
+    "python": {
+      "posture": "Python sidecars are OPTIONAL and MUST NOT be required authority paths (MGR-047.9, steering). None are in the shipped Rust closure; they are auxiliary services.",
+      "lockfile": {
+        "present": false,
+        "committed": false,
+        "evidence": "No uv.lock, poetry.lock, Pipfile.lock, or pinned requirements.lock exists anywhere (file_search: 0 results). kria-modules/pyproject.toml declares [tool.uv] dev-dependencies but NO uv.lock is committed. .gitignore ignores .venv/ (repo .venv is Python 3.14).",
+        "gap": "NO Python ecosystem is version-locked. This FAILS MGR-047.1 (committed exact lock) and MGR-047.11 for every Python dependency and any runtime-downloaded model weight."
+      },
+      "manifests": [
+        {"path": "kria-modules/pyproject.toml", "declared_license": "MIT (license = {text = \"MIT\"})", "license_status": "Known-declared (own package; conflicts with root Apache LICENSE — PL-1)", "pinning": "ALL deps open-ranged (>=): pillow, opencv-python-headless, pytesseract, pymupdf, python-docx, pandas, openpyxl, tree-sitter, trafilatura, readability-lxml, sentence-transformers, librosa, noisereduce, httpx; optional gpu extra: easyocr, torch; dev: pytest, pytest-asyncio. NO exact pins, NO lock.", "reachability": "optional pre-cognitive processing + telegram MCP sidecar"},
+        {"path": "sidecars/kria-tts/requirements.txt", "declared_license": "n/a (requirements list, no package license)", "pinning": "open-ranged: kokoro>=0.9.0, soundfile>=0.12.0, numpy>=1.24.0; transitive torch/misaki/spacy/transformers unpinned & unlocked", "reachability": "optional TTS sidecar (Kokoro); model weights + en_core_web_sm spaCy model DOWNLOAD at runtime (no checksum)", "license_status": "dependency + downloaded-model licenses Unknown (no lock/SBOM)"},
+        {"path": "sidecars/kria-stt/requirements.txt", "declared_license": "n/a", "pinning": "open-ranged: faster-whisper>=1.0.0, numpy>=1.24.0; optional torch>=2.0.0", "reachability": "optional STT sidecar (faster-whisper/CTranslate2)", "license_status": "Unknown (no lock/SBOM)"},
+        {"path": "sidecars/kria-vision/requirements.txt", "declared_license": "n/a", "pinning": "open-ranged: fastapi>=0.110.0, uvicorn[standard]>=0.27.0, pillow>=10.0.0, numpy>=1.24.0, pydantic>=2.0.0, python-multipart>=0.0.9; optional (commented) mss/ultralytics/transformers for OmniParser", "reachability": "optional vision sidecar (/parse); OmniParser backend optional & degrades honestly", "license_status": "Unknown (no lock/SBOM); NOTE ultralytics YOLO backend => AGPL-3.0 weights, see model MDL-omniparser-detect / conflict PL-3"}
+      ],
+      "python_summary": "Python is ENTIRELY UNLOCKED (no committed lockfile) and uses open ranges throughout — a systemic MGR-047.1/.11 gap. kria-modules declares MIT (conflicts with root Apache). Sidecars are optional (not authority). Model weights (Kokoro, faster-whisper, spaCy en_core_web_sm, YOLO/Florence-2) download at runtime with no committed checksum."
+    },
+
+    "models": {
+      "vendoring_status": "CRITICAL: .gitignore ignores `/models/**` (except .gitkeep) AND globally ignores *.onnx, *.tflite, *.bin, *.gguf, *.ggml, *.pt, *.safetensors. `git ls-files models/` returns 0 tracked files. Therefore NO model artifact (and NO on-disk model LICENSE file) is committed/vendored. All models are out-of-band LOCAL downloads on the owner's laptop; their bytes/licenses are NOT part of the tracked repo and have NO committed checksum. This FAILS MGR-047.11 (exact checksum + reviewed FOSS disposition) for every model until a committed models/manifest + vendoring/checksum policy exists (design §6.1).",
+      "on_disk_observed_not_committed": [
+        {"id": "MDL-memory-minilm", "path": "~/.kria/models/embeddings/all-MiniLM-L6-v2.onnx + tokenizer.json (NOT in repo models/)", "role": "LIVE memory vector embedder (subject of 0.3.5)", "reachability": "shipped (memory-graph vector path)", "checksum_committed": false, "license_status": "Unknown", "cross_ref": "model-license-inventory.json U-1/U-2/U-5", "disposition": "F1 (vendor+pin via models/manifest) / F5 (SBOM+release checksum)"},
+        {"id": "MDL-routing-e5", "path": "hf-hub cache (fastembed MultilingualE5Small; downloaded at runtime)", "role": "intent-routing semantic embedder", "reachability": "shipped (routing)", "checksum_committed": false, "license_status": "Unknown", "cross_ref": "model-license-inventory.json U-7", "disposition": "F1/F5"},
+        {"id": "MDL-classifier", "path": "models/classifier/model.onnx + tokenizer.json (on disk, uncommitted)", "role": "ONNX intent classifier (README 'ONNX-powered fast intent routing')", "reachability": "shipped (routing)", "checksum_committed": false, "license_status": "Unknown (no on-disk license file)", "disposition": "F1/F5"},
+        {"id": "MDL-omniparser-detect", "path": "models/omniparser/icon_detect/{model.pt, model.yaml, LICENSE} (on disk, uncommitted)", "role": "OmniParser YOLO icon DETECTOR (GUI-cognition Sight)", "reachability": "OPTIONAL vision sidecar (KRIA_VISION_MODEL=omniparser; /parse degrades honestly without it)", "checksum_committed": false, "license_status": "Known-on-disk = AGPL-3.0 (on-disk LICENSE file text: 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3')", "conflict_ref": "PL-3 (strong copyleft vs permissive project + 100% FOSS)", "disposition": "F5 legal block (MGR-047.4 incompatible copyleft) + F1 deletion-ownership decision (MGR-047.5/.7 — optional capability, deletion candidate)"},
+        {"id": "MDL-omniparser-caption", "path": "models/omniparser/icon_caption/{model.safetensors, config.json, generation_config.json, LICENSE} (on disk, uncommitted)", "role": "OmniParser Florence-2 caption model", "reachability": "OPTIONAL vision sidecar (caption; optional even within omniparser)", "checksum_committed": false, "license_status": "Known-on-disk = MIT (on-disk LICENSE file text: 'MIT License ... Copyright (c) Microsoft Corporation')", "disposition": "F5 (SBOM + commit checksum + record license); F1 vendoring"},
+        {"id": "MDL-piper-voices", "path": "models/piper/{en_US-lessac-high, en_US-ljspeech-high, en_US-ryan-high}.onnx(+.onnx.json) (on disk, uncommitted)", "role": "Piper TTS voices", "reachability": "shipped voice path (voice-piper-rs / piper sidecar)", "checksum_committed": false, "license_status": "Unknown (voice .onnx.json metadata carries dataset/quality/language but NO license key; not inferred)", "disposition": "F1/F5 (each voice + underlying dataset license reviewed separately)"},
+        {"id": "MDL-stt-whisper", "path": "models/stt/{ggml-base.en.bin, ggml-large-v3-turbo-q5_0.bin, ggml-small-q5_1.bin} (on disk, uncommitted)", "role": "whisper.cpp/ggml STT weights", "reachability": "shipped voice path (whisper-rs is a DEFAULT feature)", "checksum_committed": false, "license_status": "Unknown (no on-disk license)", "disposition": "F1/F5"},
+        {"id": "MDL-vad-silero", "path": "models/vad/silero_vad.onnx (on disk, uncommitted)", "role": "Silero VAD", "reachability": "shipped voice path (VAD)", "checksum_committed": false, "license_status": "Unknown (no on-disk license)", "disposition": "F1/F5"},
+        {"id": "MDL-wake", "path": "models/wake/{embedding_model.onnx, hey_ria.onnx, melspectrogram.onnx} (on disk, uncommitted)", "role": "openWakeWord wake detection", "reachability": "shipped (voice-wake-oww is a DEFAULT feature; wake daemon)", "checksum_committed": false, "license_status": "Unknown (no on-disk license)", "disposition": "F1/F5"},
+        {"id": "MDL-llm", "path": "models/llm/.gitkeep only (GGUF downloaded out-of-band)", "role": "local llama.cpp LLM weights", "reachability": "shipped (LLM inference) when local model used", "checksum_committed": false, "license_status": "Unknown (no on-disk license; per-model varies)", "disposition": "F1/F5"}
+      ],
+      "models_summary": "ZERO models are committed or checksummed in-repo (all git-ignored, local-only). One HARD license conflict found on disk: the OmniParser YOLO detector is AGPL-3.0 (strong copyleft) — release-blocking vs the permissive project license and 100% FOSS steering. Its companion Florence-2 caption model is MIT. All other model licenses are Unknown (no in-repo license metadata; not inferred). Every model needs a committed manifest+checksum (F1) and a reviewed FOSS disposition + SBOM component (F5)."
+    },
+
+    "assets_non_model": {
+      "fonts": "Shipped via npm @fontsource/{ibm-plex-sans,jetbrains-mono,space-grotesk} (see npm.ui_app.shipped_font_assets); design §19 requires a 'license-reviewed application font stack'. Licenses Unknown-here → extract from package-lock metadata + attribute per MGR-047.8 (F5).",
+      "icons": "Shipped via npm lucide-static 0.544.0 + generated by scripts/build-icons.mjs; also crates/kria-desktop/icons (app/tray icons — KRIA's own artwork, covered by project license once PL-1 resolved). Third-party icon license Unknown-here → SBOM extract + attribution (F5).",
+      "wake_models": "Covered under models.MDL-wake.",
+      "piper_voices": "Covered under models.MDL-piper-voices.",
+      "assets_summary": "Third-party font + icon licenses must be extracted from the committed npm lockfile and attributed distinctly from the project license (MGR-047.8). KRIA's own icon artwork inherits the (to-be-resolved) project license."
+    },
+
+    "project_license": {
+      "observed_declarations": [
+        {"source": "root /LICENSE", "value": "Apache-2.0 (full Apache License 2.0 text)", "copyright": "Copyright 2026 Obaidullah Zeeshan"},
+        {"source": "Cargo.toml [workspace.package] license", "value": "MIT", "applies_to": "7 member crates via license.workspace=true (kria-eval excluded — no license)"},
+        {"source": "README.md License badge + '📜 License' section", "value": "Apache 2.0", "copyright": "Copyright 2024-2026 ObaidGits"},
+        {"source": "requirements.md MGR-047.8", "value": "asserts 'KRIA's MIT project license'"},
+        {"source": "design.md §1 Licensing row", "value": "documents the conflict: 'Cargo declares MIT while root LICENSE text is Apache-2.0'"},
+        {"source": "kria-modules/pyproject.toml", "value": "MIT (Python sidecar package)"},
+        {"source": "openclaw-substrate/package.json", "value": "UNLICENSED (KRIA's own shipped MCP bridge code)"}
+      ],
+      "project_license_summary": "The project has NO single canonical license. The root LICENSE file (Apache-2.0) contradicts the Cargo/pyproject metadata (MIT) and the requirements doc (MIT), while README claims Apache-2.0 and one shipped component is UNLICENSED. There is ALSO a copyright-holder mismatch ('Obaidullah Zeeshan' in LICENSE vs 'ObaidGits' in README vs 'KRIA Contributors' in Cargo authors). This blocks any release license claim (MGR-047.8) until a canonical license + holder is chosen and propagated."
+    }
+  },
+
+  "license_conflicts": [
+    {
+      "id": "PL-1",
+      "title": "Project license: root LICENSE (Apache-2.0) vs Cargo/pyproject metadata (MIT)",
+      "detail": "Root /LICENSE is the full Apache-2.0 text (Copyright 2026 Obaidullah Zeeshan). Cargo.toml [workspace.package] license = \"MIT\" (applied to 7 crates) and kria-modules/pyproject license = MIT. requirements.md MGR-047.8 also calls it 'MIT'. These are two DIFFERENT licenses claimed for the same project.",
+      "severity": "release-blocking",
+      "requirement": "MGR-047.8, MGR-047.3",
+      "resolver_gate": "F1 (choose + propagate canonical project license) / F5 (verify SBOM/docs consistency)"
+    },
+    {
+      "id": "PL-2",
+      "title": "README (Apache-2.0) vs Cargo (MIT) + copyright-holder mismatch",
+      "detail": "README badge and License section state Apache 2.0 with 'Copyright 2024-2026 ObaidGits'; LICENSE file says 'Copyright 2026 Obaidullah Zeeshan'; Cargo authors = 'KRIA Contributors'. Doc/metadata disagreement on BOTH license and copyright holder.",
+      "severity": "release-blocking",
+      "requirement": "MGR-047.8",
+      "resolver_gate": "F1 / F5"
+    },
+    {
+      "id": "PL-3",
+      "title": "OmniParser YOLO detector is AGPL-3.0 (strong copyleft) — incompatible with permissive project + 100% FOSS shipping",
+      "detail": "models/omniparser/icon_detect/LICENSE (on disk) is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3'. AGPL-3.0 is a strong/network copyleft that is incompatible with shipping under a permissive MIT/Apache project license without triggering copyleft obligations. Reachability: OPTIONAL vision sidecar (KRIA_VISION_MODEL=omniparser); /parse degrades honestly without it. Companion icon_caption model is MIT (Microsoft Florence-2).",
+      "severity": "release-blocking (if the omniparser capability ships)",
+      "requirement": "MGR-047.4 (block incompatible copyleft), MGR-047.3, MGR-047.5/.7 (optional-capability deletion ownership)",
+      "resolver_gate": "F5 (legal disposition / block) + F1 (decide keep-with-isolation vs delete the optional capability + its deps/weights/tests/SBOM)"
+    },
+    {
+      "id": "PL-4",
+      "title": "openclaw-substrate own code marked npm UNLICENSED",
+      "detail": "openclaw-substrate/package.json declares license 'UNLICENSED' (npm convention for proprietary/no-distribution). This is KRIA's OWN shipped code (MCP bridge inside skill containers) and contradicts both the project license intent and the '100% FOSS' steering.",
+      "severity": "release-blocking",
+      "requirement": "MGR-047.3, MGR-047.8",
+      "resolver_gate": "F1 (relabel to the canonical project license)"
+    },
+    {
+      "id": "PL-5",
+      "title": "kria-eval crate declares NO license",
+      "detail": "crates/kria-eval/Cargo.toml overrides version/edition explicitly and omits both `license` and `license.workspace = true`. It is the only crate with no license disposition.",
+      "severity": "medium (dev/eval tooling, not shipped in the desktop bundle)",
+      "requirement": "MGR-047.11",
+      "resolver_gate": "F1 (add license.workspace=true or explicit license)"
+    }
+  ],
+
+  "missing_locks_and_checksums": [
+    {"id": "ML-1", "item": "Python dependencies (all sidecars + kria-modules)", "gap": "NO committed Python lockfile anywhere (no uv.lock/poetry.lock/requirements.lock); all deps open-ranged (>=).", "requirement": "MGR-047.1/.11", "resolver_gate": "F1 (generate + commit uv.lock/pinned requirements) / F5 (SBOM)"},
+    {"id": "ML-2", "item": "ALL model artifacts (memory MiniLM, routing E5, classifier, omniparser x2, piper voices, whisper ggml, silero vad, wake x3, llm gguf)", "gap": "Zero committed checksums — models/** is git-ignored and *.onnx/*.bin/*.gguf/*.pt/*.safetensors globally ignored; artifacts are local-only downloads.", "requirement": "MGR-047.11, MGR-042.6", "resolver_gate": "F1 (commit models/manifest with source URL/revision/checksums) / F5 (SBOM + release checksum)"},
+    {"id": "ML-3", "item": "Runtime-downloaded Python model weights (Kokoro, en_core_web_sm spaCy, faster-whisper, YOLO/Florence-2)", "gap": "Downloaded on first use; no committed checksum.", "requirement": "MGR-047.11", "resolver_gate": "F1/F5"},
+    {"id": "ML-4", "item": "Shipped npm font/icon package licenses", "gap": "Versions locked (package-lock v3) but per-package FOSS license text not yet extracted/attributed.", "requirement": "MGR-047.8/.11", "resolver_gate": "F5 (SBOM extract + attribution)"},
+    {"id": "ML-5", "item": "Cargo/npm manifest open ranges", "gap": "Closures are lock-pinned (Cargo.lock v4 1096 pkgs; ui/package-lock v3) but manifests use semver ranges vs the steering 'no open ranges'.", "requirement": "steering (pin exact) + MGR-047.1", "resolver_gate": "F1/F5 policy decision (tighten manifests vs rely on committed lock)"}
+  ],
+
+  "unknowns": [
+    {"id": "UNK-1", "fact": "FOSS license disposition of MDL-memory-minilm (+ tokenizer), MDL-routing-e5, MDL-classifier, MDL-piper-voices, MDL-stt-whisper, MDL-vad-silero, MDL-wake, MDL-llm", "why": "No in-repo license file/metadata; not inferred; no download in F0.", "resolver_gate": "F1 (disposition) / F5 (release block if unresolved)"},
+    {"id": "UNK-2", "fact": "Per-package FOSS license of the full npm closure incl. shipped fonts (@fontsource x3) and icons (lucide-static)", "why": "Locked to versions but license text not extracted here (no inference from name).", "resolver_gate": "F5 (SBOM)"},
+    {"id": "UNK-3", "fact": "Per-package FOSS license of the full Python closure", "why": "No lockfile; no SBOM; not inferred.", "resolver_gate": "F1 (lock) / F5 (SBOM)"},
+    {"id": "UNK-4", "fact": "Canonical project license + copyright holder", "why": "Contradictory declarations (Apache vs MIT; Obaidullah Zeeshan vs ObaidGits vs KRIA Contributors).", "resolver_gate": "F1"},
+    {"id": "UNK-5", "fact": "Transitive Cargo crate licenses roll-up (1096 pkgs)", "why": "Closure locked but not yet license-scanned into an SBOM.", "resolver_gate": "F5"}
+  ],
+
+  "disposition_split": {
+    "F1_pin_before_authority_work": [
+      "PL-1 / PL-2 / UNK-4: choose + propagate canonical project license (LICENSE vs Cargo MIT vs README) and single copyright holder.",
+      "PL-4: relabel openclaw-substrate UNLICENSED -> canonical project license.",
+      "PL-5: add a license to kria-eval.",
+      "ML-1 / UNK-3: generate + commit a Python lockfile and pin sidecar deps.",
+      "ML-2 / ML-3 / UNK-1: create + commit models/manifest pinning source URL/revision/artifact+tokenizer checksums for every reachable model (ties to model-license-inventory.json U-1..U-6).",
+      "PL-3 (F1 half): decide keep-with-AGPL-isolation vs DELETE the optional OmniParser capability + its Python deps/weights/tests/SBOM (MGR-047.5/.7).",
+      "ML-5: manifest pin-vs-lock policy decision."
+    ],
+    "F5_sbom_and_release_blocking_review": [
+      "PL-3 (F5 half): legal disposition of AGPL-3.0 OmniParser detector — block inclusion until explicit disposition (MGR-047.4).",
+      "UNK-1 / UNK-2 / UNK-3 / UNK-5: SBOM (SPDX/CycloneDX) across cargo/npm/python/models/assets + reviewed FOSS disposition for every component.",
+      "ML-4 / UNK-2: extract + attribute shipped font/icon licenses distinctly from the project license (MGR-047.8).",
+      "Vulnerability scan + approved-exception evidence linked to exact lockfiles (MGR-047.6).",
+      "three.js/WebGL deletion-ownership decision if F6 3D is not pursued (MGR-047.5/.7)."
+    ]
+  },
+
+  "summary": {
+    "headline_conflict": "PL-1: root LICENSE = Apache-2.0 (Copyright 2026 Obaidullah Zeeshan) but Cargo workspace license = MIT (7 crates) and MGR-047.8/kria-modules also say MIT, while README claims Apache-2.0 with a different holder (ObaidGits). No canonical project license exists.",
+    "second_hard_conflict": "PL-3: OmniParser YOLO icon detector ships under AGPL-3.0 (on-disk LICENSE) — strong copyleft incompatible with the permissive project license + 100% FOSS posture; release-blocking if the optional vision capability ships.",
+    "lockfile_coverage_by_ecosystem": {
+      "cargo": "LOCKED — Cargo.lock v4 committed, 1096 pkgs (closure exact).",
+      "npm": "LOCKED — ui/package-lock.json v3 committed (closure exact); dev test suites also locked.",
+      "python": "UNLOCKED — no committed lockfile anywhere; all deps open-ranged.",
+      "models": "UNLOCKED/UNVENDORED — all models git-ignored, zero committed checksums.",
+      "assets": "Fonts/icons version-locked via npm lock; license text not yet extracted."
+    },
+    "license_conflicts_count": 5,
+    "missing_locks_or_checksums_count": 5,
+    "unknowns_count": 5,
+    "f1_items": 7,
+    "f5_items": 5,
+    "invariant_note": "No license was inferred from any package name or code comment. On-disk model LICENSE files (AGPL-3.0 detector, MIT caption) are recorded as observed facts; the embedding.rs 'Apache-2.0' doc-comment (0.3.5) remains rejected as non-evidence.",
+    "no_downloads_performed": true,
+    "no_secrets_copied": true,
+    "parent_task_0_3_status": "COMPLETE — 0.3.6 is the final F0.3 inventory subtask."
+  }
+}

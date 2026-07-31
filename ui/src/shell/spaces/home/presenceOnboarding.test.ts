@@ -62,13 +62,15 @@ describe("presenceOnboarding — first-run teaching (design §17, Req 19)", () =
     );
   });
 
-  it("teaches the Hidden Dock discovery hint after earlier hints retire", () => {
+  it("teaches the shared navigation rail after earlier hints retire", () => {
     const retired = retiredFrom(
       new Set([ONBOARDING_COACH_IDS["core-whisper"], ONBOARDING_COACH_IDS["orbit-reveal"]]),
     );
     const next = visibleOnboardingHints(retired, { orbitEngaged: true })[0];
     expect(next.id).toBe("dock-hint");
-    expect(next.message).toContain("⌘K");
+    expect(next.message).toBe(
+      "Use the left navigation rail to move between Home and your Spaces.",
+    );
   });
 
   it("renders nothing once every hint is retired (never repeats)", () => {

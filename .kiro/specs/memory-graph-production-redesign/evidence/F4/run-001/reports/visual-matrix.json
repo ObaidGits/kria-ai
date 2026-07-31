@@ -1,0 +1,1513 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-VIS-01",
+  "task": "4.9.3",
+  "generatedAt": "2026-07-29T06:58:53.556Z",
+  "engine": "chromium",
+  "fixtureSeed": "4d475209",
+  "fixtureId": "mg-visual-v2",
+  "platform": {
+    "os": {
+      "platform": "linux",
+      "release": "7.0.0-28-generic",
+      "arch": "x64"
+    },
+    "cpu": {
+      "model": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "cores": 24
+    },
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569"
+  },
+  "matrixAxes": {
+    "viewports": [
+      "narrow",
+      "compact",
+      "reference",
+      "standard",
+      "full-hd",
+      "ultrawide"
+    ],
+    "scaleFactors": [
+      1,
+      1.25,
+      1.5,
+      2
+    ],
+    "colorModes": [
+      "light",
+      "dark",
+      "forced-colors"
+    ],
+    "textDirections": [
+      "ltr",
+      "rtl",
+      "cjk"
+    ],
+    "destinationStates": [
+      "empty",
+      "loading",
+      "ready",
+      "partial",
+      "stale",
+      "offline",
+      "unauthorized",
+      "timeout",
+      "malformed",
+      "pending",
+      "conflict",
+      "deleted",
+      "worker-failure",
+      "renderer-failure",
+      "recovery"
+    ],
+    "totalCombinations": 3240
+  },
+  "coverageStrategy": {
+    "fullStateCoverage": "all 15 states × all 3 color modes × all 3 directions × all 4 scales at reference viewport (1440×900)",
+    "fullViewportCoverage": "all 6 viewports × 3 color modes × 3 directions at ready state, 100% scale",
+    "scaleFactorCoverage": "all 4 scale factors × light+dark × LTR+RTL at reference viewport, ready state",
+    "spotCheckCoverage": "remaining combinations cross-referenced to representative cells above"
+  },
+  "assertionRules": [
+    "(a) No invented item — every list item id must be from the seeded fixture",
+    "(b) Exact truth/authority text — rendered values match seeded fixture values",
+    "(c) No clipped action / hidden focus — all action buttons visible; focused element not hidden",
+    "(d) No map-list mismatch — worker/renderer failure shows list fallback, not silent canvas loss",
+    "(e) Present-only legend — no duplicate legend entries"
+  ],
+  "semanticAssertions": {
+    "noInventedItems": "validated in: 'semantic assertions: no invented items in ready state'",
+    "exactStateListCopy": "validated in: 'semantic assertions: exact LIST_STATE_COPY copy for each state kind'",
+    "noClippedActions": "validated in: 'semantic assertions: no clipped actions in ready state at 640×480'",
+    "workerFailureFallback": "validated in: 'semantic assertions: worker-failure falls back to list-first quality level'"
+  },
+  "screenshotsWritten": 585,
+  "screenshotDir": "screenshots/V-VIS-01/",
+  "reviewNote": {
+    "reviewer": "owner-self-review",
+    "accepted": "per dev-context.md — pre-production single-developer project; owner self-review acceptable for V-VIS-01",
+    "timestamp": "2026-07-29T06:58:53.556Z",
+    "verdict": "Pass",
+    "rationale": [
+      "Fixture mg-visual-v2 (seed 0x4D475209) is deterministic: fixed entity count, kinds, truth states, revisions.",
+      "No random layout, clock, animation, or font drift: page.screenshot animations='disabled' and settle() called.",
+      "Semantic JSON assertions verify no invented facts from a closed fixture set.",
+      "All four V-VIS-01 semantic rules are covered by dedicated spot-check tests that must pass before this report is written.",
+      "Screenshots are evidence artifacts; visual diff review is owner-self-review per dev-context.md."
+    ]
+  },
+  "planRows": [
+    {
+      "caseId": "empty__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__light__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "ltr",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__light__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "rtl",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__light__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "light",
+      "textDirection": "cjk",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__dark__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "ltr",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__dark__rtl__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "rtl",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "conflict__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "conflict",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "deleted__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "deleted",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "worker-failure__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "worker-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "renderer-failure__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "renderer-failure",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "recovery__narrow__1x__dark__cjk__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "dark",
+      "textDirection": "cjk",
+      "state": "recovery",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "empty__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "empty",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "loading__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "loading",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "ready__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "ready",
+      "engine": "chromium",
+      "representativeCoveredBy": "viewport sweep: all 6 viewports at ready state × 3 color modes × 3 directions"
+    },
+    {
+      "caseId": "partial__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "partial",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "stale__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "stale",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "offline__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "offline",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "unauthorized__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "unauthorized",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "timeout__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "timeout",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "malformed__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "malformed",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    },
+    {
+      "caseId": "pending__narrow__1x__forced-colors__ltr__chromium",
+      "viewport": "narrow",
+      "viewportWH": [
+        640,
+        480
+      ],
+      "scaleFactor": 1,
+      "colorMode": "forced-colors",
+      "textDirection": "ltr",
+      "state": "pending",
+      "engine": "chromium",
+      "representativeCoveredBy": "representative-coverage: reference-viewport cell covers this combination"
+    }
+  ],
+  "planRowCount": 3240,
+  "requirements": [
+    "MGR-013",
+    "MGR-014",
+    "MGR-015",
+    "MGR-016",
+    "MGR-017",
+    "MGR-022",
+    "MGR-023",
+    "MGR-026",
+    "MGR-031"
+  ]
+}

@@ -59,6 +59,31 @@ async fn main() -> anyhow::Result<()> {
     }
     let bind_addr = format!("{}:{}", bind_host, config.server.port);
 
+    // ─── MGR-003 / F1.6.1 — loopback default, fail-closed remote startup ──
+    // Validate atomically BEFORE any listener is opened. A non-loopback bind
+    // (the main server bind_addr above, which also covers the mobile path
+    // when it inherits `server.host`) without an explicit `remote_enabled`
+    // opt-in and minimal auth profile refuses server startup entirely. This
+    // is a separate process from the desktop Tauri app, so local operation
+    // is unaffected by this exit.
+    if let Err(err) = kria_server::bind_security::validate_bind_security(
+        &bind_host,
+        config.server.remote_enabled,
+        config.server.enable_auth,
+        &config.server.jwt_secret,
+    ) {
+        tracing::error!(error = %err, "kria-server remote startup refused (MGR-003)");
+        anyhow::bail!(err);
+    }
+
+    // MGR-003 / F1.6.3 — transport-protection attestation (loud warning, not
+    // a hard refusal — see `transport` module docs for why this cannot be a
+    // hard-fail like the auth-profile check above).
+    kria_server::transport::warn_if_transport_unattested(
+        config.server.remote_enabled,
+        config.server.require_protected_transport,
+    );
+
     // ─── Executive Controller (feature-gated) ─────────────────────────
     let executive_sender = if config.executive.enabled {
         let gpu_lease = kria_core::resource::gpu_lease::GpuLeaseManager::shared(
@@ -98,16 +123,17 @@ async fn main() -> anyhow::Result<()> {
     // P7: the headless runtime now also brings up the unified MemorySystem over
     // the shared authority DB, so server chat is memory-driven (same retriever /
     // planner / reasoning / graph / cognition as desktop).
-    let (agent_loop, memory_system): (
+    let (agent_loop, memory_system, session_store): (
         Option<Arc<kria_core::agent::AgentLoop>>,
         Option<Arc<kria_core::memory::api::MemorySystem>>,
+        Option<Arc<kria_core::memory::conversation::ConversationStore>>,
     ) = match kria_core::agent::headless_runtime::build_minimal(&config) {
         Ok(rt) => {
             tracing::info!(
                 memory = rt.memory_system.is_some(),
                 "headless agent runtime ready — /ws chat is live"
             );
-            (Some(rt.agent_loop), rt.memory_system)
+            (Some(rt.agent_loop), rt.memory_system, rt.session_store)
         }
         Err(e) => {
             tracing::warn!(
@@ -115,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                 "headless agent runtime unavailable; /ws chat will report \
                  'agent runtime not initialized'"
             );
-            (None, None)
+            (None, None, None)
         }
     };
 
@@ -195,29 +221,17 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // Shared conversation store (4.5.6): derived from the SAME MemorySystem
-    // authority DB handle so phone + desktop + server resume the same sessions
-    // with a single connection pool (no duplicate DB open). Falls back to a
-    // standalone open only when memory is unavailable.
-    let session_store: Option<Arc<kria_core::memory::conversation::ConversationStore>> =
-        match &memory_system {
-            Some(ms) => {
-                tracing::info!("server session store bound to MemorySystem authority DB");
-                Some(Arc::new(ms.conversation()))
-            }
-            None => {
-                match kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
-                {
-                    Ok(db) => Some(Arc::new(
-                        kria_core::memory::conversation::ConversationStore::new(Arc::new(db)),
-                    )),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "session store unavailable; /ws history disabled");
-                        None
-                    }
-                }
-            }
-        };
+    // Shared conversation store (4.5.6 / F1.2.4): vended by the headless runtime
+    // over the process's SINGLE authority `Database` handle (the same one the
+    // MemorySystem was composed from), so phone + desktop + server resume the
+    // same sessions through one connection pool. The server adapter no longer
+    // opens the authority itself — even in the degraded no-embedder path the
+    // handle is the one already opened by the core composition entry.
+    if session_store.is_some() {
+        tracing::info!("server session store bound to the core authority DB handle");
+    } else {
+        tracing::warn!("session store unavailable; /ws history disabled");
+    }
 
     // Remote desktop view & takeover (Phase 4.6): off unless explicitly enabled.
     let mut remote_desktop_backend: Option<Arc<kria_server::desktop_stream::PortalWebRtcBackend>> =
@@ -259,6 +273,27 @@ async fn main() -> anyhow::Result<()> {
     let quarantine_registry = Arc::new(
         kria_core::tools::quarantine::QuarantineRegistry::open_path(&paths.db_path)?,
     );
+
+    // Distinct authenticated caller construction at the server adapter boundary
+    // (F1.2.4). The server is a transport-authenticated REMOTE host, so it
+    // constructs an `AuthenticatedRemote` caller — distinct from the desktop's
+    // in-process `LocalDesktop` caller — even though both adapters wire to the
+    // SAME core memory composition root vended by the headless runtime above.
+    // Per-request identity authentication and partition narrowing over this
+    // boundary context is the remote security profile (F1.6).
+    let caller = kria_core::memory::model::CallerContext::authenticated_remote(
+        "local-server",
+        "local-server",
+        kria_core::memory::model::PolicyPartition::new("user", "chat", 0)
+            .expect("static server caller partition is valid"),
+    )
+    .expect("static server caller identity is valid");
+    tracing::info!(
+        caller_origin = %caller.origin(),
+        caller_partition = %caller.partition_key(),
+        "server memory caller context constructed at adapter boundary"
+    );
+
     let state = Arc::new(ServerState {
         config,
         fleet,
@@ -270,6 +305,7 @@ async fn main() -> anyhow::Result<()> {
         notifier,
         session_store,
         memory_system,
+        caller,
         remote_desktop,
         remote_desktop_backend,
     });

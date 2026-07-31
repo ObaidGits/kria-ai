@@ -54,6 +54,13 @@ pub struct ChatMediaRecord {
 }
 
 /// A durable derived fact with decay/access bookkeeping.
+///
+/// **Superseded by** [`crate::memory::model::Record`] (`RecordKind::Memory`) —
+/// the decay/access bookkeeping becomes retrieval-time scoring rather than
+/// stored columns. Retained as the live
+/// [`crate::memory::runtime_backend::KriaMemoryRuntime`] fact read/write model
+/// until the F1.5 write cutover + F3 retrieval-on-v2; see the
+/// ledger in [`crate::memory::model::legacy_mapping`] (task F2.1.6).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryFact {
     pub id: Option<i64>,

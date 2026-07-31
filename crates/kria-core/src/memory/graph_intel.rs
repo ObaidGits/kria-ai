@@ -1,11 +1,16 @@
 //! Knowledge-Graph Intelligence (memory-upgrade Phase 2).
 //!
-//! Autonomous analysis + inference over the existing `entities` / `relationships`
-//! authority tables (no new storage): degree centrality, community detection
+//! Autonomous analysis + inference over the `entities` / `relationships_v2`
+//! tables (no new storage): degree centrality, community detection
 //! (union-find), Adamic-Adar link prediction (hidden-relationship inference),
 //! and transitive graph completion that materializes inferred edges through the
-//! authority transaction. Bounded for a personal-scale graph; runs as a P4
+//! v2 governed path. Bounded for a personal-scale graph; runs as a P4
 //! background job.
+//!
+//! After task F2.2.7 all graph intelligence queries target `relationships_v2`
+//! (entity-endpoint rows only); the legacy `relationships` table has been
+//! dropped.  The `complete_transitive` helper is removed — inferred edge
+//! materialization for v2 is part of F3.3.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -15,7 +20,6 @@ use uuid::Uuid;
 
 use crate::memory::db::Database;
 use crate::memory::error::{MemoryResult, StorageError};
-use crate::memory::ids::new_id;
 
 /// A centrality result: entity + degree + display name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,11 +49,18 @@ impl GraphIntelligence {
         Self { db }
     }
 
-    /// Load the undirected adjacency of currently-valid relationships.
+    /// Load the undirected adjacency of currently-valid entity-endpoint relationships
+    /// from `relationships_v2`.
     fn adjacency(&self) -> MemoryResult<HashMap<Uuid, HashSet<Uuid>>> {
         self.db.with_read(|conn| {
             let mut stmt = conn
-                .prepare("SELECT source_id, target_id FROM relationships WHERE valid_until IS NULL")
+                .prepare(
+                    "SELECT source_id, target_id FROM relationships_v2 \
+                     WHERE source_kind = 'entity' AND target_kind = 'entity' \
+                       AND valid_until IS NULL \
+                       AND (truth_state IS NULL \
+                            OR truth_state NOT IN ('superseded','forgotten','deleted'))",
+                )
                 .map_err(StorageError::Sqlite)?;
             let rows = stmt
                 .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
@@ -67,37 +78,6 @@ impl GraphIntelligence {
                 }
             }
             Ok(adj)
-        })
-    }
-
-    /// Typed directed edges (for transitive completion), valid only.
-    fn typed_edges(&self) -> MemoryResult<Vec<(Uuid, Uuid, String, f64)>> {
-        self.db.with_read(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT source_id, target_id, rel_type, strength FROM relationships \
-                     WHERE valid_until IS NULL",
-                )
-                .map_err(StorageError::Sqlite)?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, f64>(3)?,
-                    ))
-                })
-                .map_err(StorageError::Sqlite)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(StorageError::Sqlite)?;
-            let mut out = Vec::new();
-            for (s, t, rt, st) in rows {
-                if let (Ok(s), Ok(t)) = (Uuid::parse_str(&s), Uuid::parse_str(&t)) {
-                    out.push((s, t, rt, st));
-                }
-            }
-            Ok(out)
         })
     }
 
@@ -127,8 +107,11 @@ impl GraphIntelligence {
                        ELSE r.source_id \
                      END) AS degree \
                      FROM entities e \
-                     LEFT JOIN relationships r \
-                       ON r.valid_until IS NULL \
+                     LEFT JOIN relationships_v2 r \
+                       ON r.source_kind = 'entity' AND r.target_kind = 'entity' \
+                      AND r.valid_until IS NULL \
+                      AND (r.truth_state IS NULL \
+                           OR r.truth_state NOT IN ('superseded','forgotten','deleted')) \
                       AND r.source_id <> r.target_id \
                       AND (r.source_id = e.id OR r.target_id = e.id) \
                      GROUP BY e.id, e.display_name \
@@ -250,78 +233,17 @@ impl GraphIntelligence {
         Ok(preds)
     }
 
-    /// Transitive graph completion: for A —t→ B and B —t→ C (same rel_type) with
-    /// no existing A —t→ C, materialize the inferred edge (strength = product of
-    /// the two, so inferred links are weaker). Returns the number of edges added.
-    /// Bounded by `max_new`. Idempotent (skips existing edges).
-    pub fn complete_transitive(&self, max_new: usize) -> MemoryResult<usize> {
-        let edges = self.typed_edges()?;
-        // Existing directed (src,tgt,type) set for idempotency.
-        let existing: HashSet<(Uuid, Uuid, String)> = edges
-            .iter()
-            .map(|(s, t, rt, _)| (*s, *t, rt.clone()))
-            .collect();
-        // Typed adjacency: (node, rel_type) -> [(neighbor, strength)]
-        let mut typed: HashMap<(Uuid, String), Vec<(Uuid, f64)>> = HashMap::new();
-        for (s, t, rt, st) in &edges {
-            typed.entry((*s, rt.clone())).or_default().push((*t, *st));
-        }
-
-        let mut proposals: Vec<(Uuid, Uuid, String, f64)> = Vec::new();
-        for ((a, rt), mids) in &typed {
-            for (mid, st1) in mids {
-                if let Some(seconds) = typed.get(&(*mid, rt.clone())) {
-                    for (c, st2) in seconds {
-                        if c == a {
-                            continue;
-                        }
-                        let key = (*a, *c, rt.clone());
-                        if existing.contains(&key) {
-                            continue;
-                        }
-                        proposals.push((*a, *c, rt.clone(), (st1 * st2).clamp(0.0, 1.0)));
-                    }
-                }
-            }
-        }
-        // De-dup proposals + bound.
-        let mut seen: HashSet<(Uuid, Uuid, String)> = HashSet::new();
-        proposals.retain(|(a, c, rt, _)| seen.insert((*a, *c, rt.clone())));
-        proposals.truncate(max_new);
-        if proposals.is_empty() {
-            return Ok(0);
-        }
-
-        let now = chrono::Utc::now().to_rfc3339();
-        let tx = self.db.begin()?;
-        for (a, c, rt, st) in &proposals {
-            tx.conn()
-                .execute(
-                    "INSERT INTO relationships(id, source_id, target_id, rel_type, strength, \
-                     valid_from, valid_until, evidence_event_id) \
-                     VALUES(?1,?2,?3,?4,?5,?6,NULL,NULL)",
-                    params![
-                        new_id().to_string(),
-                        a.to_string(),
-                        c.to_string(),
-                        rt,
-                        st,
-                        now,
-                    ],
-                )
-                .map_err(StorageError::Sqlite)?;
-        }
-        tx.commit()?;
-        Ok(proposals.len())
-    }
+    // NOTE: `complete_transitive` was removed in task F2.2.7. Transitive edge
+    // materialization over the v2 governed path is part of F3.3.
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::ids::new_id;
     use crate::memory::stores::ports::GraphStore;
     use crate::memory::stores::SqliteGraphStore;
-    use crate::memory::types::{Entity, Relationship};
+    use crate::memory::types::Entity;
 
     fn entity(name: &str) -> Entity {
         let id = new_id();
@@ -333,17 +255,34 @@ mod tests {
             created_at: chrono::Utc::now(),
         }
     }
-    fn rel(a: Uuid, b: Uuid, rt: &str) -> Relationship {
-        Relationship {
-            id: new_id(),
-            source_id: a,
-            target_id: b,
-            rel_type: rt.into(),
-            strength: 0.9,
-            valid_from: chrono::Utc::now(),
-            valid_until: None,
-            evidence_event_id: None,
-        }
+
+    /// Insert a `relationships_v2` entity-to-entity edge.
+    fn insert_v2_rel(db: &Arc<Database>, source: Uuid, target: Uuid, rel_name: &str) {
+        let id = new_id();
+        let now = chrono::Utc::now().to_rfc3339();
+        let identity = format!("{source}-{target}-{rel_name}");
+        let tx = db.begin().unwrap();
+        tx.conn()
+            .execute(
+                "INSERT OR IGNORE INTO relationships_v2(
+                     id, source_kind, source_id, target_kind, target_id,
+                     relation_name, relation_version, direction_class,
+                     valid_from, valid_until, truth_state,
+                     namespace, owner_id, scope, sensitivity,
+                     policy_source_id, policy_version, identity_hash)
+                 VALUES (?1,'entity',?2,'entity',?3,?4,1,'directed',?5,NULL,NULL,
+                         'core','','global',0,'core','pending-f1.4',?6)",
+                rusqlite::params![
+                    id.to_string(),
+                    source.to_string(),
+                    target.to_string(),
+                    rel_name,
+                    now,
+                    identity,
+                ],
+            )
+            .unwrap();
+        tx.commit().unwrap();
     }
 
     fn seed() -> (Arc<Database>, Vec<Uuid>) {
@@ -357,18 +296,13 @@ mod tests {
         for e in &ents {
             g.add_entity(&mut tx, e).unwrap();
         }
-        // Star-ish: A-B, A-C, B-C (triangle), C-D, D-E.
-        g.add_relationship(&mut tx, &rel(ents[0].id, ents[1].id, "related_to"))
-            .unwrap();
-        g.add_relationship(&mut tx, &rel(ents[0].id, ents[2].id, "related_to"))
-            .unwrap();
-        g.add_relationship(&mut tx, &rel(ents[1].id, ents[2].id, "related_to"))
-            .unwrap();
-        g.add_relationship(&mut tx, &rel(ents[2].id, ents[3].id, "related_to"))
-            .unwrap();
-        g.add_relationship(&mut tx, &rel(ents[3].id, ents[4].id, "related_to"))
-            .unwrap();
         tx.commit().unwrap();
+        // Star-ish: A-B, A-C, B-C (triangle), C-D, D-E.
+        insert_v2_rel(&db, ents[0].id, ents[1].id, "related_to");
+        insert_v2_rel(&db, ents[0].id, ents[2].id, "related_to");
+        insert_v2_rel(&db, ents[1].id, ents[2].id, "related_to");
+        insert_v2_rel(&db, ents[2].id, ents[3].id, "related_to");
+        insert_v2_rel(&db, ents[3].id, ents[4].id, "related_to");
         (db, ents.iter().map(|e| e.id).collect())
     }
 
@@ -395,20 +329,5 @@ mod tests {
         let targets: Vec<Uuid> = preds.iter().map(|p| p.target).collect();
         assert!(targets.contains(&ids[0]) || targets.contains(&ids[1]));
         assert!(preds.iter().all(|p| p.score > 0.0));
-    }
-
-    #[test]
-    fn transitive_completion_adds_inferred_edges() {
-        let (db, _ids) = seed();
-        let gi = GraphIntelligence::new(db.clone());
-        let before = gi.typed_edges().unwrap().len();
-        let added = gi.complete_transitive(100).unwrap();
-        assert!(added > 0, "expected inferred transitive edges");
-        let after = gi.typed_edges().unwrap().len();
-        assert_eq!(after, before + added);
-        // Idempotent-ish: a second pass adds fewer or zero *new* unique edges
-        // beyond what now exists (existing set now includes the inferred ones).
-        let added2 = gi.complete_transitive(100).unwrap();
-        assert!(added2 <= added);
     }
 }

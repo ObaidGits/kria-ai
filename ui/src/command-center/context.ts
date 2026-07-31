@@ -195,3 +195,123 @@ export function cycleContext() {
   const i = order.indexOf(activeContext());
   setActiveContext(order[(i + 1) % order.length]);
 }
+
+
+// ── Living Core cognition model ─────────────────────────────────────────────
+// This is a bounded presentation model. A future runtime resolver can drive the
+// same contract without changing the homepage components.
+export type CoreState = "idle" | "listening" | "thinking" | "retrieving" | "executing";
+
+export interface CognitionSnapshot {
+  state: CoreState;
+  stateLabel: string;
+  activity: string;
+  detail: string;
+  goal: string;
+  evidence: string;
+  memory: string;
+  nextAction: string;
+  effort: string;
+  confidence: number;
+}
+
+const COGNITION_BY_CONTEXT: Record<HomeContext, Omit<CognitionSnapshot, "state" | "stateLabel" | "activity" | "detail">> = {
+  general: {
+    goal: "Choose the most useful next step.",
+    evidence: "No urgent action is running; the next hour is open.",
+    memory: "Your last session ended while refining KRIA's interface.",
+    nextAction: "Continue the interface work",
+    effort: "About 20 min",
+    confidence: 86,
+  },
+  coding: {
+    goal: "Move the active project forward without losing context.",
+    evidence: "Recent code changes and project memory are available locally.",
+    memory: "The last coding session focused on Command Center interaction quality.",
+    nextAction: "Review the latest project changes",
+    effort: "About 10 min",
+    confidence: 91,
+  },
+  writing: {
+    goal: "Turn the current draft into a clear finished argument.",
+    evidence: "A draft and related research are present in this context.",
+    memory: "The opening needed a stronger local-first point of view.",
+    nextAction: "Continue the draft",
+    effort: "About 25 min",
+    confidence: 83,
+  },
+  meetings: {
+    goal: "Enter the next conversation with decisions and context ready.",
+    evidence: "The design review is the next relevant calendar context.",
+    memory: "The last review left one open interaction-design decision.",
+    nextAction: "Prepare a concise meeting brief",
+    effort: "About 8 min",
+    confidence: 88,
+  },
+  automation: {
+    goal: "Keep active workflows understandable and under control.",
+    evidence: "Automation context exposes queue, history, logs, and triggers.",
+    memory: "The most recent workflow review prioritised observable failures.",
+    nextAction: "Inspect automation outcomes",
+    effort: "About 6 min",
+    confidence: 89,
+  },
+  research: {
+    goal: "Build a useful answer from relevant local knowledge.",
+    evidence: "Research, documents, notes, and memory are available together.",
+    memory: "The current comparison concerns Tauri IPC approaches.",
+    nextAction: "Continue the source comparison",
+    effort: "About 18 min",
+    confidence: 81,
+  },
+  documents: {
+    goal: "Find the right source without making the user browse manually.",
+    evidence: "The local document index is the active knowledge context.",
+    memory: "Recent work centred on organising the knowledge base.",
+    nextAction: "Search related documents",
+    effort: "About 4 min",
+    confidence: 92,
+  },
+};
+
+export const [coreState, setCoreState] = createSignal<CoreState>("idle");
+export const [activeIntent, setActiveIntent] = createSignal("");
+
+function intentSummary(): string {
+  const intent = activeIntent().trim();
+  if (!intent) return "your request";
+  return intent.length > 56 ? `${intent.slice(0, 53)}…` : `“${intent}”`;
+}
+
+export function currentCognition(): CognitionSnapshot {
+  const baseline = COGNITION_BY_CONTEXT[activeContext()];
+  const state = coreState();
+  const live: Record<CoreState, Pick<CognitionSnapshot, "stateLabel" | "activity" | "detail">> = {
+    idle: {
+      stateLabel: "Ready",
+      activity: "Everything is ready",
+      detail: `${currentContext().label} work is loaded and context is preserved. KRIA will wait for your direction.`,
+    },
+    listening: {
+      stateLabel: "Listening",
+      activity: "Listening for your next instruction",
+      detail: "Voice activity is represented locally and remains under your control.",
+    },
+    thinking: {
+      stateLabel: "Reasoning",
+      activity: `Structuring ${intentSummary()}`,
+      detail: "Separating intent, context, constraints, and the safest next step.",
+    },
+    retrieving: {
+      stateLabel: "Retrieving",
+      activity: "Connecting relevant project memory",
+      detail: "Prioritising context that can explain and support the next action.",
+    },
+    executing: {
+      stateLabel: "Executing",
+      activity: "Following the approved plan",
+      detail: "Progress and verification remain visible while the action runs.",
+    },
+  };
+  return { state, ...live[state], ...baseline };
+}

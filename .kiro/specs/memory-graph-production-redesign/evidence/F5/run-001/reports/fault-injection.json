@@ -1,0 +1,102 @@
+{
+  "suite": "V-FAULT-01 / V-AUTH-01 — Fault injection: AuthorityTx all-or-none, commit/publication boundary, DB busy, outbox recovery",
+  "task": "5.3.1",
+  "test_file": "crates/kria-core/tests/memory_graph_v2.rs",
+  "run_command": "cargo test -p kria-core --test memory_graph_v2 -- --nocapture",
+  "status": "PASS",
+  "tests_total": 21,
+  "tests_passed": 21,
+  "tests_failed": 0,
+  "duration_ms": 1410,
+  "timestamp": "2026-07-29T00:00:00Z",
+  "reviewer": "owner-self-review",
+  "requirements": ["V-FAULT-01", "V-AUTH-01", "MGR-033", "MGR-017"],
+  "sections": [
+    {
+      "id": "S1",
+      "name": "All-or-none atomicity — fault injection at every AuthorityTx step",
+      "description": "Drop the transaction without commit at each stage (pre-write, after start event, after completion event, after revision reserved, after outbox enqueued, after idempotency written). All six components (events_v2, audit_records, graph_revisions, derived_outbox, idempotency_results, authority_meta) must be zero / unchanged after each drop.",
+      "tests": [
+        "fault_injection_drop_before_any_write_rolls_back_all",
+        "fault_injection_drop_after_start_event_rolls_back_event",
+        "fault_injection_drop_after_completion_event_rolls_back_all",
+        "fault_injection_drop_after_revision_reserved_rolls_back_revision",
+        "fault_injection_drop_after_outbox_enqueue_rolls_back_outbox",
+        "fault_injection_drop_after_idempotency_write_rolls_back_idempotency",
+        "fault_injection_sql_error_mid_transaction_rolls_back_all",
+        "successful_commit_writes_all_six_components_atomically"
+      ],
+      "passed": 8,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "All-or-none: any pre-commit failure results in zero committed rows across all six components."
+    },
+    {
+      "id": "S2",
+      "name": "Commit success / publication failure — post-commit convergence",
+      "description": "Commit succeeds but the post-commit WakePublisher fails (Noop, dropping wake). Committed truth must be fully recoverable from revisions_since() and outbox pending(). Re-publishing the same wake multiple times must not alter committed rows.",
+      "tests": [
+        "commit_success_noop_publication_truth_recoverable",
+        "commit_success_multiple_failed_publishes_all_recoverable_from_cursor",
+        "commit_success_republished_wake_does_not_alter_committed_rows"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Publication failure cannot alter committed truth; revisions_since + outbox pending provides full recovery."
+    },
+    {
+      "id": "S3",
+      "name": "DB busy state — busy_timeout pragma and concurrent write serialization",
+      "description": "Verify busy_timeout >= 5000ms on the authority connection. Concurrent writes from 8 threads produce exactly 8 distinct revisions without corruption or panics. A write under lock contention eventually succeeds within busy_timeout.",
+      "tests": [
+        "db_busy_timeout_pragma_is_set_on_authority",
+        "db_busy_concurrent_writes_serialize_without_corruption",
+        "db_busy_write_serialized_when_lock_held"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "status": "PASS",
+      "busy_timeout_ms": 5000,
+      "invariant": "busy_timeout >= 5000ms; concurrent writes are serialized, never corrupted or panicked."
+    },
+    {
+      "id": "S4",
+      "name": "Outbox lease/apply failure recovery",
+      "description": "mark_failed with retry_at -> status=pending+attempts++; mark_failed without retry_at -> dead_letter; mark_done -> applied, not in pending(); multiple failures increment attempts correctly; past retry_at item re-appears in pending() for retry.",
+      "tests": [
+        "outbox_mark_failed_schedules_retry_and_stays_pending",
+        "outbox_mark_failed_no_retry_at_dead_letters",
+        "outbox_mark_done_transitions_to_applied",
+        "outbox_multiple_failures_increment_attempts_correctly",
+        "outbox_failed_item_with_past_retry_at_is_eligible_again"
+      ],
+      "passed": 5,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Outbox delivery failures increment attempts, schedule retry, or dead-letter; retry-eligible items re-appear in pending(); mark_done removes from pending()."
+    },
+    {
+      "id": "S5",
+      "name": "Recovery_Mode entry: isolated derived failures",
+      "description": "A failing derived-projection (FTS) does not affect pending outbox items for other targets (vectors, scene). Committed authority rows are completely unaffected by outbox delivery failures.",
+      "tests": [
+        "outbox_failed_target_does_not_affect_other_targets",
+        "committed_truth_stable_despite_outbox_failures"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Derived projection failures are isolated; authority committed rows are never altered by outbox delivery failures."
+    }
+  ],
+  "notes": [
+    "All 21 tests pass using in-memory SQLite (Database::open_in_memory).",
+    "All-or-none atomicity proven at every AuthorityTx stage (S1): drop-without-commit at any step leaves zero committed rows in all six tables.",
+    "Post-commit convergence proven (S2): NoopWakePublisher and re-published wakes never alter committed rows; revisions_since recovers all missed revisions.",
+    "DB busy_timeout=5000ms verified by PRAGMA read-back (S3); 8-thread concurrent write test confirms serialization without corruption.",
+    "Outbox lease/apply failure recovery proven (S4): retry scheduling, dead-lettering, attempt counting, and re-eligibility all correct.",
+    "Isolated derived failures proven (S5): FTS failure does not block vectors/scene; authority truth is stable regardless of projection delivery.",
+    "Owner self-review accepted per .kiro/steering/dev-context.md (single-developer pre-production project)."
+  ]
+}

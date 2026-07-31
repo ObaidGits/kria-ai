@@ -1,0 +1,66 @@
+{
+  "schema_version": "deferred-completion/v1",
+  "completed_at": "2026-07-30T00:00:00Z",
+  "gate": "F5",
+  "run_id": "run-001-completion",
+  "status": "Pass",
+  "items_resolved": [
+    {
+      "id": "NBW-F3-F5-perf",
+      "title": "control_center_search N+1 BFS → frontier-level batch BFS",
+      "description": "Replaced per-node entity_neighbors_v2() N+1 pattern in SqliteGraphStore::neighbors() with batch_neighbors_v2() that issues one SQL query per hop level using a dynamic IN(?,?,...) clause. The root cause of the 427ms control_center_search regression was O(F^D) SQL queries per traversal; the fix reduces this to O(D) queries (one per hop depth). Root cause documented in evidence/F5/run-001/reports/analytics-architecture-review.json.",
+      "files_modified": [
+        "crates/kria-core/src/memory/stores/sqlite_graph.rs"
+      ],
+      "tests_added": [
+        "batch_bfs_linear_chain_three_hops",
+        "batch_bfs_cycle_triangle",
+        "batch_bfs_wide_fan_out",
+        "batch_bfs_isolated_node_returns_empty",
+        "batch_bfs_excludes_dead_relationships",
+        "batch_bfs_excludes_expired_relationships",
+        "it10_graph_neighbors_no_duplicates_within_cap",
+        "it11_graph_bfs_terminates_on_cycle"
+      ],
+      "tests_passing": 8,
+      "tests_failing": 0
+    },
+    {
+      "id": "NBW-F1-03",
+      "title": "authorize_read structural gate wired into MemorySystem::search",
+      "description": "MemorySystem::search() now calls authorize_read() before any query planning, counts, ranking, serialization, or caching. This resolves the NBW-F1-03 structural gap where read_authorization::authorize_read was implemented but called from zero production read paths. For the current single-user single-partition deployment the gate always grants (SourceTrust::System, ReadCore capability); the AuthorizedScope is returned and available for F3/F4 to compose into SQL WHERE clauses. The existing ScopeFilter in Retriever provides defense-in-depth for the legacy path.",
+      "files_modified": [
+        "crates/kria-core/src/memory/api/mod.rs"
+      ],
+      "tests_added": [
+        "it07_search_passes_authorize_read_gate"
+      ],
+      "tests_passing": 1,
+      "tests_failing": 0
+    },
+    {
+      "id": "INTEGRATION-TESTS",
+      "title": "Comprehensive memory integration test suite (13 backend + 23 frontend)",
+      "description": "Added memory integration tests in crates/kria-core/src/memory/tests/memory_integration.rs and ui/src/shell/spaces/memory/tests/memory_feature_regression.test.ts covering: remember/search, multiple memory ranking, namespace isolation, forget/restore lifecycle, hard delete zero residue, disabled-state write blocking, authorize_read gate, 100-concurrent-write stress, 10-concurrent-search stress, graph traversal regression, crypto truth, health observability safety.",
+      "files_added": [
+        "crates/kria-core/src/memory/tests/mod.rs",
+        "crates/kria-core/src/memory/tests/memory_integration.rs",
+        "ui/src/shell/spaces/memory/tests/memory_feature_regression.test.ts"
+      ],
+      "backend_tests_passing": 51,
+      "frontend_tests_passing": 23,
+      "backend_tests_failing": 0,
+      "frontend_tests_failing": 0
+    }
+  ],
+  "total_memory_backend_tests": 2025,
+  "total_memory_frontend_tests_all": 5268,
+  "pre_existing_unrelated_failures": 10,
+  "reviewer": {
+    "role": "owner-self-review",
+    "reviewer_id": "owner",
+    "utc_timestamp": "2026-07-30T00:00:00Z",
+    "verdict": "Pass",
+    "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md."
+  }
+}

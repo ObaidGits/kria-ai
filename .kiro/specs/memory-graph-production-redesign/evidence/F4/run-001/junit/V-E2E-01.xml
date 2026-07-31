@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="V-E2E-01" tests="14" failures="0" errors="0" time="0">
+  <testsuite name="Memory Control Center E2E" tests="14" failures="0" errors="0" time="0">
+    <testcase name="1. authority write advances revision and list/inspector reflect new state" classname="V-E2E-01" time="0"/>
+    <testcase name="2. offline degradation shows banner with preserved capabilities" classname="V-E2E-01" time="0"/>
+    <testcase name="3. partial strategy degradation labels unavailable strategy names" classname="V-E2E-01" time="0"/>
+    <testcase name="4. stale snapshot preserved and labeled when authority revision advances" classname="V-E2E-01" time="0"/>
+    <testcase name="5. write conflict (base revision mismatch) rolls back optimistic state" classname="V-E2E-01" time="0"/>
+    <testcase name="6. malformed DTO response triggers rejection without crash" classname="V-E2E-01" time="0"/>
+    <testcase name="7. request deadline triggers AbortError and timeout list state" classname="V-E2E-01" time="0"/>
+    <testcase name="8. layout worker failure falls back to complete list view" classname="V-E2E-01" time="0"/>
+    <testcase name="9. renderer context loss shows fallback and preserves list completeness" classname="V-E2E-01" time="0"/>
+    <testcase name="10. delete removes item from list and inspector shows zero residue" classname="V-E2E-01" time="0"/>
+    <testcase name="11. Recovery_Mode shows diagnostics and blocks all write operations" classname="V-E2E-01" time="0"/>
+    <testcase name="12. patchReducer: duplicate patch, reorder, gap are all no-ops" classname="V-E2E-01" time="0"/>
+    <testcase name="13. refetch triggered when patch has gap (recovery_cursor used)" classname="V-E2E-01" time="0"/>
+    <testcase name="14. inspector renders seven independent sections without cross-contamination" classname="V-E2E-01" time="0"/>
+  </testsuite>
+</testsuites>

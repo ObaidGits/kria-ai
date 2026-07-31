@@ -10,13 +10,13 @@
  * point.
  *
  * Register roles (design §7):
- *   • Hidden Dock ...... deliberate, COMPLETE, stable navigation (all Spaces).
+ *   • Navigation Rail .. deliberate, COMPLETE, stable navigation (all Spaces).
  *   • Command Palette .. the SEARCHABLE register + owner of search/recent/pinned.
  *   • Contextual Orbit . ambient, PARTIAL, routing-only capability awareness.
  *
  * These are pure/contract-level assertions over the reused palette + router;
  * they duplicate no sibling suite (router.test.ts, navigationCoverage.test.tsx,
- * HiddenDock.test.tsx, ContextualOrbit.test.tsx own their own dimensions) and
+ * NavigationRail.test.tsx and ContextualOrbit.test.tsx own their dimensions,
  * exist to pin the Requirement-14 invariants in one place.
  *
  * Requirements: 14.1, 14.2, 14.3, 14.4.

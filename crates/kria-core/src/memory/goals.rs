@@ -11,6 +11,18 @@
 //! Priority is Memory-Worth-aware at read time: [`GoalStore::planner_context`]
 //! and [`GoalStore::active_goals`] order by `(priority, confidence)` so the
 //! planner naturally prefers high-priority, high-confidence goals.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::goal`](
+//! crate::memory::authority::CommandCandidate::goal) is the typed
+//! command-candidate scaffolding (task F1.5.1) this store's goal-creation
+//! writes will route through once a concrete `TxSemanticStore` builder
+//! persists a `goals_v2` row (F2; goal *status transitions* are a separate
+//! preview-gated `Correct` command, F1.7). Until that builder exists, this
+//! store remains the live persistence path — routing through the
+//! [`AuthorityCommandBus`](crate::memory::authority::AuthorityCommandBus) today
+//! would silently drop goal content, since the bus's only available semantic
+//! store (`DeferredSemanticStore`) writes no concrete row. See the ledger in
+//! [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 
@@ -22,6 +34,12 @@ use crate::memory::error::{MemoryResult, StorageError};
 use crate::memory::ids::new_id;
 
 /// Goal lifecycle status (superset of the schema default `candidate`).
+///
+/// **Superseded by** the canonical v2 [`crate::memory::model::GoalStatus`]
+/// (a different closed set: no `failed`/`abandoned`; adds `conflicted`/`stale`/
+/// `superseded`/`deleted`). Retained as the live `goals`-table status until the
+/// F1.5 write cutover, which remaps `failed`/`abandoned` → `deleted`; see the
+/// ledger in [`crate::memory::model::legacy_mapping`] (task F2.1.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GoalStatus {
     /// Proposed, not yet actively pursued.
@@ -79,6 +97,12 @@ impl GoalStatus {
 }
 
 /// A goal record (mirror of the authority `goals` row + hierarchy).
+///
+/// **Superseded by** [`crate::memory::model::Goal`] (`goals_v2`) +
+/// [`crate::memory::model::GoalProgress`] (canonical v2 goal). Retained as the
+/// live goals persistence/read model until the F1.5 write cutover + F3
+/// retrieval-on-v2; see the ledger in [`crate::memory::model::legacy_mapping`]
+/// (task F2.1.6).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
     pub id: Uuid,

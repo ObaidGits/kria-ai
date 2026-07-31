@@ -1,0 +1,272 @@
+[
+  {
+    "id": "2b33b327-4897-60cc-9037-7d43eec9bd34",
+    "record_kind": "memory",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "work",
+      "owner": "owner-alpha",
+      "scope": "team",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-00",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-00",
+    "content_hash": "81e4b937cbbc293356127ea5f7931a57dc4706bcde65fae408246be172cd6cdf"
+  },
+  {
+    "id": "176e977b-d65f-26ff-ac8f-afc5c55bffec",
+    "record_kind": "summary",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "shared",
+      "owner": "owner-alpha",
+      "scope": "public",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-01",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-01",
+    "content_hash": "adb048bea47ba04170e0503dd49e00660d27947c318a0cca563a6fdf379d1a9c"
+  },
+  {
+    "id": "53310b2b-984b-0b4b-b37a-5a8d9758822f",
+    "record_kind": "skill",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "work",
+      "owner": "owner-alpha",
+      "scope": "team",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-02",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-02",
+    "content_hash": "116fef86b8b3d84bf9fe02d8d85029605d45c4ef872f80583506948d8389f1bb"
+  },
+  {
+    "id": "a41c68a6-a675-d593-2876-adb89a28785a",
+    "record_kind": "rule",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "work",
+      "owner": "owner-alpha",
+      "scope": "public",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-03",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-03",
+    "content_hash": "8b8584a41f8fbd41ca0062e4dd06f173d768bc2e3e7c6e88e17907b2ef5cfc1f"
+  },
+  {
+    "id": "906dc5f9-9514-6366-4b54-1078504e80de",
+    "record_kind": "entity",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "personal",
+      "owner": "owner-beta",
+      "scope": "private",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-04",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-04",
+    "content_hash": "2014aacb601e1cd0309ccf8fc536717c5c8dea860c28171d745b79ae14aae5e6"
+  },
+  {
+    "id": "fe5328c2-7dbb-9ee6-d8da-a213d862c744",
+    "record_kind": "alias",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "shared",
+      "owner": "owner-beta",
+      "scope": "private",
+      "sensitivity": 0
+    },
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "label": "synthetic-public-05",
+    "authorized_for_observer": true,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 shared record :: synthetic-public-05",
+    "content_hash": "fd3a26bfdb75d258ac5a080adf473ce906d7defb6aadc9cd7ef29ba237d03405"
+  },
+  {
+    "id": "b6af81cb-e01c-4a3c-661a-3ec09d0d42c0",
+    "record_kind": "memory",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "shared",
+      "owner": "owner-beta",
+      "scope": "public",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-label-medical-note",
+    "authorized_for_observer": false,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-label-medical-note",
+    "content_hash": "f14363ad2b8181db9f45ec65c4841a14b536478e21ffefdee6603281676f8a20"
+  },
+  {
+    "id": "7a29e3fb-e26e-b518-e1fa-873caf328e39",
+    "record_kind": "entity",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "work",
+      "owner": "owner-beta",
+      "scope": "private",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-identity",
+    "authorized_for_observer": false,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-identity",
+    "content_hash": "c0de61e0b4e0c9f5b327650c1a29bfb880a69d6ff4cd9051798902ae17cfacd9"
+  },
+  {
+    "id": "a35af8ba-ca37-dac5-7953-da9073cc80d5",
+    "record_kind": "memory",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "shared",
+      "owner": "owner-beta",
+      "scope": "public",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-count-0",
+    "authorized_for_observer": false,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-count-0",
+    "content_hash": "879ba5d6a4092d68cb4f3aed9cf273a885fbeae71c4e5928299e0d694adc5e80"
+  },
+  {
+    "id": "22a6027a-c1e2-bb6e-c84c-6fd8583bfc19",
+    "record_kind": "memory",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "work",
+      "owner": "owner-alpha",
+      "scope": "team",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-count-1",
+    "authorized_for_observer": false,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-count-1",
+    "content_hash": "ebff166783450fa9bf49611c5d5d836fc043c28800ef7b3b093ef659229404e2"
+  },
+  {
+    "id": "e87761b5-7298-73d2-c390-2bf9e0bc17ae",
+    "record_kind": "memory",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "shared",
+      "owner": "owner-beta",
+      "scope": "team",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-topology",
+    "authorized_for_observer": false,
+    "valid_from": "2024-01-01T00:00:00Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-topology",
+    "content_hash": "c6225b6d577caf6e4287308dcfe8939f633c6d6190585dcd2b62c3762b60ba4e"
+  },
+  {
+    "id": "3838b5e8-ea87-9698-b64a-aca8d97873f5",
+    "record_kind": "episode",
+    "truth_state": "Current",
+    "memory_mode": "Permanent",
+    "policy": {
+      "namespace": "personal",
+      "owner": "owner-beta",
+      "scope": "public",
+      "sensitivity": 3
+    },
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "label": "synthetic-protected-timing",
+    "authorized_for_observer": false,
+    "valid_from": "2024-03-15T04:05:06Z",
+    "valid_until": "2025-01-01T00:00:00Z",
+    "content": "synthetic mg-policy-pairs-v2 protected record :: synthetic-protected-timing",
+    "content_hash": "987c3f370f82903bdebafcc98a0487de2c2e91640872c67c6cadc8527c9d7e17"
+  }
+]

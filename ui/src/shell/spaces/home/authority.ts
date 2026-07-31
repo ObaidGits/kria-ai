@@ -14,7 +14,7 @@
  *   • the Focus engine (`homeFocusStore`) is a pure read-model that emits chips
  *     of kind `"stage" | "route"` — never `"send"`/`"execute"` — which this
  *     module classifies as `staged`/`route`, never `auto-execute`.
- *   • navigation is owned by the user / palette / Hidden Dock (Phase 6); the
+ *   • navigation is owned by the user / palette / Navigation Rail (Phase 6); the
  *     Focus engine never calls `navigate` (verified by the static guardrail
  *     lint), which this module models as `NavSource` never being `"ai"`.
  *
@@ -129,7 +129,7 @@ export function resolveConflict(claims: AuthorityClaims): AuthorityActor | null 
 /**
  * Where a navigation command legitimately originates. Navigation is owned by
  * the user and the surfaces the user drives directly — the Command Palette
- * (searchable authority), the Hidden Dock (deliberate), a message action, or a
+ * (searchable authority), the Navigation Rail (deliberate), a message action, or a
  * `route` chip the user clicked. Crucially it is NEVER `"ai"`/`"focus-engine"`:
  * the AI read-model may *declare a routing target*, but only an explicit user
  * gesture executes navigation.
@@ -137,7 +137,7 @@ export function resolveConflict(claims: AuthorityClaims): AuthorityActor | null 
 export type NavSource =
   | "user"
   | "palette"
-  | "dock"
+  | "navigation-rail"
   | "message-action"
   | "chip-route"
   | "ai"
@@ -147,7 +147,7 @@ export type NavSource =
 export const USER_OWNED_NAV_SOURCES: readonly NavSource[] = [
   "user",
   "palette",
-  "dock",
+  "navigation-rail",
   "message-action",
   "chip-route",
 ] as const;

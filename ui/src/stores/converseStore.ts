@@ -283,6 +283,7 @@ const [runtimeError, setRuntimeError] = createSignal<string | null>(null);
 const [threadSearchQuery, setThreadSearchQuery] = createSignal("");
 const [threadSearchHits, setThreadSearchHits] = createSignal<ThreadSearchHit[]>([]);
 const [searchingThreads, setSearchingThreads] = createSignal(false);
+const [deletingThreadId, setDeletingThreadId] = createSignal<string | null>(null);
 const [exportFormat, setExportFormat] = createSignal<ConversationExportFormat>("markdown");
 const [exportingConversation, setExportingConversation] = createSignal(false);
 
@@ -309,6 +310,11 @@ interface RawHistoryMessage {
   timestamp?: string;
   tool_name?: string | null;
   tool_result?: string | null;
+}
+
+interface DeleteSessionResult {
+  deleted_session_id: string;
+  replacement_session_id: string | null;
 }
 
 let runtimeSubscriptions: Unsubscribe[] = [];
@@ -489,6 +495,70 @@ function setThreadArchived(threadId: string, archived: boolean): Promise<boolean
 
 function setThreadTemporary(threadId: string, temporary: boolean): Promise<boolean> {
   return setThreadFlag(threadId, "temporary", temporary);
+}
+
+async function deleteThread(threadId: string): Promise<boolean> {
+  if (!threadId || deletingThreadId()) return false;
+  const deletingActiveThread = activeThreadId() === threadId;
+  const activeGuiSession = activeGuiCognitionSession();
+  if (deletingActiveThread && (thinking() || activeGuiSession?.sessionId === threadId)) {
+    actionNotification("info", "Stop the active response or desktop task before deleting this chat.");
+    return false;
+  }
+
+  setDeletingThreadId(threadId);
+  try {
+    const result = await bridgeInvoke<DeleteSessionResult>(
+      "delete_session",
+      { sessionId: threadId },
+      { timeoutMs: 15_000 },
+    );
+    if (!result.ok) {
+      actionNotification("error", `Couldn't delete conversation: ${result.message}`);
+      return false;
+    }
+
+    setThreads((current) => current.filter((thread) => thread.id !== threadId));
+    setThreadSearchHits((current) => current.filter((hit) => hit.sessionId !== threadId));
+    setDraftMap((current) => {
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+    persistDrafts();
+    if (newThreadIntentId() === threadId) setNewThreadIntentId(null);
+
+    if (deletingActiveThread) {
+      setActiveThreadIdSignal(null);
+      setMessages([]);
+      setWorkBlocks([]);
+      setCurrentTurnId(null);
+      setContextRail([]);
+      setComposerDraft({ ...DEFAULT_DRAFT });
+      clearGuiCognitionSession();
+      eventBus.emit("converse:thread-switched", { threadId: "" });
+    }
+
+    let refreshed: Thread[] = [];
+    try {
+      refreshed = await loadThreads();
+    } catch (error) {
+      actionNotification(
+        "error",
+        `Chat was deleted, but the thread list could not refresh: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (deletingActiveThread) {
+      const replacementId = result.data.replacement_session_id ?? refreshed[0]?.id ?? null;
+      if (replacementId) await activateThread(replacementId);
+    }
+
+    actionNotification("success", "Chat deleted.");
+    return true;
+  } finally {
+    setDeletingThreadId(null);
+  }
 }
 
 function toolResultText(value: unknown): string {
@@ -1490,6 +1560,7 @@ export const converseStore = {
   threadSearchQuery,
   threadSearchHits,
   searchingThreads,
+  deletingThreadId,
   exportFormat,
   exportingConversation,
   activeGuiCognitionSession,
@@ -1509,6 +1580,7 @@ export const converseStore = {
   setThreadPinned,
   setThreadArchived,
   setThreadTemporary,
+  deleteThread,
   setExportFormat,
   exportActiveConversation,
   cancelGuiCognitionTurn,

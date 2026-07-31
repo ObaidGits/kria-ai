@@ -47,7 +47,7 @@ import {
   type Accessor,
 } from "solid-js";
 import { converseStore, shellStore } from "../../stores";
-import type { ContextRailItem } from "../../stores/converseStore";
+import type { ContextRailItem, Thread } from "../../stores/converseStore";
 import { nonEmpty } from "../../stores/currentWorkSummary";
 import { resolveFactLink, activateFactLink } from "../capabilityLinks";
 import { BOUNDED, BOUNDED_CLAMP_2, BOUNDED_CLAMP_3, boundedTitle } from "../boundedText";
@@ -57,7 +57,7 @@ import {
 } from "../../stores/guiCognitionSession";
 import { GuiCognitionPanel } from "../../components/GuiCognitionPanel";
 import { Icon } from "../../components/Icon";
-import { IconButton, Menu, type MenuItem } from "../../kit";
+import { Confirm, IconButton, Menu, type MenuItem } from "../../kit";
 import { OverflowControl } from "../OverflowControl";
 import { controlTier, partitionControls, type TieredControl } from "../controlPriority";
 import MessageStream from "./converse/MessageStream";
@@ -294,6 +294,7 @@ export default function ConverseSpace() {
     return converseStore.emptyStateClass() !== "cold-start";
   });
   const [showArchived, setShowArchived] = createSignal(false);
+  const [pendingDelete, setPendingDelete] = createSignal<Thread | null>(null);
   let threadSearchTimer: ReturnType<typeof setTimeout> | undefined;
   let converseRoot: HTMLElement | undefined;
   let focusedLane: string | undefined;
@@ -594,6 +595,15 @@ export default function ConverseSpace() {
                         aria-pressed={thread.archived}
                         onClick={() => void converseStore.setThreadArchived(thread.id, !thread.archived)}
                       />
+                      <IconButton
+                        icon="trash-2"
+                        variant="danger"
+                        label={`Delete ${thread.title}`}
+                        disabled={converseStore.deletingThreadId() !== null
+                          || (converseStore.activeThreadId() === thread.id
+                            && (converseStore.thinking() || guiSessionActive()))}
+                        onClick={() => setPendingDelete(thread)}
+                      />
                     </div>
                   </div>
                 )}
@@ -822,6 +832,20 @@ export default function ConverseSpace() {
           </div>
         </div>
       </Show>
+
+      <Confirm
+        open={pendingDelete() !== null}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        title="Delete chat?"
+        message={`“${pendingDelete()?.title ?? "This chat"}” and its conversation history will be permanently deleted. KRIA memories are managed separately.`}
+        confirmLabel="Delete chat"
+        cancelLabel="Keep chat"
+        risk="danger"
+        onConfirm={() => {
+          const thread = pendingDelete();
+          if (thread) void converseStore.deleteThread(thread.id);
+        }}
+      />
     </section>
   );
 }

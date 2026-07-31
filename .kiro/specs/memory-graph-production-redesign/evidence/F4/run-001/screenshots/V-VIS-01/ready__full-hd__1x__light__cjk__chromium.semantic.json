@@ -1,0 +1,25 @@
+{
+  "caseId": "ready__full-hd__1x__light__cjk__chromium",
+  "capturedAt": "2026-07-29T06:58:32.839Z",
+  "targetState": "ready",
+  "items": [],
+  "itemCount": 0,
+  "degradation": {
+    "present": false
+  },
+  "recovery": {
+    "present": false
+  },
+  "focus": {
+    "focusedTag": "button",
+    "focusedVisible": true
+  },
+  "legend": [],
+  "graph": {
+    "canvasPresent": false,
+    "fallbackPresent": false,
+    "fallbackLabel": null
+  },
+  "spacePresent": true,
+  "violations": []
+}

@@ -1,0 +1,26 @@
+{
+  "role": "security-privacy",
+  "status": "owner-self-review",
+  "reviewer": "spec-owner",
+  "reviewedAt": "2026-07-28T17:07:33Z",
+  "gate": "F2",
+  "runId": "run-001",
+  "manifestHash": null,
+  "verdict": "Pass",
+  "reviewMethod": "owner-self-review — pre-production single-developer project per dev-context steering",
+  "securityFindings": [
+    "PolicyPartition (namespace/scope/sensitivity/owner) is carried on every semantic record type and enforced through the full SQL↔Rust↔API round-trip — confirmed by f2_1_5 PBT with 128 cases per type.",
+    "Sensitivity level (0–3) stored as SQL integer with CHECK constraint; round-trips without loss in all PBT cases.",
+    "shred_key_id and content_cipher (encrypted payload fields) are Option<String>/Option<Vec<u8>> only — neither leaks through the serde JSON API path (PBT confirms None/Some arms both round-trip correctly).",
+    "No new unfiltered read path introduced by F2 work — NBW-F1-03 from F1 manifest is unchanged and still applies.",
+    "Paired-world policy tests (f1_9_2_evidence_slices::paired_world_*) continue to pass, confirming policy-partition isolation is not regressed.",
+    "injection_or_1_equals_1 test in fts5_validation_tests passes — SQL injection through FTS5 MATCH is properly parameterized.",
+    "No user text reaches SQL as a raw string in any F2 semantic model path."
+  ],
+  "privacyFindings": [
+    "incognito_leaves_no_trace_across_restart passes — incognito-mode records do not survive restart.",
+    "memory::write_policy::tests::incognito_persists_nothing passes.",
+    "No new export/import paths introduced in F2 that could bypass policy filtering — V-IO-01 full path deferred to CMD-MG-EVAL (NBW-F2-01)."
+  ],
+  "note": "Per spec validation.md §6: the author of an implementation may not be the sole Security/Privacy approver for production gate. This self-review is explicitly acceptable for pre-production single-developer closure per dev-context steering ('No heavy ceremony'). A full independent security review is required before F5 production release gate."
+}

@@ -1,0 +1,27 @@
+.kria-knowledge {
+  width: 100%;
+  min-width: 0;
+  min-height: 720px;
+  height: min(820px, calc(100vh - 220px));
+  overflow: hidden;
+  border: 1px solid var(--color-focus-orbit-hair);
+  border-radius: 12px;
+  background: var(--color-focus-orbit-bg);
+}
+
+.kria-knowledge__sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-height: 850px) {
+  .kria-knowledge {
+    min-height: 620px;
+    height: calc(100vh - 190px);
+  }
+}

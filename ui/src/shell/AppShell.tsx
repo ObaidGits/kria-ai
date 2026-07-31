@@ -1,6 +1,6 @@
 /**
  * AppShell — the global shell (Req 1.1). Composes the shell regions:
- *   PresenceBar · Dock · SpaceRouter · InspectorHost · StatusLine
+ *   PresenceBar · NavigationRail · SurfaceHost · InspectorHost · StatusLine
  * plus the one-at-a-time ModalHost (Req 1.6).
  *
  * Responsibilities:
@@ -43,8 +43,7 @@ import {
   type Space,
 } from "./router";
 import { PresenceBar } from "./PresenceBar";
-import { Dock } from "./Dock";
-import { SpaceRouter } from "./SpaceRouter";
+import { NavigationRail } from "./NavigationRail";
 import { InspectorHost } from "./InspectorHost";
 import { StatusLine } from "./StatusLine";
 import { ModalHost } from "./ModalHost";
@@ -71,7 +70,6 @@ import { initWindowModeManager, disposeWindowModeManager } from "../windowing/wi
 import { CompanionFallbackHost } from "../windowing/MiniCompanions";
 import { CompanionEmber } from "./spaces/home/CompanionEmber";
 import { SetupExperience } from "./setup/SetupExperience";
-import { isFeatureEnabled } from "../featureFlags";
 import SurfaceHost from "../app/SurfaceHost";
 import "./AppShell.css";
 
@@ -85,15 +83,6 @@ export interface AppShellProps {
 }
 
 export function AppShell(props: AppShellProps) {
-  // Command Center homepage (frontend-only, static demo) — full-screen HUD
-  // surface that replaces the standard shell when the flag is ON (default).
-  // Early return before any shell effects register so the demo surface is
-  // fully self-contained. Flip `home.command-center` OFF (localStorage/env) to
-  // restore the normal presence shell.
-  if (isFeatureEnabled("home.command-center")) {
-    return <SurfaceHost />;
-  }
-
   const [provisioningResolved, setProvisioningResolved] = createSignal(false);
 
   // Restore the last active Converse thread from the persisted session BEFORE
@@ -315,16 +304,11 @@ export function AppShell(props: AppShellProps) {
       <a class="kria-skip-link" href="#space-root">Skip to workspace</a>
       <PresenceBar onOpenApprovals={openApprovals} onOpenNotifications={openNotifications} />
       <div class="kria-shell__body">
-        {/* Router is the sole authority for the rendered Space (Req 7.10 /
-            design §9, §20.1). The Dock navigates via navigate(); the effect
-            above mirrors currentRoute().space into shellStore.activeSpace.
-
-            One unified, always-present sidebar across EVERY Space (matching the
-            homepage sidebar). The former hover-reveal HiddenDock on the Converse
-            home is retired so navigation is identical everywhere — no per-Space
-            reveal behaviour. Same canonical 7-Space Dock; routing unchanged. */}
-        <Dock />
-        <SpaceRouter />
+        {/* One shell-owned rail serves Home, every canonical Space, Command Deck,
+            and Developer Observatory. SurfaceHost switches the middle region;
+            SpaceRouter remains the sole Space authority inside `workspace`. */}
+        <NavigationRail />
+        <SurfaceHost />
         <InspectorHost />
       </div>
       <StatusLine />

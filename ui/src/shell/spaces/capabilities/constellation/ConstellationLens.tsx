@@ -37,7 +37,7 @@ import { ConstellationFallback } from "./ConstellationFallback";
 import { ConstellationCanvas3D } from "./ConstellationCanvas3D";
 import { IconButton } from "../../../../kit";
 import { openDetachedSurface, windowPresentation } from "../../../../windowing/detachableSurfaces";
-import "../../memory/graph/KnowledgeGraphLens.css";
+import "../../memory/graph/kria-graph.css";
 import "./constellation.css";
 
 export default function ConstellationLens() {

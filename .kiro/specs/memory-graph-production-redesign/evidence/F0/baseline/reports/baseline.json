@@ -1,0 +1,305 @@
+{
+  "schema": "memory-graph.baseline/v1",
+  "task": "0.5.2 Capture focused current search/graph/write/startup latency, query shape, CPU/RAM/frame/idle behavior, security exposure, accessible route, and screenshots with explicit known limitations.",
+  "gate": "F0",
+  "run_id": "baseline",
+  "generated_at_utc": "2026-07-22T19:53:30Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": [
+    "MGR-001",
+    "MGR-027",
+    "MGR-029",
+    "MGR-048"
+  ],
+  "design_refs": [
+    "validation.md §3 (reference-hardware ID + warm/cold protocol)",
+    "validation.md V-PERF-01 (>=30 warm iterations + separate cold, percentile reporting)",
+    "design.md §1 (current-vs-target; SVG active / 3D dormant / model+SBOM incomplete)"
+  ],
+  "predecessor_artifacts": [
+    "crates/kria-eval/src/memory_graph/baseline.rs (0.5.1 ReferenceHardwareId + BaselineEnvironment + SampleProtocol)",
+    "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2 read/query-shape + security findings)",
+    "evidence/F0/f0-inventory/reports/ui-paths.json (0.3.4 accessible route + broken SVG renderer)",
+    "evidence/F0/f0-inventory/reports/model-license-inventory.json (0.3.5 model artifact not vendored)"
+  ],
+  "method": "Real latencies captured on the reference laptop with an in-memory SQLite authority and the live embedder. The all-MiniLM-L6-v2 ONNX artifact is NOT vendored in-repo (model-license-inventory.json U-1) but MAY be present at runtime under ~/.kria/models/embeddings; when absent OnnxEmbedder degrades to Unavailable and search falls back to the FTS keyword floor. The strategy actually exercised in THIS run is recorded in measurement_substrate.retrieval_strategy_observed (embedder_onnx_loaded reflects whether a real ONNX model was loaded). Each metric follows the 0.5.1 SampleProtocol: WARMUP_ITERATIONS warm-ups discarded, then SAMPLE_ITERATIONS warm samples summarized to p50/p95/p99 (nearest-rank). Measurements that require a broad corpus/build, a GUI, or a screenshot are recorded Unavailable with cause + the exact command that would produce them. No number is fabricated.",
+  "invariants_applied": [
+    "Baseline numbers are DESCRIPTIVE current-state, never acceptance targets (tasks.md F0.5).",
+    "Correctness accompanies every latency number (correctness_note per metric).",
+    "No broad 100k generation/build performed in F0 (mg-release-v2 materialization deferred to F3/F5).",
+    "Unavailable measurement recorded with cause + exact command; never replaced by an estimate.",
+    "Current SVG/3D/model/security limitations remain explicit (known_limitations)."
+  ],
+  "reference_hardware_id": "mg-ref-hw-f8193487d9ba1dc2",
+  "sample_protocol": {
+    "warmup_iterations": 5,
+    "sample_iterations": 30,
+    "percentiles": [
+      50.0,
+      95.0,
+      99.0
+    ],
+    "measurement_protocol": "Warm",
+    "note": "Warm-phase only. A separate cold-start protocol run (fresh process, cold page cache) is Unavailable in this slice — see unavailable_measurements.cold_start."
+  },
+  "environment": {
+    "reference_hardware": {
+      "hardwareId": "mg-ref-hw-f8193487d9ba1dc2",
+      "cpu": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "ram": "15.3 GiB",
+      "gpu": null,
+      "storage": null,
+      "display": null,
+      "dpi": null
+    },
+    "build_environment": {
+      "os": "Ubuntu 24.04.4 LTS",
+      "kernel": "7.0.0-28-generic",
+      "webkitGtk": null,
+      "runtime": "rustc (pinned )",
+      "buildProfile": "debug",
+      "lockfileHashes": {},
+      "binaryHashes": {}
+    },
+    "environment_state": {
+      "powerState": "AC",
+      "thermalState": null,
+      "networkState": "Unknown",
+      "protocol": "Warm"
+    },
+    "accessibility": {
+      "locale": "en_US.UTF-8",
+      "theme": null,
+      "input": null,
+      "assistiveTech": null
+    }
+  },
+  "measurement_substrate": {
+    "authority": "in-memory SQLite (:memory:) via MemorySystem::open_for_test",
+    "embedder": "OnnxEmbedder(minilm_v1)",
+    "embedder_onnx_loaded": true,
+    "retrieval_strategy_observed": "hybrid (vector + FTS)",
+    "corpus_records": 8,
+    "note": "In-memory authority avoids disk fsync/WAL variance; production disk-backed authority (synchronous=FULL) latency is NOT represented here and is Unavailable at F0 scale — see unavailable_measurements.disk_authority_scale."
+  },
+  "latency_metrics": {
+    "startup_open": {
+      "status": "measured",
+      "unit": "ms",
+      "what": "MemorySystem::open_for_test: schema create/verify + composition-root wiring for a fresh in-memory authority.",
+      "samples": 30,
+      "p50": 118.739,
+      "p95": 133.403,
+      "p99": 145.328,
+      "min": 115.164,
+      "max": 145.328,
+      "correctness_note": "Correctness: each open returns a usable MemorySystem (subsequent seed/search/flush succeed in the same run). Descriptive only; not the production Tauri/Axum cold-start path."
+    },
+    "write_remember": {
+      "status": "measured",
+      "unit": "ms",
+      "what": "MemorySystem::remember(WriteCandidate::user): governed synchronous fast-path write (event persist + enrichment enqueue).",
+      "samples": 30,
+      "p50": 0.092,
+      "p95": 0.101,
+      "p99": 0.131,
+      "min": 0.072,
+      "max": 0.131,
+      "correctness_note": "Correctness: every remember returned Ok(WriteDecision) (no write rejected). Warm in-memory path; excludes enrichment/embedding backlog and disk fsync."
+    },
+    "search_fts": {
+      "status": "measured",
+      "unit": "ms",
+      "what": "MemorySystem::search(query, None): the hybrid retriever (vector + FTS keyword floor). The strategy actually exercised is recorded in measurement_substrate.retrieval_strategy_observed.",
+      "samples": 30,
+      "p50": 7.78,
+      "p95": 8.868,
+      "p99": 9.783,
+      "min": 7.345,
+      "max": 9.783,
+      "correctness_note": "Correctness: all searches returned Ok over the hybrid path (ONNX embedder loaded on this host). memory_bench (cargo test -p kria-eval memory_bench) independently asserts hit_rate>=0.8/mrr>=0.6 on this corpus, so returned results are relevant. ctx=None => static default ScopeFilter (no per-caller policy) — see security_exposure."
+    },
+    "graph_entity_search": {
+      "status": "measured",
+      "unit": "ms",
+      "what": "MemorySystem::graph_search_entities(q): 'display_name/alias LIKE %q% LIMIT 50' over the entities table (SqliteGraphStore::search_entities).",
+      "samples": 30,
+      "p50": 0.025,
+      "p95": 0.026,
+      "p99": 0.03,
+      "min": 0.025,
+      "max": 0.03,
+      "correctness_note": "Correctness: query returns Ok. NOTE the seeded corpus performs little entity extraction, so the entities table is near-empty; this is a lower-bound query-dispatch latency, NOT representative of a populated graph. Representative graph traversal is Unavailable — see unavailable_measurements.graph_traversal_representative."
+    }
+  },
+  "unavailable_measurements": {
+    "cold_start": {
+      "status": "unavailable",
+      "cause": "This slice measures warm steady-state only. A cold-start baseline (fresh OS process, cold page cache, disk-backed authority open) requires a separate harness invocation with cache-drop privileges not exercised in F0.",
+      "command": "cargo run -p kria-eval --bin mg-baseline -- --run-id baseline-cold  # after: sync && echo 3 | sudo tee /proc/sys/vm/drop_caches (privileged; not run in F0)"
+    },
+    "disk_authority_scale": {
+      "status": "unavailable",
+      "cause": "Latency was captured against an in-memory (:memory:) SQLite authority to avoid fsync/WAL variance. Disk-backed authority latency at synchronous=FULL is not represented and no persistent-DB baseline was run in F0.",
+      "command": "cargo run -p kria-eval --bin mg-baseline -- --run-id baseline-disk  # (requires a --db-path option not implemented at F0)"
+    },
+    "graph_traversal_representative": {
+      "status": "unavailable",
+      "cause": "graph_neighbors/centrality/communities latency over a REPRESENTATIVE graph needs a populated entities/relationships topology (mg-medium-v2 / mg-release-v2 100k). Broad 100k generation/build is explicitly not required in F0 (tasks.md F0.5), and the seeded corpus performs negligible entity extraction, so representative traversal cannot be measured cheaply here.",
+      "command": "cargo test -p kria-eval memory_graph::fixtures -- --ignored generate_mg_release_v2  # then a graph-bench harness (deferred to F3/F5 per read-paths.json target_gate)"
+    },
+    "scale_100k_latency": {
+      "status": "unavailable",
+      "cause": "100k-authority search/graph/write latency is an F3/F5 scale-proof measurement; F0 must not perform the broad build.",
+      "command": "cargo test -p kria-eval memory_bench  # extended with mg-release-v2 (0x4D475204) at F5 (see validation.md V-PERF-01 / V-SCALE)"
+    }
+  },
+  "query_shape": {
+    "source": "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2)",
+    "search_fts": {
+      "sql": "bm25(memories_fts) MATCH ? [AND namespace = ? only if exactly one namespace] ORDER BY bm25 LIMIT k",
+      "plan_characteristics": "FTS5 MATCH + bm25 rank + LIMIT k. Ranking and top-k truncation happen BEFORE scope/sensitivity policy (memories_fts carries only namespace, not scope/sensitivity). Retriever re-applies filter.allows()/state gate POST-fusion (defense-in-depth).",
+      "finding_ref": "R-fts-query / R-retriever-search (MGR-004.4 policy-after-rank leak; MGR-006 count semantics)"
+    },
+    "graph_neighbors": {
+      "sql": "SELECT * FROM relationships WHERE source_id = ?1 OR target_id = ?1  (BFS per hop, visited-set cycle guard, hops clamped to MAX_HOPS_CAP=3)",
+      "plan_characteristics": "Iterative BFS issuing one incident-edge query per frontier node + get_entity per hop. NO scope/sensitivity/namespace filter applied at any hop.",
+      "finding_ref": "R-graph-neighbors / R-graph-relationships (MGR-007 unbounded/unversioned; no Graph_Revision, no query hash, no window metadata)"
+    },
+    "graph_centrality": {
+      "sql": "SELECT e.id, e.display_name, COUNT(edges) FROM entities LEFT JOIN relationships (valid_until IS NULL) GROUP BY e.id ORDER BY degree DESC LIMIT ?1",
+      "plan_characteristics": "Full-scan aggregate over entities/active edges, recomputed each call (no revision-keyed analytics cache). LIMIT truncates pre-policy; algorithm name 'degree' not emitted in payload.",
+      "finding_ref": "R-graph-centrality (MGR-011.3 metadata gap; MGR-004 policy gap; MGR-009.4 no cache)"
+    },
+    "graph_entity_search": {
+      "sql": "SELECT ... FROM entities WHERE display_name LIKE %q% OR alias LIKE %q% LIMIT 50",
+      "plan_characteristics": "Substring LIKE scan + hard LIMIT 50, no scope/sensitivity filter; separate from the full-corpus retriever.",
+      "finding_ref": "R-graph-search-entities (MGR-006.1 wants entities/aliases inside one ranked search)"
+    },
+    "explain_by_id": {
+      "sql": "SELECT memory JOIN events by id + derived_from/contradicts/access history",
+      "plan_characteristics": "Direct by-id read of ANY memory (including secret) with NO scope/sensitivity/namespace check.",
+      "finding_ref": "R-explain-memory (MGR-004 by-id policy bypass)"
+    },
+    "result_cache": "NONE across all read paths — every search/graph/analytics call is recomputed (no result cache; adaptive RRF weights are global per query-class, not policy/identity/revision keyed)."
+  },
+  "cpu_ram_frame_idle": {
+    "process_cpu_ram": {
+      "status": "unavailable",
+      "cause": "Per-process CPU% / RSS sampling for the capture harness is not instrumented in this backend bin (no cross-platform sampler wired). System RAM total is captured in environment.reference_hardware.ram.",
+      "command": "/usr/bin/time -v cargo run -p kria-eval --bin mg-baseline  # coarse process RSS/CPU (not integrated into the artifact at F0)"
+    },
+    "frame": {
+      "status": "unavailable",
+      "cause": "Frame-time (paint/layout-shift/long-task) telemetry is a GUI-only signal from the WebKitGTK renderer. The active MemoryUniverse SVG renderer does not type-check at HEAD (ui-paths.json compile_status TS2304 timeline/setTimeline), so the Playwright frame baseline cannot run deterministically.",
+      "command": "cd ui && npx playwright test e2e/memory-graph-baseline.spec.ts --project=webkit  # BLOCKED: fix MemoryUniverse.tsx / MemoryGraphFallback.tsx typecheck first"
+    },
+    "idle": {
+      "status": "unavailable",
+      "cause": "Idle-behavior (mutation/GC/event counters at rest) is captured by the same blocked Playwright baseline spec; unavailable for the same renderer-typecheck reason.",
+      "command": "cd ui && npx playwright test e2e/memory-graph-baseline.spec.ts --project=webkit"
+    }
+  },
+  "security_exposure": {
+    "source": "evidence/F0/f0-inventory/reports/read-paths.json (0.3.1/0.3.2 security_note)",
+    "descriptive": true,
+    "exposures": [
+      "Server memory routes (crates/kria-server/src/memory_routes.rs) are mounted under CorsLayer::permissive() (lib.rs:90) — permissive CORS on all /memory/* read routes.",
+      "auth.rs passes through requests with NO Authorization header — the memory read routes are effectively unauthenticated; if the server binds non-loopback, full-corpus memory/graph/analytics/explain are exposed.",
+      "NO Effective_Policy engine mediates reads. The only read-side gate is a caller-supplied ScopeFilter (RetrievalCtx), never derived from an authenticated caller identity/owner.",
+      "All live desktop/server search commands pass ctx=None => static default ScopeFilter (include_secret=false, no ns/scope restriction) — 'policy' is a constant, not MGR-004.2 most-restrictive Effective_Policy.",
+      "Graph traversal, centrality/communities, predict-links, explain-by-id, and aggregate health/metrics apply NO policy at all — by-id/graph reads return secret/out-of-scope content.",
+      "FTS candidate ranking + fused count are computed over pre-policy rows (MGR-004.4 policy-after-rank leak)."
+    ],
+    "target_gate": "F1 (MGR-004 fail-closed identity-derived Effective_Policy; secure remote disabled by default)"
+  },
+  "accessible_route": {
+    "source": "evidence/F0/f0-inventory/reports/ui-paths.json (0.3.4)",
+    "route": "MemoryGraphFallback (ui/src/shell/spaces/memory/graph/MemoryGraphFallback.tsx) — the synchronized semantic table opened from MemoryUniverse via the 'Open accessible memory list' dialog (showList signal).",
+    "features": "Sortable/filterable entity table (Entity/Component/Centrality/Connections/Actions), roving-tabindex keyboard nav, live-region announcements, per-row focus/expand revealing relationship + predicted-link rows.",
+    "status": "Current (BROKEN at HEAD)",
+    "broken_cause": "Does not type-check at the inventoried commit: MemoryGraphFallback.tsx references undefined isPinned/togglePin (TS2304 at lines 294/320/321/323); MemoryUniverse.tsx (its host) references undefined timeline/setTimeline (TS2304 at 165). The on-disk active renderer sources are in a half-reverted state.",
+    "vocabulary_note": "The 'Component' column label uses the correct MGR-011.1 word, but its value is node.community sourced from memory_graph_communities (backend still emits 'communities' for connected components) — corrected only at the leaf label, not end-to-end.",
+    "target_gate": "F4 (single Semantic_Scene table; MGR-011 end-to-end component rename; MGR-014 accessible composite)"
+  },
+  "screenshots": {
+    "status": "unavailable",
+    "cause": "The UI cannot be cheaply or deterministically screenshotted in F0: the active MemoryUniverse SVG renderer and its MemoryGraphFallback table both fail typecheck at HEAD (ui-paths.json compile_status — TS2304 timeline/setTimeline and isPinned/togglePin), so a headless WebKitGTK render is not trustworthy/deterministic.",
+    "command": "cd ui && npx playwright test e2e/memory-graph-baseline.spec.ts --project=webkit  # (legacy seed 0x4b524941, caps/viewports per evidence/phase-0-baseline/README.md) — BLOCKED until the renderer typecheck is fixed",
+    "known_limitation": "Screenshots + frame/idle/AT-facing capture are all gated on repairing the broken active renderer; they are release-relevant (F4) and explicitly Blocked at F0, not fabricated."
+  },
+  "known_limitations": [
+    {
+      "id": "L-svg-broken",
+      "limitation": "The active MemoryUniverse SVG renderer + MemoryGraphFallback table do NOT type-check at HEAD (undefined timeline/setTimeline, isPinned/togglePin). The shipped 2D memory graph is in a broken/half-reverted state.",
+      "source": "ui-paths.json",
+      "target_gate": "F4"
+    },
+    {
+      "id": "L-3d-dormant",
+      "limitation": "GraphCanvas3D (Three.js) is dormant — no live import/mount reaches it from the memory graph. Its 3D support modules are shared by the capabilities constellation lens, not the memory graph. Dormant code is not capability proof.",
+      "source": "ui-paths.json",
+      "target_gate": "F6"
+    },
+    {
+      "id": "L-model-not-vendored",
+      "limitation": "The all-MiniLM-L6-v2 ONNX artifact + tokenizer are NOT vendored in-repo; source URL, revision, artifact/tokenizer checksums, and FOSS license disposition are Unknown. The artifact may be present out-of-band at runtime (~/.kria/models/embeddings); measurement_substrate.embedder_onnx_loaded records which path THIS run used. On a host without the artifact the embedder degrades to Unavailable (never hash vectors) and retrieval falls back to the FTS keyword floor.",
+      "source": "model-license-inventory.json U-1..U-6",
+      "target_gate": "F1/F5"
+    },
+    {
+      "id": "L-no-read-policy",
+      "limitation": "No Effective_Policy engine mediates reads; only a caller-supplied ScopeFilter (never identity-derived), applied only on the retriever search path and NOT on graph/analytics/explain-by-id/aggregate reads.",
+      "source": "read-paths.json critical_gap",
+      "target_gate": "F1"
+    },
+    {
+      "id": "L-no-graph-revision",
+      "limitation": "Graph reads return ad-hoc serde_json with NO schema version, Graph_Revision, query hash, window metadata, truncation reason, or cursor (MGR-007.2 gap).",
+      "source": "read-paths.json R-graph-neighbors",
+      "target_gate": "F2/F3"
+    },
+    {
+      "id": "L-permissive-cors",
+      "limitation": "Server /memory/* routes are mounted under CorsLayer::permissive() and pass through requests with no Authorization header — effectively unauthenticated memory read routes.",
+      "source": "read-paths.json R-server-read-routes",
+      "target_gate": "F1"
+    },
+    {
+      "id": "L-fts-policy-after-rank",
+      "limitation": "FTS bm25 ranking + top-k LIMIT are computed over pre-policy rows (memories_fts carries only namespace, not scope/sensitivity); secret/out-of-scope rows enter the candidate pool and are dropped only post-fusion (MGR-004.4 leak).",
+      "source": "read-paths.json R-fts-query",
+      "target_gate": "F1/F3"
+    },
+    {
+      "id": "L-components-mislabeled",
+      "limitation": "Connected-components (union-find) analytics are named 'community'/'communities' in code, contract JSON, and most of the UI (MGR-011.1 vocabulary violation); must be renamed 'component' end-to-end.",
+      "source": "read-paths.json R-graph-communities",
+      "target_gate": "F2/F3"
+    },
+    {
+      "id": "L-no-result-cache",
+      "limitation": "No result cache on any read path; every search/graph/analytics call recomputes. Analytics are not revision-keyed (MGR-009.4 unimplemented).",
+      "source": "read-paths.json",
+      "target_gate": "F3"
+    },
+    {
+      "id": "L-count-semantics",
+      "limitation": "Search response 'count' is the post-truncation displayed slice, not corpus total M — cannot honestly render 'showing N of M' / 'at least M' (MGR-006.3).",
+      "source": "read-paths.json R-desktop-search-commands",
+      "target_gate": "F3/F4"
+    },
+    {
+      "id": "L-in-memory-only",
+      "limitation": "This baseline measured an in-memory (:memory:) authority for cheap determinism; disk-backed synchronous=FULL latency and cold-start are Unavailable at F0 (see unavailable_measurements).",
+      "source": "this artifact",
+      "target_gate": "F3/F5"
+    }
+  ],
+  "notes": [
+    "This artifact is descriptive current-state baseline material for MGR-027/MGR-029; it contains NO Verified implementation claim (completion proof for F0.5).",
+    "Reproduce: cargo run -p kria-eval --bin mg-baseline -- --run-id baseline (writes this file).",
+    "No private content, real labels, query text, or credentials are recorded; the corpus is synthetic public text."
+  ]
+}

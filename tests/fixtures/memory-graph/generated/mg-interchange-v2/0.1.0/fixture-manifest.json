@@ -1,0 +1,199 @@
+{
+  "schema_version": "memory-graph-fixture/v1",
+  "fixture_id": "mg-interchange-v2",
+  "generator": {
+    "name": "memory_graph::fixtures::interchange_v2",
+    "version": "0.1.0",
+    "algorithm": "splitmix64",
+    "seed_hex": "0x4D475208",
+    "seed": 1296519688
+  },
+  "schema_versions": {
+    "authority_schema": 2,
+    "ontology": 1,
+    "model": "all-MiniLM-L6-v2"
+  },
+  "counts": {
+    "total_records": 13,
+    "total_links": 5,
+    "valid_records": 10,
+    "invalid_records": 3,
+    "valid_links": 5,
+    "invalid_links": 0,
+    "records_by_kind": {
+      "memory": 3,
+      "rule": 2,
+      "skill": 2,
+      "summary": 3
+    },
+    "records_by_truth_state": {
+      "Confirmed": 3,
+      "Current": 3,
+      "Inferred": 2,
+      "Superseded": 2
+    },
+    "records_by_memory_mode": {
+      "Permanent": 4,
+      "Session_Only": 3,
+      "Temporary": 3
+    },
+    "records_by_sensitivity": {
+      "1": 10
+    },
+    "links_by_kind": {
+      "contradicts": 1,
+      "derived_from": 1,
+      "mentions_entity": 1,
+      "superseded_by": 1,
+      "supports": 1
+    },
+    "idempotency_collisions": 0
+  },
+  "expected": {
+    "valid_record_ids": [
+      "2928c818-2c03-d137-35e4-04b56adf7361",
+      "3ec40be1-9551-b957-2bf0-90ad60e5796c",
+      "8853bd7e-0c64-2dfe-92bc-b1da90afd99e",
+      "9928bf04-069b-defc-113e-5e31fdb7fffa",
+      "abcc47f3-e29d-58f2-726d-c529e5724189",
+      "b445f3f3-b7f2-cc3a-7f65-60604bb0fb00",
+      "c11c81cb-0b61-d32a-8e7a-d706a87c3b73",
+      "c1b86869-1248-a31b-24b8-fdca0a0a97ab",
+      "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "dc2351ce-0aaf-b62f-5f0c-85b06f2baab9"
+    ],
+    "membership_hash": "2eea172b432ecbe5153a3889bcf812d197a43b00169b27c66d1664fd295b4fba",
+    "invalid_records": [
+      {
+        "id": "neg-unknown-required-field",
+        "reason": "UnsupportedSchema"
+      },
+      {
+        "id": "neg-checksum-mismatch",
+        "reason": "ChecksumMismatch"
+      },
+      {
+        "id": "neg-unknown-required-enum",
+        "reason": "UnsupportedSchema"
+      }
+    ],
+    "invalid_links": [],
+    "idempotency_collisions": []
+  },
+  "files": [
+    {
+      "path": "interchange-package.json",
+      "media_type": "application/json",
+      "sha256": "81fc483fa93a7169d360b97e561f310adc72e51ea7b1782e1a06269cec49e557",
+      "size": 12075
+    },
+    {
+      "path": "negative-cases.json",
+      "media_type": "application/json",
+      "sha256": "814a352aec50575dc7490d33e1da5ff3383e3b3af6fbf0302e001f3261f2a255",
+      "size": 2301
+    }
+  ],
+  "package_sha256": "2f45a911e5bef4bbe11d99470d979342a8e6fe6bc15fb72c50275132391de115",
+  "contains_private_data": false,
+  "interchange_oracle": {
+    "interchange_schema": "memory-graph-interchange/v1",
+    "ontology_version": 1,
+    "relation_registry_version": 1,
+    "algorithm_version": 1,
+    "model_version": "all-MiniLM-L6-v2",
+    "scope": "namespace:personal;scope:private",
+    "package_checksum": "b3ad2be53fbaf289e81310ff5b4fc18bb0fef7c2ebdc81cdeffb54b9819edd13",
+    "total_records": 10,
+    "total_events": 6,
+    "total_links": 5,
+    "total_provenance": 6,
+    "ordered_item_ids": [
+      "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "b445f3f3-b7f2-cc3a-7f65-60604bb0fb00",
+      "8853bd7e-0c64-2dfe-92bc-b1da90afd99e",
+      "2928c818-2c03-d137-35e4-04b56adf7361",
+      "3ec40be1-9551-b957-2bf0-90ad60e5796c",
+      "c11c81cb-0b61-d32a-8e7a-d706a87c3b73",
+      "dc2351ce-0aaf-b62f-5f0c-85b06f2baab9",
+      "c1b86869-1248-a31b-24b8-fdca0a0a97ab",
+      "abcc47f3-e29d-58f2-726d-c529e5724189",
+      "9928bf04-069b-defc-113e-5e31fdb7fffa",
+      "d04dab67-6279-a10a-68f0-d560b8ada132",
+      "4b26ed42-8b96-542d-6873-8c04c7435181",
+      "1e0303e5-951b-5c3e-bda1-af4419c320ef",
+      "748d4b39-cd49-1777-9e9e-3f4b4eac9a7f",
+      "39aa98ae-1c7e-8fe8-8b9a-22ae9978c084",
+      "b5e03776-8c1c-dfdd-6c60-719ede392ee7",
+      "c2cd7824-d2ea-c627-7187-0cda6109a37d",
+      "4e5f0510-21ef-d202-0c42-7be1f882f76f",
+      "49ef5d2c-da9b-be4c-b016-772a7a3d8d26",
+      "7949a1a4-b213-5ec0-9082-477b555c4da6",
+      "453a38fe-4d96-88bf-b660-628a389ac98f",
+      "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "5ee649e5-f9ee-9fec-6cb1-e0f42b73babe",
+      "2a0caaf3-a695-ad3c-4b50-f625abd205cf",
+      "29101ee7-ff6d-c65c-7c57-3e269d2b004a",
+      "959a8ed9-afac-dbbb-ea78-d1f8e4dd6bfc",
+      "50670f34-8d9a-0296-976c-9564576c0a59"
+    ],
+    "optional_extension_key": "ext",
+    "known_optional_fields": [
+      "note"
+    ],
+    "unknown_optional_fields": [
+      "x_edge_weight",
+      "x_experimental_weight",
+      "x_ingest_batch",
+      "x_render_hint",
+      "x_trace_span",
+      "x_vendor_tag"
+    ],
+    "records_with_unknown_optional": 8,
+    "negative_cases": [
+      {
+        "case_id": "neg-unknown-required-field",
+        "kind": "unknown_required_field",
+        "description": "unexpected top-level field; strict schema rejects atomically",
+        "reason_code": "UnsupportedSchema",
+        "expected_disposition": "reject_atomic"
+      },
+      {
+        "case_id": "neg-checksum-mismatch",
+        "kind": "checksum_mismatch",
+        "description": "stored checksum does not match recomputed item checksum",
+        "reason_code": "ChecksumMismatch",
+        "expected_disposition": "reject_atomic"
+      },
+      {
+        "case_id": "neg-unknown-required-enum",
+        "kind": "unknown_required_enum",
+        "description": "unrecognized required enum/version; UnsupportedSchema",
+        "reason_code": "UnsupportedSchema",
+        "expected_disposition": "reject_atomic"
+      }
+    ],
+    "no_secrets": true,
+    "secret_scan_patterns": [
+      "password",
+      "passwd",
+      "api_key",
+      "apikey",
+      "access_key",
+      "private key",
+      "begin rsa",
+      "authorization:",
+      "bearer ",
+      "aws_secret",
+      "akia"
+    ],
+    "empty_store_round_trip": {
+      "preserves_ids": true,
+      "preserves_order": true,
+      "preserves_links": true,
+      "preserves_provenance": true,
+      "preserves_state": true,
+      "reexport_matches_import": true
+    }
+  }
+}

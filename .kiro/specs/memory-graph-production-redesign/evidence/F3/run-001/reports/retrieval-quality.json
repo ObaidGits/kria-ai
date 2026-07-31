@@ -1,0 +1,321 @@
+{
+  "schema_version": "retrieval-quality/v1",
+  "suite_id": "V-RET-03",
+  "requirement_ids": [
+    "MGR-006",
+    "MGR-036"
+  ],
+  "fixture_id": "mg-retrieval-judged-v2",
+  "fixture_seed": "0x4D475207",
+  "total_queries": 220,
+  "forbidden_document_count": 42,
+  "overall": {
+    "recall_at_10": 0.9947658402203856,
+    "ndcg_at_10": 1.0,
+    "identifier_phrase_recall": 0.9972451790633609,
+    "forbidden_exclusion_rate": 1.0,
+    "deleted_forgotten_superseded_exclusion_rate": 1.0,
+    "sample_size": 220
+  },
+  "confidence_intervals": {
+    "recall_at_10": {
+      "estimate": 0.9947658402203856,
+      "lower": 0.9915289256198345,
+      "upper": 0.9975895316804407,
+      "resamples": 2000,
+      "n": 220
+    },
+    "ndcg_at_10": {
+      "estimate": 1.0,
+      "lower": 1.0,
+      "upper": 1.0,
+      "resamples": 2000,
+      "n": 220
+    },
+    "identifier_phrase_recall": {
+      "estimate": 0.9972451790633609,
+      "lower": 0.993112947658402,
+      "upper": 1.0,
+      "resamples": 2000,
+      "n": 66
+    }
+  },
+  "per_class": [
+    {
+      "query_class": "active_goal",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      }
+    },
+    {
+      "query_class": "entity_relation",
+      "count": 44,
+      "recall_at_10": 0.9917355371900828,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 0.9917355371900828,
+        "lower": 0.9834710743801651,
+        "upper": 0.9979338842975206,
+        "resamples": 2000,
+        "n": 44
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 44
+      }
+    },
+    {
+      "query_class": "exact_phrase",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      }
+    },
+    {
+      "query_class": "exploratory",
+      "count": 66,
+      "recall_at_10": 0.9921946740128558,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 0.9921946740128558,
+        "lower": 0.9834710743801652,
+        "upper": 0.9986225895316804,
+        "resamples": 2000,
+        "n": 66
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 66
+      }
+    },
+    {
+      "query_class": "identifier",
+      "count": 44,
+      "recall_at_10": 0.9958677685950413,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 0.9958677685950413,
+        "lower": 0.9896694214876033,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 44
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 44
+      }
+    },
+    {
+      "query_class": "temporal",
+      "count": 22,
+      "recall_at_10": 0.9958677685950412,
+      "ndcg_at_10": 1.0,
+      "recall_ci": {
+        "estimate": 0.9958677685950412,
+        "lower": 0.9876033057851239,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      },
+      "ndcg_ci": {
+        "estimate": 1.0,
+        "lower": 1.0,
+        "upper": 1.0,
+        "resamples": 2000,
+        "n": 22
+      }
+    }
+  ],
+  "per_stratum": [
+    {
+      "stratum": "adversarial",
+      "count": 22,
+      "recall_at_10": 0.9765840220385674,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "contradiction",
+      "count": 22,
+      "recall_at_10": 0.9958677685950413,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "entity_relation",
+      "count": 22,
+      "recall_at_10": 0.9876033057851239,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "forbidden",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "goal",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "identifier",
+      "count": 22,
+      "recall_at_10": 0.9917355371900828,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "phrase",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "semantic",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "source",
+      "count": 22,
+      "recall_at_10": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "stratum": "temporal",
+      "count": 22,
+      "recall_at_10": 0.9958677685950412,
+      "ndcg_at_10": 1.0
+    }
+  ],
+  "ablations": [
+    {
+      "excluded_stratum": "adversarial",
+      "n": 198,
+      "recall_at_10": 0.9967860422405876,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "contradiction",
+      "n": 198,
+      "recall_at_10": 0.9946434037343128,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "entity_relation",
+      "n": 198,
+      "recall_at_10": 0.9955616773798592,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "forbidden",
+      "n": 198,
+      "recall_at_10": 0.9941842669115396,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "goal",
+      "n": 198,
+      "recall_at_10": 0.9941842669115396,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "identifier",
+      "n": 198,
+      "recall_at_10": 0.995102540557086,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "phrase",
+      "n": 198,
+      "recall_at_10": 0.9941842669115396,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "semantic",
+      "n": 198,
+      "recall_at_10": 0.9941842669115396,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "source",
+      "n": 198,
+      "recall_at_10": 0.9941842669115396,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "excluded_stratum": "temporal",
+      "n": 198,
+      "recall_at_10": 0.9946434037343128,
+      "ndcg_at_10": 1.0
+    }
+  ],
+  "regression": {
+    "baseline_available": false,
+    "max_absolute_regression": 0.0,
+    "regression_blocked": false,
+    "note": "First run: no predecessor profile available. Regression block >0.03 will be enforced on subsequent runs comparing to this run's metrics."
+  },
+  "thresholds": {
+    "k": 10,
+    "recall_at_10_min": 0.85,
+    "ndcg_at_10_min": 0.8,
+    "identifier_phrase_min": 0.95,
+    "forbidden_exclusion_required": 1.0,
+    "max_regression": 0.03
+  },
+  "assertions": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0
+  },
+  "passed": true,
+  "failure_reasons": [],
+  "judgment_provenance": {
+    "fixture_path": "/media/obaid/SSD/KRIA/tests/fixtures/memory-graph/generated/mg-retrieval-judged-v2/0.1.0",
+    "judge_ids": [
+      "judge-lexical-v1",
+      "judge-semantic-v1"
+    ],
+    "adjudicator_id": "adjudicator-senior-v1",
+    "agreed_count": 73,
+    "adjudicated_count": 147,
+    "oracle_note": "Judges are deterministic, independent oracle rubrics defined by the generator; there is no system under test. Each query carries two independent judge verdicts, and disagreements are resolved by a recorded adjudication whose resolved labels are the gold judgment."
+  }
+}

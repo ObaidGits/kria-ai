@@ -40,6 +40,48 @@ impl AliasType {
     pub fn is_strong(&self) -> bool {
         !matches!(self, AliasType::Name)
     }
+
+    /// Parse the wire-format alias-type tag write-surface adapters
+    /// (desktop `memory_resolve_entities`, and any future server route) accept
+    /// from the caller back into an [`AliasType`]. Unrecognized/absent tags
+    /// default to the weakest classification (`Name`, never auto-merges) —
+    /// this mirrors the historical inline adapter match exactly, so relocating
+    /// it here is a pure move, not a behavior change (task F1.5.2: adapters
+    /// construct caller/command only and carry no standalone alias-taxonomy
+    /// decision).
+    pub fn from_str(s: &str) -> AliasType {
+        match s {
+            "email" => AliasType::Email,
+            "handle" => AliasType::Handle,
+            "url" => AliasType::Url,
+            "repo" => AliasType::Repo,
+            _ => AliasType::Name,
+        }
+    }
+}
+
+#[cfg(test)]
+mod alias_type_tests {
+    use super::AliasType;
+
+    #[test]
+    fn from_str_round_trips_every_known_tag() {
+        for at in [
+            AliasType::Email,
+            AliasType::Handle,
+            AliasType::Url,
+            AliasType::Repo,
+            AliasType::Name,
+        ] {
+            assert_eq!(AliasType::from_str(at.as_str()), at);
+        }
+    }
+
+    #[test]
+    fn from_str_defaults_unknown_tags_to_name() {
+        assert_eq!(AliasType::from_str("bogus"), AliasType::Name);
+        assert_eq!(AliasType::from_str(""), AliasType::Name);
+    }
 }
 
 /// Outcome of resolving an incoming entity mention.

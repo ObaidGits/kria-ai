@@ -411,6 +411,8 @@ mod tests {
         let mut sched = CognitiveScheduler::new(Arc::new(StaticResourceMonitor {
             on_battery: false,
             memory_pressure: false,
+            thermal_pressure: false,
+            model_pressure: false,
         }));
         sched.register(Arc::new(ConsolidationJob::session_end(cognition)));
 
@@ -434,6 +436,8 @@ mod tests {
         let mut sched = CognitiveScheduler::new(Arc::new(StaticResourceMonitor {
             on_battery: true,
             memory_pressure: false,
+            thermal_pressure: false,
+            model_pressure: false,
         }));
         sched.register(Arc::new(ConsolidationJob::daily_reflection(cognition)));
 

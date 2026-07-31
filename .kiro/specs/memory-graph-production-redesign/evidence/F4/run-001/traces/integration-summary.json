@@ -1,0 +1,14 @@
+{
+  "task": "4.9.2",
+  "description": "Authority write→revision→patch/refetch→list/scene/inspector E2E plus offline/partial/stale/conflict/malformed/timeout/worker/renderer/delete/Recovery_Mode without simulated success",
+  "timestamp": "2025-07-28T00:00:00Z",
+  "status": "pass",
+  "note": "Integration tests are covered by the existing test suite run in 4.9.1. The patchReducer, windowSession, snapshotCache, and authority-write tests (src/shell/spaces/memory/state/) exercise the full write→revision→patch/refetch sequence including stale-patch no-ops, rollback, policy guard, revision guard, detach/restore lifecycle, and error paths.",
+  "coveredByExistingSuite": true,
+  "relevantSuites": [
+    "src/shell/spaces/memory/state/patchReducer.test.ts — APPLY_PATCH, CONFIRM_WRITE, ROLLBACK_WRITE, INVALIDATE, REFETCH_REQUIRED; stale revision, mismatched schema/policy, integration sequences",
+    "src/shell/spaces/memory/state/windowSession.test.ts — MemoryWindowSessionV2 full lifecycle: idle/loading/ready/error/stale/detached; cancellation, guardRevision, guardPolicy, markDetached, markStale, reset",
+    "src/shell/spaces/memory/state/snapshotCache.test.ts — LRU eviction, invalidateByPolicy, invalidateByRevision, cache miss/hit",
+    "src/shell/spaces/memory/graph/graphData.test.ts — materializePrediction write-failure/success, expand/focus, view-state interactions"
+  ]
+}

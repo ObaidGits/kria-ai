@@ -66,7 +66,7 @@ const AI_OUTPUT_KINDS: readonly AiOutputKind[] = [
 const NAV_SOURCES: readonly NavSource[] = [
   "user",
   "palette",
-  "dock",
+  "navigation-rail",
   "message-action",
   "chip-route",
   "ai",

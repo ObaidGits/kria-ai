@@ -45,6 +45,7 @@ DIRECT_INVOKE_BASELINE = {
     "ui/src/components/SettingsModal.tsx",
     "ui/src/components/SubstrateStatus.tsx",
     "ui/src/components/TestRunnerDashboard.tsx",
+    "ui/src/shell/spaces/memory/api/client.ts",
     "ui/src/stores/app.ts",
     "ui/src/stores/memory.ts",
     "ui/src/stores/n8n.ts",

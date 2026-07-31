@@ -6,6 +6,13 @@
 //! multi-hop causal chains (bounded DFS), and counterfactual estimation
 //! (belief in an effect if a given cause were removed). Labels are normalized
 //! so repeated observations of the same causal pair accumulate.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::causal_link`](
+//! crate::memory::authority::CommandCandidate::causal_link) is the typed
+//! command-candidate scaffolding (task F1.5.1) this engine's observation writes
+//! will route through once a concrete `TxSemanticStore` builder persists the
+//! causal-link semantic row (F2). This engine remains the live persistence
+//! path until then — see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::collections::HashSet;
 use std::sync::Arc;

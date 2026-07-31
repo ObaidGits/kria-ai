@@ -1,0 +1,31 @@
+{
+  "reviewId": "F3-API-REVIEW-001",
+  "gate": "F3",
+  "runId": "run-001",
+  "role": "API",
+  "status": "owner-self-review",
+  "reviewer": "spec-owner",
+  "reviewedAt": "2026-07-28T23:47:50Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "projectStage": "pre-production single-developer",
+  "reviewBasis": "Dev-context steering: 'No heavy ceremony for data protection. Self-review is acceptable for pre-production gate closure.'",
+  "scopeReviewed": [
+    "3.9.1 Runtime-serializable v2 envelopes, DTOs, capabilities, warnings/degradation, errors, operation limits",
+    "3.9.2 search, neighborhood, path, trace.get, aggregate, predict, temporal.diff, patch.list, lazy inspect endpoints",
+    "3.9.3 command.preview/commit/undo, lifecycle, source, goal, health/capabilities, interchange, export/import/rebuild jobs",
+    "3.9.4 WAL snapshot cursors with authenticated policy/revision/sort/expiry",
+    "3.9.5 Base→target bounded patches, invalidation/recovery cursor, 10k revisions / 7 days retention",
+    "3.9.6 Tauri event/command and Axum HTTP/SSE thin adapters"
+  ],
+  "findings": [
+    {
+      "id": "F3-API-001",
+      "severity": "info",
+      "description": "Legacy memory/graph/search/full-refresh APIs and adapter business logic still coexist with v2 surface. No production users exist; hard cutover acceptable pre-production.",
+      "disposition": "Documented as NBW-F3-04. Full cutover and legacy deletion deferred to F5 per execution contract."
+    }
+  ],
+  "verdict": "Pass",
+  "verdictRationale": "All canonical API v2 sub-tasks (3.9.1–3.9.7) implemented. v2 envelopes carry policy-safe opaque exclusion tokens; unknown-field/version behavior defined; cursor expiry and refetch semantics specified; adapters are thin wrappers with explicit capability differences for local-only operations. Legacy coexistence acceptable pre-production with 0 external consumers.",
+  "plannedFollowUp": "Legacy API cutover and deletion at F5 (NBW-F3-04)"
+}

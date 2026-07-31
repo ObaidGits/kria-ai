@@ -1,0 +1,484 @@
+{
+  "schema": "memory-graph.ui-paths.inventory/v1",
+  "task": "0.3.4 Inventory active `MemoryUniverse`/fallback/list behavior, dormant `GraphCanvas3D`, synthetic topology, inert controls, visual claims, command names, and test mocks that simulate success.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T18:28:27Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": ["MGR-001", "MGR-011", "MGR-012", "MGR-014", "MGR-015", "MGR-026"],
+  "design_refs": [
+    "design.md §1 current-vs-target table row 'UI: Active MemoryUniverse SVG and semantic table; GraphCanvas3D dormant' -> 'Memory Control Center with authoritative Canvas2D map plus synchronized DOM list and shared actions'",
+    "design.md §10.1 chosen renderer (Canvas2D pixels + synchronized DOM semantic list/table + DOM inspector; SVG element/filter pressure risk)",
+    "design.md §11.x renderer options table (WebGL/Three.js repository dependency/dormant code is NOT evidence; F6 only)",
+    "requirements.md MGR-001 (epistemic truth), MGR-011 (honest analytics vocabulary), MGR-012 (renderer-neutral scene), MGR-014 (accessible composite), MGR-015 (authoritative 2D view), MGR-026 (visual authority encoding)"
+  ],
+  "predecessor_artifacts": [
+    "evidence/F0/f0-inventory/reports/write-paths.json (0.3.1 writer inventory; memory_graph_create_relationship + lifecycle/truth/feedback write commands + STORE-kria_memory_db)",
+    "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2 read inventory; memory_graph_* read commands R-graph-centrality/communities/relationships/predict-links, R-explain-memory, and R-ui-graph-read-layer / R-ui-memory-inspector client-side assumptions)",
+    "evidence/F0/f0-inventory/reports/schema-inventory.json (0.3.3)"
+  ],
+  "method": "Static source trace of the SolidJS UI memory/graph surfaces from LIVE mount/registration roots: MemorySpace.tsx segment 'knowledgegraph' -> KnowledgeGraphLens (default export) -> MemoryUniverse; and windowing/DetachedSurfaceRoot.tsx -> KnowledgeGraphLens for the detached 'lens' surface. For each surface: classify Current/Planned/Unavailable/Unknown with a live-registration/import-reachability locator, and enumerate synthetic topology, inert controls, visual claims lacking backing, the exact Tauri command names invoked (mapped to 0.3.1 writes / 0.3.2 reads), and test doubles that simulate backend success. Compile status verified with `npx tsc --noEmit` (ui/). Dormancy of GraphCanvas3D verified with import-reachability grep across ui/src. Invariant: dormant code/comments/tests are NOT capability proof. No secrets copied.",
+  "invariants_applied": [
+    "Dormant code/comments/tests are not capability proof — classification is tied to a LIVE mount/import path (MemorySpace/DetachedSurfaceRoot -> KnowledgeGraphLens -> MemoryUniverse), not to filenames or in-file doc comments.",
+    "MGR-001.1/.2: every visible semantic claim must carry Provenance/Truth_State or show Unavailable/omit.",
+    "MGR-001.3: a numeric quality value may be called confidence only when bounded [0,1] with calibration evidence; otherwise label 'Relative score' with algorithm/profile version.",
+    "MGR-001.4: a Navigation_Group (generated facet) must be labeled generated navigation and excluded from authority topology.",
+    "MGR-011.1: connected components must be named `component` in code, contracts, tests, docs, and UI (NOT `community`).",
+    "MGR-011.3: centrality output must carry the named algorithm and evaluated scope.",
+    "MGR-012: one renderer-neutral Semantic_Scene consumed by 2D view + synchronized list/table + optional 3D, with typed renderer-independent actions.",
+    "MGR-014.3: a synchronized semantic list/table must exist for every graph-visible item and action.",
+    "MGR-015.1/.2: the authoritative 2D view must complete all workflows without optional 3D and render only a query-defined bounded scene with honest totals/truncation.",
+    "MGR-026.3/.5/.6: encode states without opacity-only; omit a visual channel when the backing value is unavailable; never reveal hidden policy classes via color/gaps/counts."
+  ],
+
+  "live_composition_roots": {
+    "memory_space_segment": "ui/src/shell/spaces/MemorySpace.tsx: <Show when={props.segment === 'knowledgegraph'}><KnowledgeGraphLens /></Show> (line ~209). MemorySpace also mounts MemoryInspector via registerMemoryInspector and CognitionPanel.",
+    "detached_surface": "ui/src/windowing/DetachedSurfaceRoot.tsx: context()!=='capabilities' -> <KnowledgeGraphLens /> (fallback branch) for the detached memory 'lens' window.",
+    "lens_container": "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.tsx (default export): onMount -> graphData.load(); subscribes eventBus 'memory:updated' (coalesced 250ms re-load for kinds relationship/entity/created/updated/deleted); renders <MemoryUniverse static={lensRenderMode().isStatic} />. NEVER imports GraphCanvas3D.",
+    "active_renderer": "ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx (SVG viewBox 0 0 1100 720) — the shipped 2D renderer.",
+    "active_table": "ui/src/shell/spaces/memory/graph/MemoryGraphFallback.tsx — the synchronized semantic table, opened from MemoryUniverse via the 'Open accessible memory list' dialog (showList signal); also the primary component in KnowledgeGraphLens.stories.",
+    "read_model": "ui/src/shell/spaces/memory/graph/graphData.ts (reactive read-model over memory_graph_* via bridgeInvoke) + graphModel.ts (pure mapping/caps/color) + memoryUniverseModel.ts (client-side facet/layout synthesis).",
+    "record_inspector": "ui/src/shell/spaces/memory/MemoryInspector.tsx (memory_explain + memory action commands), registered via registerMemoryInspector.tsx.",
+    "render_mode_note": "ui/src/platform/renderMode.ts comment: 'Shipped Memory Graph currently reads only isStatic; it always mounts its authoritative 2D SVG and does not consume enable3D. GraphCanvas3D remains dormant unless a future MGR-030 Phase 7 integration passes every gate.'"
+  },
+
+  "compile_status": {
+    "command": "npx tsc --noEmit (ui/)",
+    "result": "FAIL — the two ACTIVE renderer files reference undefined symbols and do not type-check at the inventoried commit.",
+    "errors": [
+      "src/shell/spaces/memory/graph/MemoryUniverse.tsx(165,38) TS2304: Cannot find name 'timeline'.",
+      "src/shell/spaces/memory/graph/MemoryUniverse.tsx(165,67) TS2304: Cannot find name 'setTimeline'.",
+      "src/shell/spaces/memory/graph/MemoryUniverse.tsx(165,80) TS7006: Parameter 'value' implicitly has an 'any' type.",
+      "src/shell/spaces/memory/graph/MemoryGraphFallback.tsx(294,39) TS2304: Cannot find name 'isPinned'.",
+      "src/shell/spaces/memory/graph/MemoryGraphFallback.tsx(320,41) TS2304: Cannot find name 'isPinned'.",
+      "src/shell/spaces/memory/graph/MemoryGraphFallback.tsx(321,42) TS2304: Cannot find name 'togglePin'.",
+      "src/shell/spaces/memory/graph/MemoryGraphFallback.tsx(323,58) TS2304: Cannot find name 'isPinned'."
+    ],
+    "interpretation": "The on-disk active renderer sources are in a BROKEN / half-reverted state: MemoryUniverse.tsx uses an undefined `timeline`/`setTimeline` signal for a 'Timeline' toolbar button, and MemoryGraphFallback.tsx uses undefined local `isPinned`/`togglePin` for Pin/Unpin controls. This is corroborated by their own tests, which describe a DIFFERENT (cleaner) surface (see source_vs_test_divergence). Classification below marks these surfaces Current-but-Broken."
+  },
+
+  "ui_surfaces": [
+    {
+      "id": "U-knowledge-graph-lens",
+      "surface": "KnowledgeGraphLens (memory graph container)",
+      "file": "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.tsx",
+      "role": "Live mount point for the Memory Graph space segment + detached lens window. Loads graphData, coalesces memory:updated refreshes, renders MemoryUniverse, exposes a 'Detach Memory Graph' IconButton (open_detached_surface).",
+      "classification": "Current",
+      "live_evidence": "MemorySpace.tsx segment 'knowledgegraph' -> <KnowledgeGraphLens/>; DetachedSurfaceRoot.tsx fallback -> <KnowledgeGraphLens/>.",
+      "commands_invoked": ["memory_graph_centrality", "memory_graph_communities", "memory_graph_relationships (via expand)", "memory_graph_predict_links (via expand)", "open_detached_surface (optional, detach button)"],
+      "findings": ["The only shipped memory-graph renderer it mounts is MemoryUniverse (SVG). It contains no path to GraphCanvas3D — confirming 3D dormancy at the container level."],
+      "target_gate": "F4 (replace with Memory Control Center 2D-authoritative shell)"
+    },
+    {
+      "id": "U-memory-universe",
+      "surface": "MemoryUniverse (ACTIVE 2D SVG renderer)",
+      "file": "ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+      "role": "Radial SVG 'universe' view: a synthetic central 'CURRENT FOCUS' core, 9 generated navigation-facet hubs, orbiting memory nodes, curved relationship/predicted edges, camera pan/zoom, filter box, an emphasis/lens toolbar, a details panel, and an 'Open accessible memory list' dialog embedding MemoryGraphFallback.",
+      "classification": "Current (BROKEN — does not type-check at this commit; see compile_status and source_vs_test_divergence)",
+      "live_evidence": "Rendered unconditionally by KnowledgeGraphLens; SVG aria-label 'Radial 2D memory view centered on current focus'.",
+      "consumes": "graphData.visibleNodes()/visibleEdges() -> memoryUniverseModel.buildUniverse() (client-side facet grouping + layout synthesis).",
+      "commands_invoked": ["(via graphData.expand on node select) memory_graph_relationships", "memory_graph_predict_links", "(via inspector 'Link') memory_graph_create_relationship"],
+      "synthetic_topology_refs": ["S-universe-core", "S-facet-categories", "S-keyword-categorization", "S-hashed-layout", "S-expand-injected-nodes", "S-curved-edges"],
+      "inert_control_refs": ["I-lens-emphasis-toolbar", "I-timeline-button", "I-auto-arrange", "I-pin-inspector", "I-cmdk-hint"],
+      "visual_claim_refs": ["V-generated-facet-label", "V-legend", "V-edge-authority-titles", "V-relative-score", "V-core-focus-text"],
+      "findings": [
+        "MGR-015: this is an SVG renderer, not the design's authoritative Canvas2D; design.md §10.1 flags SVG element/filter scaling pressure as the reason to migrate.",
+        "MGR-012: no renderer-neutral Semantic_Scene — the view builds its own bespoke universe model (memoryUniverseModel) that the table (MemoryGraphFallback) does NOT share (the table consumes graphData/graphModel directly). Two divergent view models.",
+        "Does not type-check (undefined `timeline`/`setTimeline`)."
+      ],
+      "target_gate": "F4 (Canvas2D authoritative view over one Semantic_Scene; remove bespoke universe model)"
+    },
+    {
+      "id": "U-memory-graph-fallback",
+      "surface": "MemoryGraphFallback (ACTIVE synchronized semantic table)",
+      "file": "ui/src/shell/spaces/memory/graph/MemoryGraphFallback.tsx",
+      "role": "Sortable/filterable entity table (Entity/Component/Centrality/Connections/Actions), roving-tabindex keyboard nav, live-region announcements, per-row focus/expand revealing relationship + predicted-link rows, hide/show-hidden, and materialize-predicted-link.",
+      "classification": "Current (BROKEN — does not type-check at this commit; undefined `isPinned`/`togglePin`)",
+      "live_evidence": "Rendered inside MemoryUniverse's showList dialog ('Accessible table view'); also the component of KnowledgeGraphLens.stories.",
+      "consumes": "graphData.visibleNodes()/visibleEdges()/capped()/focusedId()/hidden(); graphModel.maxCentrality/nodeSizeForCentrality.",
+      "commands_invoked": ["(via graphData.expand) memory_graph_relationships", "memory_graph_predict_links", "(via materialize) memory_graph_create_relationship"],
+      "visual_claim_refs": ["V-table-component-badge", "V-table-centrality", "V-table-confirmed-status", "V-relative-score"],
+      "inert_control_refs": ["I-pin-table"],
+      "findings": [
+        "MGR-014.3: provides the required synchronized semantic list/table (good), but reads a DIFFERENT view model than MemoryUniverse (graphData directly vs memoryUniverseModel) — not one renderer-neutral scene (MGR-012).",
+        "MGR-011.1 PARTIAL: the column header + badge say 'Component'/'component N' (correct vocabulary) but the value is `node.community` sourced from the memory_graph_communities command (backend still emits 'communities' for connected components) — vocabulary corrected only at the leaf label, not end-to-end.",
+        "Does not type-check (undefined `isPinned`/`togglePin`); its own test asserts pin controls should NOT exist (source_vs_test_divergence)."
+      ],
+      "target_gate": "F4 (single Semantic_Scene table; MGR-011 end-to-end `component` rename)"
+    },
+    {
+      "id": "U-memory-inspector",
+      "surface": "MemoryInspector (record detail + actions)",
+      "file": "ui/src/shell/spaces/memory/MemoryInspector.tsx",
+      "role": "Discloses a memory record (content, confidence, truth/state, worth, staleness, conflicts, lineage, AI explanation) and offers verify/reinforce/penalize/correct/forget+undo/hard-delete actions.",
+      "classification": "Current",
+      "live_evidence": "registerMemoryInspector.tsx registers the 'memory' inspector renderer; MemorySpace mounts it. (Cross-ref read-paths R-ui-memory-inspector.)",
+      "commands_invoked": ["memory_explain", "memory_verify", "memory_record_feedback", "memory_correct", "memory_forget", "memory_restore_forgotten", "memory_hard_delete", "memory_update (supersede, per write-paths)"],
+      "findings": ["MGR-001/MGR-004 cross-ref: inspector discloses every field trusting an unauthorized backend by-id read (memory_explain applies no policy — see read-paths R-explain-memory)."],
+      "target_gate": "F1/F4"
+    },
+    {
+      "id": "U-graph-canvas-3d",
+      "surface": "GraphCanvas3D (DORMANT Three.js renderer)",
+      "file": "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx",
+      "role": "Would wire the layout worker + Three.js GraphScene + LensController into a 3D memory graph with pin/hide/materialize and predicted-link panel.",
+      "classification": "Unavailable (dormant; NOT capability proof)",
+      "live_evidence": "Import-reachability grep across ui/src: GraphCanvas3D is referenced ONLY by its own file, doc comments (MemorySpace.tsx/renderMode.ts/stories/tests) — NO component imports or mounts <GraphCanvas3D/>. Header comment: 'dormant Phase 7 candidate; not mounted by shipped Memory Graph. No active import path reaches this component.'",
+      "commands_invoked": ["(same graphData commands IF ever mounted) memory_graph_relationships/predict_links/create_relationship — not reachable in production"],
+      "findings": [
+        "Confirmed dormant for the Memory Graph: no live mount. Its 'pin' action (graphData.togglePin) is the only consumer for which the pinned set was designed (see graphData comment).",
+        "IMPORTANT nuance: the 3D SUPPORT modules it depends on — GraphScene.ts (Three.js), lensController.ts, layout.worker.ts — are NOT globally dormant: they ARE imported/constructed by a DIFFERENT live surface, ConstellationCanvas3D.tsx (capabilities space). So 'graph-only 3D dependencies' (three, ngraph.forcelayout) are reachable via the constellation lens, not via memory. Delete/cutover planning must account for this shared usage."
+      ],
+      "target_gate": "F6 (ship-or-delete; per design.md WebGL/Three.js is F6-only and dormant code is not evidence)"
+    },
+    {
+      "id": "U-graph-3d-support",
+      "surface": "3D support modules (GraphScene / lensController / layout.worker / layoutSettle)",
+      "files": [
+        "ui/src/shell/spaces/memory/graph/GraphScene.ts",
+        "ui/src/shell/spaces/memory/graph/lensController.ts",
+        "ui/src/shell/spaces/memory/graph/layout.worker.ts",
+        "ui/src/shell/spaces/memory/graph/layoutSettle.ts"
+      ],
+      "role": "Three.js instanced scene, render-lifecycle controller, off-thread ngraph.forcelayout worker, and settle tracker.",
+      "classification": "Unavailable for Memory Graph (dormant here) / Current for Capabilities (shared)",
+      "live_evidence": "In-file comments say 'No shipped Memory Graph route imports/starts' these; grep confirms the live consumer is ui/src/shell/spaces/capabilities/constellation/ConstellationCanvas3D.tsx (imports ../../memory/graph/GraphScene, lensController, and new Worker(../../memory/graph/layout.worker.ts)).",
+      "findings": ["Physically located under the memory/graph/ folder but the live consumer is the capabilities constellation lens, not the memory graph. Cutover/removal for the memory graph must not break the constellation lens without coordination."],
+      "target_gate": "F6 (renderer decision) / relocate-or-share decision"
+    },
+    {
+      "id": "U-graph-model-3d-logic",
+      "surface": "graphModel dormant-3D logic (LOD / culling / degrade / node-size-for-3D)",
+      "file": "ui/src/shell/spaces/memory/graph/graphModel.ts",
+      "role": "computeLOD/selectLabelSet/cullNodes/evaluateDegrade/DEFAULT_NODE_SIZE ('3D scene' units) — pure math authored for a 3D lens.",
+      "classification": "Unavailable-in-2D (dormant for the shipped SVG/table which do not call these) / unit-tested only",
+      "live_evidence": "The active MemoryUniverse/MemoryGraphFallback call applyNodeCap/mapCentralityToNodes/maxCentrality/nodeSizeForCentrality/buildCommunityIndex but do NOT call computeLOD/selectLabelSet/cullNodes/evaluateDegrade (those are exercised only by dormant GL and unit tests).",
+      "findings": ["Live and dormant logic co-habit one module; the '3D scene' node-size range and LOD/cull/degrade helpers are not evidence of a shipped 3D capability (unit tests are not integration proof)."],
+      "target_gate": "F4/F6"
+    }
+  ],
+
+  "synthetic_topology": [
+    {
+      "id": "S-facet-categories",
+      "site": "memoryUniverseModel.ts MEMORY_CATEGORIES (9 hardcoded categories)",
+      "what": "Nine fixed categories (Projects, Knowledge, Goals, Skills, Events, Ideas, People, Conversations, Other) each with a hardcoded x/y screen position, icon, tone/color, and keyword list. None of these come from authority data.",
+      "authority_backed": false,
+      "honesty": "Rendered as hubs labeled 'Generated facet · N memories' with data-generated='true' / data-authority-class='navigation' (MGR-001.4-aligned labeling).",
+      "requirement": "MGR-001.4 (navigation groups must be labeled generated + excluded from topology) — labeling present; but the categories themselves are a fabricated ontology, not derived facets.",
+      "target_gate": "F2/F4"
+    },
+    {
+      "id": "S-keyword-categorization",
+      "site": "memoryUniverseModel.ts categoryForNode() — haystack = node.label.toLowerCase(); keyword substring match",
+      "what": "Each entity is assigned to one of the 9 facets by naive case-insensitive substring keyword matching on its display label (fallback 'Other'). This invents a categorization/grouping with no backing in the memory model.",
+      "authority_backed": false,
+      "requirement": "MGR-001.4 / MGR-011.6 (generated facets = navigation, not ontology). The grouping is client-fabricated and label-driven; it can misclassify and presents an invented taxonomy.",
+      "target_gate": "F2/F4"
+    },
+    {
+      "id": "S-hashed-layout",
+      "site": "memoryUniverseModel.ts placeMemory() / buildUniverse()",
+      "what": "Node x/y positions are computed from an FNV-1a hash of the node id plus orbit/angle math around the hardcoded facet center; node radius from sqrt(centrality). Layout/positions are fully synthetic and NOT a backend/query-defined layout.",
+      "authority_backed": false,
+      "requirement": "MGR-015.2 (2D view must render a query-defined bounded Semantic_Scene) — current layout is a decorative client synthesis, not a scene layout with honest totals/truncation.",
+      "target_gate": "F2/F4"
+    },
+    {
+      "id": "S-universe-core",
+      "site": "MemoryUniverse.tsx <g class='memory-universe__core'> ('CURRENT FOCUS' / 'Visible memory view' / 'N memories shown')",
+      "what": "A central star/core node is always drawn. It is a synthetic UI anchor, not an authority record/entity.",
+      "authority_backed": false,
+      "honesty": "Its labels describe the view ('Visible memory view', 'N memories shown') rather than asserting a fake entity, so it is honest-ish, but it is still a fabricated node in the topology.",
+      "requirement": "MGR-001.1/MGR-026.1 (visible items should map to record kinds).",
+      "target_gate": "F4"
+    },
+    {
+      "id": "S-expand-injected-nodes",
+      "site": "graphData.ts expand(): additions.push({ id, label: id.slice(0,8), community: -1, centrality: 1 })",
+      "what": "When expanding a focus node, relationship endpoints not already present are injected as nodes with a FABRICATED label (first 8 chars of the id), community -1, and centrality 1 (a made-up value, not the entity's real degree).",
+      "authority_backed": "partial (the ids/edges are backend-sourced, but the injected label and centrality=1 are fabricated)",
+      "requirement": "MGR-001.1 (no invented state) / MGR-026.5 (omit a channel when its value is unavailable — here a fake centrality is invented instead of omitted).",
+      "cross_ref": "read-paths R-ui-graph-read-layer.",
+      "target_gate": "F2/F4"
+    },
+    {
+      "id": "S-curved-edges",
+      "site": "memoryUniverseModel.ts curvedPath() + MemoryUniverse relationship layer",
+      "what": "Edges are drawn as decorative quadratic curves with a bend factor; the curvature is purely aesthetic and carries no semantic meaning.",
+      "authority_backed": "edges yes; curvature no",
+      "requirement": "MGR-026.8 (polish must not carry fake meaning) — low risk, but the curve is decorative.",
+      "target_gate": "F4"
+    }
+  ],
+
+  "inert_controls": [
+    {
+      "id": "I-timeline-button",
+      "site": "MemoryUniverse.tsx toolbar <button ... onClick={() => setTimeline(v => !v)}><Icon name='clock'/> Timeline</button>",
+      "wiring": "References undefined `timeline()`/`setTimeline` (TS2304 compile error). No timeline view is rendered anywhere in the component. Fully inert AND broken.",
+      "implies_capability": "A temporal/timeline workflow (MGR-015.1 lists 'history' as a required 2D workflow) that is not implemented in this renderer.",
+      "requirement": "MGR-015.1 (history/temporal workflow) — not delivered here.",
+      "target_gate": "F4"
+    },
+    {
+      "id": "I-lens-emphasis-toolbar",
+      "site": "MemoryUniverse.tsx toolbar buttons 'Generated facets' / 'Relationships' / 'Predicted links' (setLens)",
+      "wiring": "setLens() only updates the `lens()` signal, which is written to a `data-lens` attribute on the section (CSS emphasis only). The SVG render path always draws the relationship layer, facet layer, and core regardless of lens — the buttons do NOT filter or switch what is rendered.",
+      "implies_capability": "Distinct 'lenses' (facet vs relationship vs prediction emphasis) that appear to change the view but only toggle a CSS attribute.",
+      "requirement": "MGR-012.3 (typed renderer-independent actions) — these are cosmetic toggles, not scene/action switches.",
+      "target_gate": "F4"
+    },
+    {
+      "id": "I-auto-arrange",
+      "site": "MemoryUniverse.tsx view-controls <button aria-label='Auto arrange'><Icon name='rotate-ccw'/></button>",
+      "wiring": "onClick sets selection to core and resets the camera. It does NOT re-run or re-arrange any layout (layout is the deterministic hash synthesis). The label 'Auto arrange' misrepresents a camera/selection reset.",
+      "implies_capability": "An automatic graph re-layout.",
+      "requirement": "MGR-001.6 / MGR-026 (labels must match behavior).",
+      "target_gate": "F4"
+    },
+    {
+      "id": "I-pin-inspector",
+      "site": "MemoryUniverse.tsx MemoryDetailsPanel 'Pin memory'/'Release position' -> graphData.togglePin",
+      "wiring": "graphData.togglePin toggles the `pinned` set. Per graphData's own comment the shipped 2D/table 'expose no pin action because deterministic positions do not consume them' — nothing in the active SVG layout reads `pinned`. The pin state is consumed only by the DORMANT GraphCanvas3D. So the control mutates state that no live renderer reads = inert.",
+      "implies_capability": "Pinning a node's position, which the deterministic 2D layout cannot honor.",
+      "requirement": "MGR-012 (actions must affect the shipped representation).",
+      "target_gate": "F4"
+    },
+    {
+      "id": "I-pin-table",
+      "site": "MemoryGraphFallback.tsx row actions Pin/Unpin -> togglePin(row.id) + 'pinned' Badge",
+      "wiring": "References undefined local `isPinned`/`togglePin` (TS2304 compile error). Even if wired to graphData.togglePin, the table has no position to pin. Inert AND broken. NOTE its own test 'does not expose inert pin controls' asserts these should be ABSENT.",
+      "implies_capability": "Pinning from the table.",
+      "requirement": "MGR-012.",
+      "target_gate": "F4"
+    },
+    {
+      "id": "I-cmdk-hint",
+      "site": "MemoryUniverse.tsx search box <kbd>\u2318K</kbd>",
+      "wiring": "A '⌘K' keyboard-shortcut hint is rendered next to the filter input, but no ⌘K handler focuses this input or opens a palette. Cosmetic affordance implying a shortcut that isn't wired. NOTE the KnowledgeGraphLens test asserts this kbd should be absent.",
+      "implies_capability": "A command-palette / quick-filter keyboard shortcut.",
+      "requirement": "MGR-001.6 / MGR-014 (announced, real affordances).",
+      "target_gate": "F4"
+    }
+  ],
+
+  "visual_claims": [
+    {
+      "id": "V-generated-facet-label",
+      "site": "MemoryUniverse hub label 'Generated facet · N memories', data-generated='true', data-authority-class='navigation'; details panel 'Facet membership is not a stored relationship.'",
+      "claim": "Groups are generated navigation facets, not stored topology.",
+      "backing": "HONEST — explicitly labeled generated navigation and excluded from authority relationships (MGR-001.4 aligned). The COUNT 'N memories' is the count of client-categorized visible nodes.",
+      "requirement": "MGR-001.4 — compliant labeling; the residual issue is the fabricated categorization itself (S-keyword-categorization), not the label."
+    },
+    {
+      "id": "V-legend",
+      "site": "MemoryUniverse legend: 'Memory', 'Generated navigation facet', 'Stored relationship' (only when a stored edge exists), 'Inferred candidate' (only when a predicted edge exists)",
+      "claim": "Encoding legend for node/edge kinds.",
+      "backing": "PARTIAL-HONEST — legend entries are conditionally shown for encodings present in the scene (MGR-026.4 aligned). But it lacks Truth_State encodings (Current/Stale/Contradicted/etc.) required by MGR-026.3.",
+      "requirement": "MGR-026.3/.4."
+    },
+    {
+      "id": "V-edge-authority-titles",
+      "site": "MemoryUniverse relationship layer <title>'Stored relationship' | 'Inferred candidate': relType — a to b</title>; data-authority-class stored|inferred",
+      "claim": "Each edge is either a stored relationship or an inferred candidate.",
+      "backing": "PARTIAL — 'stored' vs 'inferred(predicted)' is backed by graphData's predicted flag; relType falls back to 'type unavailable'. No Provenance/Graph_Revision/Valid_Time attached (MGR-002.3).",
+      "requirement": "MGR-001.1 / MGR-002 / MGR-026.2."
+    },
+    {
+      "id": "V-relative-score",
+      "site": "MemoryUniverse details panel 'Relative score {score.toFixed(2)}' for predicted links",
+      "claim": "A predicted-link relevance number.",
+      "backing": "HONEST wording — labeled 'Relative score' (not probability/percentage) per MGR-001.3. BUT missing the required algorithm/profile version alongside the score. (The dormant GraphCanvas3D uses the weaker wording 'score {n}'.)",
+      "requirement": "MGR-001.3 — labeling compliant; version metadata missing. Underlying value is Adamic-Adar (read-paths R-graph-predict-links) with no interpretation label from the backend (MGR-011.4)."
+    },
+    {
+      "id": "V-table-component-badge",
+      "site": "MemoryGraphFallback column 'Component' + Badge 'component {n}' (row.component = node.community)",
+      "claim": "The node belongs to component N.",
+      "backing": "MISLABELED-AT-SOURCE — the LEAF label uses the correct MGR-011.1 word 'component', but the value comes from `memory_graph_communities` (backend/graphModel still call connected-components 'community'; node.community; buildCommunityIndex; COMMUNITY_COLOR_TOKENS; communityColorToken). Vocabulary corrected only at the table cell, not end-to-end.",
+      "requirement": "MGR-011.1 — partial; end-to-end `component` rename required (cross-ref read-paths analytics_vocabulary_issues)."
+    },
+    {
+      "id": "V-table-centrality",
+      "site": "MemoryGraphFallback 'Centrality' column (raw node.centrality = degree)",
+      "claim": "A per-entity centrality value.",
+      "backing": "PARTIAL — the number is backend degree_centrality, but the UI presents it as bare 'Centrality' with NO named algorithm ('degree') and NO evaluated scope.",
+      "requirement": "MGR-011.3 (centrality must carry named algorithm + evaluated scope)."
+    },
+    {
+      "id": "V-table-confirmed-status",
+      "site": "MemoryGraphFallback focus-relationship rows Status column: 'Confirmed' (check icon) for non-predicted edges vs 'Predicted' Badge",
+      "claim": "A relationship is 'Confirmed'.",
+      "backing": "PARTIAL — 'Confirmed' is inferred purely from edge.predicted===false; there is no Truth_State/Provenance/verification backing behind the word 'Confirmed'. Asserts certainty beyond the data.",
+      "requirement": "MGR-001.1 (claims need Truth_State/Provenance) / MGR-026.3."
+    },
+    {
+      "id": "V-core-focus-text",
+      "site": "MemoryUniverse core text 'CURRENT FOCUS' / 'Visible memory view' / 'N memories shown'; status header 'Memory Graph — N memories shown'",
+      "claim": "N memories are shown in the current view.",
+      "backing": "HONEST — reports the count of currently visible (client-categorized) nodes, i.e. the shown set. Does NOT claim a corpus total. (But cross-ref read-paths: the underlying centrality payload M is a backend-pre-limited number, so any 'N of M' totals derived elsewhere are not the true corpus total.)",
+      "requirement": "MGR-015.2 / MGR-006.3 honest totals — the universe view avoids the 'N of M' trap by only saying 'N shown'; the fallback table's cap label ('Showing N of M') inherits the pre-limited-M concern from read-paths R-ui-graph-read-layer."
+    },
+    {
+      "id": "V-community-color",
+      "site": "graphModel.communityColorToken / COMMUNITY_COLOR_TOKENS mapping node.community -> color token; memoryUniverseModel tone-based hub colors",
+      "claim": "Color encodes community/grouping.",
+      "backing": "MISLABELED — color encodes 'community' which is actually connected-components (MGR-011.1) in the table path, and in the universe view color encodes the FABRICATED keyword facet (S-keyword-categorization). Color asserts a grouping that is either mislabeled or invented.",
+      "requirement": "MGR-011.1 / MGR-026.6 (must not reveal/assert grouping via color without backing)."
+    }
+  ],
+
+  "command_name_map": {
+    "note": "Exact Tauri command names the UI memory/graph surfaces invoke via bridgeInvoke, mapped to backend read paths (0.3.2 read-paths.json) and write paths (0.3.1 write-paths.json).",
+    "reads": [
+      {"command": "memory_graph_centrality", "args": {"limit": "cap"}, "ui_callsite": "graphData.load", "backend": "read-paths R-graph-centrality (graph_intel.rs degree_centrality; desktop commands/memory.rs:747)", "notes": "MGR-011.3 no algorithm/scope in payload; MGR-004 no policy; LIMIT truncates pre-policy; UI derives 'M' from this pre-limited count."},
+      {"command": "memory_graph_communities", "args": {}, "ui_callsite": "graphData.load", "backend": "read-paths R-graph-communities (union-find connected components mislabeled 'communities')", "notes": "MGR-011.1 vocabulary violation propagated into UI color/component model."},
+      {"command": "memory_graph_relationships", "args": {"entityId": "id"}, "ui_callsite": "graphData.expand", "backend": "read-paths R-graph-relationships (relationships_for)", "notes": "MGR-004 no policy; endpoints injected as fabricated-label nodes (S-expand-injected-nodes)."},
+      {"command": "memory_graph_predict_links", "args": {"entityId": "id", "limit": 8}, "ui_callsite": "graphData.expand", "backend": "read-paths R-graph-predict-links (Adamic-Adar)", "notes": "score shown as 'Relative score' (universe) / 'score' (dormant 3D); no algorithm/version label."},
+      {"command": "memory_explain", "args": {"memoryId": "id"}, "ui_callsite": "MemoryInspector", "backend": "read-paths R-explain-memory (observability.explain_memory)", "notes": "MGR-004 by-id read applies no policy; inspector discloses all fields."}
+    ],
+    "writes": [
+      {"command": "memory_graph_create_relationship", "args": {"sourceId": "", "targetId": "", "relType": "related_to", "strength": 0.7}, "ui_callsite": "graphData.materializePrediction (from MemoryUniverse inspector 'Link' + MemoryGraphFallback 'Materialize')", "backend": "write-paths: MemorySystem::create_relationship (api.rs:812; commands/memory.rs:988) -> direct AuthorityTx add_relationship + notify_change", "notes": "through_write_policy=false (bypasses WritePolicy). This is the ONE materially functional graph write from the UI."},
+      {"command": "memory_verify", "args": {"memoryId": "id"}, "ui_callsite": "MemoryInspector", "backend": "write-paths: TruthEngine::verify (truth.rs) direct AuthorityTx", "notes": "no immutable event atomic with change."},
+      {"command": "memory_correct", "args": {"memoryId": "id", "content": ""}, "ui_callsite": "MemoryInspector", "backend": "write-paths: FeedbackService::record_in_tx correction tx", "notes": ""},
+      {"command": "memory_record_feedback", "args": {"targetId": "id", "targetKind": "memory", "signal": "thumbs_up|thumbs_down"}, "ui_callsite": "MemoryInspector reinforce/penalize", "backend": "write-paths: FeedbackService::record (own tx outside WritePolicy)", "notes": ""},
+      {"command": "memory_forget", "args": {"kind": "memory", "value": "id"}, "ui_callsite": "MemoryInspector forget", "backend": "write-paths: Lifecycle::forget (deletion cascade bypasses WritePolicy)", "notes": ""},
+      {"command": "memory_restore_forgotten", "args": {"memoryId": "id"}, "ui_callsite": "MemoryInspector undo", "backend": "write-paths: Lifecycle::restore", "notes": ""},
+      {"command": "memory_hard_delete", "args": {"kind": "memory", "value": "id"}, "ui_callsite": "MemoryInspector hard delete (confirm-gated)", "backend": "write-paths: Lifecycle::hard_delete", "notes": ""},
+      {"command": "memory_update", "args": {"memoryId": "id"}, "ui_callsite": "MemoryInspector (supersede path)", "backend": "write-paths: TruthEngine::supersede", "notes": "observed in inspector store; supersession mutates rows directly."}
+    ],
+    "optional_host": [
+      {"command": "open_detached_surface", "ui_callsite": "KnowledgeGraphLens detach button", "backend": "desktop windowing (optional per bridge OPTIONAL_COMMANDS)", "notes": "UI-window control, not a memory read/write."}
+    ],
+    "contract_naming_note": "core.md invariant: Tauri command/event names are a frozen frontend/backend contract. The MGR-011.1 `community`->`component` rename therefore CANNOT rename the command `memory_graph_communities` casually without a coordinated contract migration — flag for F2/F4 planning."
+  },
+
+  "test_mocks_simulating_success": [
+    {
+      "id": "M-graphData-test",
+      "file": "ui/src/shell/spaces/memory/graph/graphData.test.ts",
+      "mechanism": "vi.mock('../../../../bridge/invoke') with invokeMock returning ok({...}) per command (memory_graph_centrality/communities/relationships/predict_links/create_relationship).",
+      "simulated_success": "Fabricates centrality/communities/relationships/predictions and a successful create_relationship ('rel-1'). Proves read-model shaping, NOT backend capability.",
+      "capability_proof": false
+    },
+    {
+      "id": "M-knowledgegraphlens-test",
+      "file": "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.test.tsx",
+      "mechanism": "vi.mock bridgeInvoke returning ok for centrality/communities; vi.mock gateProbes.",
+      "simulated_success": "Fabricates a 1-node graph and verifies the shipped 2D contract.",
+      "capability_proof": false,
+      "divergence_flag": "The test 'ratifies the shipped 2D renderer' asserts a toolbar/DOM the current source DOES NOT produce (see source_vs_test_divergence)."
+    },
+    {
+      "id": "M-fallback-test",
+      "file": "ui/src/shell/spaces/memory/graph/MemoryGraphFallback.test.tsx",
+      "mechanism": "vi.mock bridgeInvoke ok; graphData.seed() to inject synthetic nodes/edges directly.",
+      "simulated_success": "Seeds a fixed node/edge set and mocks relationships/predict_links/create_relationship success.",
+      "capability_proof": false,
+      "divergence_flag": "'does not expose inert pin controls' asserts Pin/Unpin ABSENT; source renders them (and they don't compile)."
+    },
+    {
+      "id": "M-inspector-test",
+      "file": "ui/src/shell/spaces/memory/MemoryInspector.test.tsx",
+      "mechanism": "vi.mock bridgeInvoke with routeInvoke(): memory_explain returns a synthetic EXPLAIN object; every action command (verify/correct/forget/restore/hard_delete/feedback) returns ok.",
+      "simulated_success": "Fabricates a full memory-explain payload and per-command successes.",
+      "capability_proof": false
+    },
+    {
+      "id": "M-e2e-fixture-backend",
+      "file": "ui/e2e/fixtures.ts (window.__KRIA_E2E_BACKEND__.invoke)",
+      "mechanism": "Playwright fixture installs a window backend whose invoke() returns canned success shapes per command (get_provisioning_state 'complete', list_sessions [], memory_timeline, memory_library_list, memory_goals_list, memory_reasoning_analytics, memory_plans_analytics, memory_cold_start_status, list_feature_controls, ...).",
+      "simulated_success": "A whole simulated backend that answers commands with success; records calls in .calls.",
+      "capability_proof": false
+    },
+    {
+      "id": "M-e2e-memory-graph-visuals",
+      "file": "ui/e2e/memory-graph-visuals.spec.ts (installMemoryGraphBackend)",
+      "mechanism": "Overrides __KRIA_E2E_BACKEND__.invoke to synthesize nodes/communities/relationships/predictions from a hardcoded categoryLabels matrix and return create_relationship success.",
+      "simulated_success": "Fabricates an entire 9-community graph client-side for visual/DOM assertions.",
+      "capability_proof": false
+    },
+    {
+      "id": "M-e2e-memory-graph-baseline",
+      "file": "ui/e2e/memory-graph-baseline.spec.ts (installAuthorityFixture)",
+      "mechanism": "Overrides invoke to return an authority-sized synthetic node set + communities and record API-call samples for perf baselines.",
+      "simulated_success": "Fabricates authority-scale graph data; measures render/API timing against synthetic success.",
+      "capability_proof": false
+    },
+    {
+      "id": "M-bridge-dev-substrate",
+      "file": "ui/src/bridge/invoke.ts (import.meta.env.DEV branch)",
+      "mechanism": "SHIPPING bridge module: when import.meta.env.DEV && window.__KRIA_E2E_BACKEND__ exists, bridgeInvoke short-circuits to the fixture backend and returns { ok:true, data } from it.",
+      "simulated_success": "Not a test file but the production bridge's DEV hook that routes to a simulate-success backend. Compile-time gated out of production builds, but present in the shipped source.",
+      "capability_proof": false,
+      "note": "Verify at F1/F4 that this branch is truly stripped from production bundles (import.meta.env.DEV) and cannot be toggled at runtime in a release build."
+    }
+  ],
+
+  "source_vs_test_divergence": {
+    "summary": "The ACTIVE renderer sources on disk are in a broken/half-reverted state that CONTRADICTS their own vitest + Playwright specs. The specs describe a cleaner, MGR-aligned surface; the source has an older, non-compiling surface.",
+    "spec_expects": [
+      "KnowledgeGraphLens.test.tsx + memory-graph-visuals.spec.ts expect a role='group' name 'Graph display emphasis' with buttons 'Generated facets'/'Relationships'/'Predicted links' using aria-pressed, an 'Open table view' button, a Camera controls group with EXACTLY 3 buttons (Zoom in/Zoom out/Reset view), NO 'Timeline'/'Auto arrange'/'Center graph'/'Pin memory' buttons, and NO ⌘K kbd hint.",
+      "MemoryGraphFallback.test.tsx expects NO Pin/Unpin controls ('does not expose inert pin controls')."
+    ],
+    "source_actually_has": [
+      "MemoryUniverse.tsx: a <nav aria-label='Memory graph controls'> with classList-active buttons (not aria-pressed), a 'Timeline' button bound to UNDEFINED timeline()/setTimeline, a 4-button Camera controls group including 'Center graph' + 'Auto arrange', a ⌘K <kbd> hint, and a 'Pin memory' inspector action.",
+      "MemoryGraphFallback.tsx: Pin/Unpin row actions + 'pinned' badge bound to UNDEFINED isPinned()/togglePin."
+    ],
+    "implication": "At this commit the active Memory Graph renderer does not type-check and would fail its own tests. Treat the shipped-2D surface as Current-but-broken; the tests encode the intended shipped contract. F4 cutover should reconcile source to the tested contract (or to the new Canvas2D design) rather than assume the on-disk universe view is the shipping baseline."
+  },
+
+  "summary": {
+    "active_renderers": [
+      "MemoryUniverse.tsx (SVG radial 'universe') — live via KnowledgeGraphLens; Current-but-BROKEN (TS2304).",
+      "MemoryGraphFallback.tsx (semantic table) — live via MemoryUniverse showList dialog; Current-but-BROKEN (TS2304).",
+      "MemoryInspector.tsx (record detail/actions) — live via registerMemoryInspector; Current."
+    ],
+    "dormant_renderers": [
+      "GraphCanvas3D.tsx — Unavailable (no live import path for the memory graph).",
+      "GraphScene.ts / lensController.ts / layout.worker.ts / layoutSettle.ts — dormant FOR THE MEMORY GRAPH, but LIVE via capabilities ConstellationCanvas3D (shared).",
+      "graphModel.ts LOD/cull/degrade/3D-node-size helpers — dormant-in-2D (unit-tested only)."
+    ],
+    "synthetic_topology_sites": ["S-facet-categories", "S-keyword-categorization", "S-hashed-layout", "S-universe-core", "S-expand-injected-nodes", "S-curved-edges"],
+    "inert_controls": ["I-timeline-button (broken+inert)", "I-lens-emphasis-toolbar (CSS-only)", "I-auto-arrange (mislabeled reset)", "I-pin-inspector (state no live renderer reads)", "I-pin-table (broken+inert)", "I-cmdk-hint (unwired shortcut)"],
+    "visual_claims_lacking_backing": [
+      "V-table-component-badge (component word correct at leaf only; source field/command still 'community' — MGR-011.1 partial)",
+      "V-table-centrality (no named algorithm/scope — MGR-011.3)",
+      "V-table-confirmed-status ('Confirmed' with no Truth_State/Provenance — MGR-001.1)",
+      "V-community-color (color asserts mislabeled/fabricated grouping — MGR-011.1/MGR-026.6)",
+      "V-relative-score (honest wording but missing algorithm/version)",
+      "V-edge-authority-titles (stored/inferred backed, but no Provenance/Graph_Revision/Valid_Time — MGR-002.3)"
+    ],
+    "honest_claims_noted": ["V-generated-facet-label (MGR-001.4 aligned)", "V-legend (conditional, MGR-026.4 aligned but missing Truth_State encodings)", "V-core-focus-text ('N shown', avoids fake corpus total in the universe view)"],
+    "command_name_map_counts": {"reads": 5, "writes": 8, "optional_host": 1},
+    "test_mocks_simulating_success": ["M-graphData-test", "M-knowledgegraphlens-test", "M-fallback-test", "M-inspector-test", "M-e2e-fixture-backend", "M-e2e-memory-graph-visuals", "M-e2e-memory-graph-baseline", "M-bridge-dev-substrate"],
+    "counts": {
+      "ui_surfaces": 7,
+      "active_renderers": 3,
+      "dormant_or_shared_3d_modules": 6,
+      "synthetic_topology_sites": 6,
+      "inert_controls": 6,
+      "visual_claims_recorded": 9,
+      "visual_claims_lacking_backing": 6,
+      "commands_reads": 5,
+      "commands_writes": 8,
+      "test_mocks_simulating_success": 8,
+      "active_files_failing_typecheck": 2
+    }
+  },
+
+  "key_findings": [
+    "ACTIVE renderer is SVG, not Canvas2D: the shipped Memory Graph is MemoryUniverse.tsx (SVG radial universe) mounted by KnowledgeGraphLens from MemorySpace segment 'knowledgegraph' and the detached lens window. This confirms design.md §1's 'active MemoryUniverse SVG + semantic table' baseline and its planned migration to an authoritative Canvas2D Memory Control Center (MGR-015/§10.1).",
+    "ACTIVE renderer is BROKEN at this commit: `npx tsc --noEmit` fails — MemoryUniverse.tsx references undefined `timeline`/`setTimeline` and MemoryGraphFallback.tsx references undefined `isPinned`/`togglePin`. Both surfaces also CONTRADICT their own vitest/Playwright specs (which describe a cleaner aria-pressed 'Graph display emphasis' toolbar, an 'Open table view' button, a 3-button camera group, and NO Timeline/pin/⌘K). Treat the on-disk universe view as Current-but-broken, not a trustworthy shipping baseline (source_vs_test_divergence).",
+    "GraphCanvas3D is genuinely DORMANT for the memory graph (no live import mounts it; verified by grep + its own header comment + renderMode.ts note), consistent with the 0.3 invariant that dormant code/comments/tests are not capability proof. NUANCE: its 3D SUPPORT modules (GraphScene/lensController/layout.worker) are NOT globally dead — they are imported and constructed by the SEPARATE live ConstellationCanvas3D in the capabilities space, so 'graph-only' three/ngraph dependencies are reachable there. Any F6 ship-or-delete of memory 3D must coordinate with the constellation lens.",
+    "SYNTHETIC TOPOLOGY is pervasive in the universe view: memoryUniverseModel fabricates 9 hardcoded categories, assigns entities by naive keyword substring match (categoryForNode), and computes node positions by hashing ids (placeMemory). A synthetic 'CURRENT FOCUS' core node is always drawn, and graphData.expand injects relationship endpoints as nodes with fabricated labels (id.slice(0,8)) and a made-up centrality=1. Only the facet labeling is honestly marked 'generated navigation' (MGR-001.4); the categorization/layout themselves are invented (MGR-001.1/MGR-015.2).",
+    "INERT / MISLEADING CONTROLS: the 'Timeline' button (undefined signal, no timeline view — broken+inert), the lens emphasis toolbar (only toggles a CSS data-lens attribute; does not switch the rendered scene), 'Auto arrange' (actually just resets camera/selection), Pin controls in both the inspector and the table (mutate a `pinned` set that only the DORMANT 3D reads; the fallback's are also undefined/broken), and a ⌘K kbd hint with no wired shortcut. Several are exactly the affordances the tests say should be removed.",
+    "VISUAL VOCABULARY/AUTHORITY GAPS: the table's 'Component' badge uses the MGR-011.1-correct word only at the leaf while the value + command remain 'community' (memory_graph_communities = connected components); 'Centrality' is shown with no named algorithm/scope (MGR-011.3); 'Confirmed' relationship status asserts certainty with no Truth_State/Provenance (MGR-001.1); community color encodes a mislabeled/fabricated grouping (MGR-011.1/MGR-026.6). Predicted-link 'Relative score' wording is MGR-001.3-compliant but lacks algorithm/version.",
+    "COMMAND CONTRACT: the UI graph surfaces invoke 5 read commands (memory_graph_centrality/communities/relationships/predict_links, memory_explain) and 8 write commands (memory_graph_create_relationship + inspector verify/correct/record_feedback/forget/restore/hard_delete/update), each mapped here to a 0.3.1 write path or 0.3.2 read path. Per core.md the command NAMES are a frozen contract, so the MGR-011.1 community->component rename cannot casually rename `memory_graph_communities` without a coordinated migration.",
+    "TEST DOUBLES ARE NOT CAPABILITY PROOF: 8 simulate-success substrates were inventoried — 4 vitest mocks (vi.mock bridgeInvoke returning ok per command; MemoryInspector fabricates a full memory_explain payload), 3 Playwright fixtures that synthesize whole graphs client-side (fixtures.ts default backend, memory-graph-visuals, memory-graph-baseline), and the SHIPPING bridge DEV hook (import.meta.env.DEV -> window.__KRIA_E2E_BACKEND__) that routes invoke to a fixture backend. F1/F4 must confirm the DEV bridge branch is stripped from release bundles."
+  ],
+
+  "coverage_note": "Covered every required 0.3.4 category from live mount/import roots: the ACTIVE MemoryUniverse SVG renderer + its MemoryGraphFallback semantic table + list dialog behavior, the record MemoryInspector, the DORMANT GraphCanvas3D (with the shared-with-constellation 3D support nuance), synthetic topology (facet categories/keyword categorization/hashed layout/synthetic core/injected endpoint nodes/decorative curves), inert controls (timeline/lens emphasis/auto-arrange/pin/⌘K), visual claims (facet labels, legend, edge authority titles, relative score, component badge, centrality, confirmed status, community color), the exact command-name map (reads->0.3.2, writes->0.3.1), and test mocks that simulate backend success (4 unit mocks + 3 e2e fixtures + 1 shipping DEV bridge hook). Compile status verified via tsc; dormancy via import-reachability grep; source-vs-test divergence recorded as a first-class finding for F4 cutover. No secrets copied."
+}

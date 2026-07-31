@@ -1,0 +1,72 @@
+[
+  {
+    "case_id": "neg-unknown-required-field",
+    "kind": "unknown_required_field",
+    "target_type": "record",
+    "reason_code": "UnsupportedSchema",
+    "raw": {
+      "order": 0,
+      "id": "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "record_kind": "memory",
+      "truth_state": "Current",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "label": "interchange record 0",
+      "note": "known optional note 0",
+      "ext": {
+        "x_experimental_weight": 0,
+        "x_render_hint": "pinned",
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "1670789cb2b6a2652eac76c5d225e5901351a8a1315367a31894cc3227199a53",
+      "required_unsupported_semantic": "must_reject"
+    }
+  },
+  {
+    "case_id": "neg-checksum-mismatch",
+    "kind": "checksum_mismatch",
+    "target_type": "record",
+    "reason_code": "ChecksumMismatch",
+    "raw": {
+      "order": 0,
+      "id": "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "record_kind": "memory",
+      "truth_state": "Current",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "label": "interchange record 0",
+      "note": "known optional note 0",
+      "ext": {
+        "x_experimental_weight": 0,
+        "x_render_hint": "pinned",
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  {
+    "case_id": "neg-unknown-required-enum",
+    "kind": "unknown_required_enum",
+    "target_type": "record",
+    "reason_code": "UnsupportedSchema",
+    "raw": {
+      "order": 0,
+      "id": "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "record_kind": "quantum_glyph",
+      "truth_state": "Current",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "label": "interchange record 0",
+      "note": "known optional note 0",
+      "ext": {
+        "x_experimental_weight": 0,
+        "x_render_hint": "pinned",
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "1670789cb2b6a2652eac76c5d225e5901351a8a1315367a31894cc3227199a53"
+    }
+  }
+]

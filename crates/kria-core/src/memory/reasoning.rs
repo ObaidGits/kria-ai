@@ -6,6 +6,13 @@
 //! reasoning in order), per-task history, hallucination tracking (failed chains
 //! + counterexamples), and analytics. Backed by the single authority
 //! [`Database`] (no parallel store).
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::reasoning_trace`](
+//! crate::memory::authority::CommandCandidate::reasoning_trace) is the typed
+//! command-candidate scaffolding (task F1.5.1) this store's trace writes will
+//! route through once a concrete `TxSemanticStore` builder persists the
+//! reasoning-trace semantic row (F2). This store remains the live persistence
+//! path until then — see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 

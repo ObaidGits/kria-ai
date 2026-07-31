@@ -1431,15 +1431,6 @@ pub async fn openclaw_recommend_skills(
 use std::collections::VecDeque;
 use std::sync::{Mutex as StdMutex, OnceLock};
 
-/// Path to the SAME `skills.db` the frozen `ProductionSkillRegistry` owns
-/// (created + migrated at boot; migrations 3–6 own `capability_profiles`,
-/// `market_catalog`, `capability_grants_scoped`, `capability_edges`). The CIL
-/// derived-view stores open additional connections to this one file — there is
-/// no second database. Mirrors the path `openclaw_recommend_skills` already uses.
-fn openclaw_skills_db_path() -> std::path::PathBuf {
-    kria_data_dir().join("skills.db")
-}
-
 /// Path to the single CPP grant store (`capability::grants`), shared by the chat
 /// dispatcher, the Capabilities panel, and the desktop grant list/revoke
 /// commands — the ONE grant store (M12 Option-A).

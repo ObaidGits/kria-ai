@@ -4,7 +4,19 @@
 //! provenance chain, contradictions, Memory Worth, and access history;
 //! `memory_health_report` summarizes the bank for the "what KRIA believes about
 //! you" surface. Read-only.
+//!
+//! ## Scheduler Telemetry (F3.8 / task 3.8.6)
+//!
+//! [`SchedulerMetrics`] aggregates scheduler counters with **zero heap allocation
+//! and zero locking in hot paths**.  All increments use `Relaxed` atomics;
+//! [`SchedulerMetrics::snapshot`] reads all fields with `Relaxed` as well —
+//! sufficient for telemetry that needs only eventual visibility, never a fenced
+//! consistent read.
+//!
+//! **Privacy invariant**: no user content, no invocation IDs, no record IDs.
+//! Only aggregate counts (§39 / MGR-039).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use rusqlite::{params, OptionalExtension};
@@ -12,6 +24,152 @@ use uuid::Uuid;
 
 use crate::memory::db::Database;
 use crate::memory::error::{MemoryResult, StorageError};
+
+// ---------------------------------------------------------------------------
+// F3.8 / task 3.8.6 — Scheduler telemetry (aggregate, redacted, lock-free)
+// ---------------------------------------------------------------------------
+
+/// Aggregate scheduler telemetry counters.
+///
+/// All fields are `AtomicU64` so hot-path recording requires **no allocation
+/// and no locking**.  The struct is safe to share via `Arc<SchedulerMetrics>`.
+///
+/// **Privacy**: only aggregate counts — no user content, no invocation IDs,
+/// no record IDs (§39 / MGR-039).
+///
+/// **Overhead budget**: each `record_*` call is a single `fetch_add` with
+/// `Relaxed` ordering — estimated ≤ 2 ns/call on modern hardware, well within
+/// the ≤1 % CPU and ≤1 % interactive-latency overhead budget (MGR-009,
+/// MGR-022, MGR-028, MGR-039, MGR-042, MGR-045; MGD-015).
+pub struct SchedulerMetrics {
+    /// Total jobs successfully dispatched to a worker.
+    pub jobs_dispatched: AtomicU64,
+    /// Jobs dropped because the bounded queue was at capacity.
+    pub jobs_dropped_cap: AtomicU64,
+    /// Jobs silently coalesced (duplicate coalescing key already queued).
+    pub jobs_coalesced: AtomicU64,
+    /// Times a background job was preempted by a higher-priority foreground
+    /// arrival or by the 100 ms time-slice budget.
+    pub jobs_preempted: AtomicU64,
+    /// Arrivals of P0 (foreground) work — used to gauge preemption pressure.
+    pub p0_arrivals: AtomicU64,
+    /// Last-known queue depth (backlog).  Written on every push/pop, never
+    /// fenced; the telemetry consumer reads an eventually-consistent value.
+    pub backlog_size: AtomicU64,
+    /// P3/P4 suspension events due to resource pressure (battery / memory /
+    /// thermal / model), i.e., degradation events.
+    pub degradation_events: AtomicU64,
+}
+
+impl SchedulerMetrics {
+    /// Create a zero-initialised metrics set.  Stack-allocatable; wrap in
+    /// `Arc` when sharing across threads.
+    pub fn new() -> Self {
+        Self {
+            jobs_dispatched: AtomicU64::new(0),
+            jobs_dropped_cap: AtomicU64::new(0),
+            jobs_coalesced: AtomicU64::new(0),
+            jobs_preempted: AtomicU64::new(0),
+            p0_arrivals: AtomicU64::new(0),
+            backlog_size: AtomicU64::new(0),
+            degradation_events: AtomicU64::new(0),
+        }
+    }
+
+    // ── record_* helpers — one `fetch_add` each, hot-path safe ─────────────
+
+    /// Record a successfully dispatched job.
+    #[inline]
+    pub fn record_dispatched(&self) {
+        self.jobs_dispatched.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a job dropped because the queue was at its configured cap.
+    #[inline]
+    pub fn record_dropped_cap(&self) {
+        self.jobs_dropped_cap.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a job that was coalesced (duplicate key already queued).
+    #[inline]
+    pub fn record_coalesced(&self) {
+        self.jobs_coalesced.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a preemption event (foreground arrival or time-slice expiry).
+    #[inline]
+    pub fn record_preempted(&self) {
+        self.jobs_preempted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a P0 foreground arrival.
+    #[inline]
+    pub fn record_p0_arrival(&self) {
+        self.p0_arrivals.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Update the last-known backlog depth (current queue length).
+    ///
+    /// This is a `store`, not an `add`, because the value represents a gauge
+    /// rather than a monotonic counter.
+    #[inline]
+    pub fn update_backlog_size(&self, depth: u64) {
+        self.backlog_size.store(depth, Ordering::Relaxed);
+    }
+
+    /// Record a degradation event (P3/P4 suspended due to resource pressure).
+    #[inline]
+    pub fn record_degradation_event(&self) {
+        self.degradation_events.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Read all counters atomically for telemetry reporting.
+    ///
+    /// Uses `Relaxed` ordering throughout — appropriate for telemetry that
+    /// only needs eventual visibility and never drives correctness decisions.
+    /// No fence is inserted; the caller must not rely on this as a
+    /// synchronisation point.
+    pub fn snapshot(&self) -> SchedulerMetricsSnapshot {
+        SchedulerMetricsSnapshot {
+            jobs_dispatched: self.jobs_dispatched.load(Ordering::Relaxed),
+            jobs_dropped_cap: self.jobs_dropped_cap.load(Ordering::Relaxed),
+            jobs_coalesced: self.jobs_coalesced.load(Ordering::Relaxed),
+            jobs_preempted: self.jobs_preempted.load(Ordering::Relaxed),
+            p0_arrivals: self.p0_arrivals.load(Ordering::Relaxed),
+            backlog_size: self.backlog_size.load(Ordering::Relaxed),
+            degradation_events: self.degradation_events.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Default for SchedulerMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A point-in-time snapshot of [`SchedulerMetrics`] — plain `u64` fields
+/// suitable for serialisation, logging, or health-report inclusion.
+///
+/// **Privacy**: only aggregate counts — no user content, no invocation IDs,
+/// no record IDs (§39 / MGR-039).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SchedulerMetricsSnapshot {
+    /// Total jobs successfully dispatched to a worker.
+    pub jobs_dispatched: u64,
+    /// Jobs dropped because the bounded queue was at capacity.
+    pub jobs_dropped_cap: u64,
+    /// Jobs silently coalesced (duplicate coalescing key already queued).
+    pub jobs_coalesced: u64,
+    /// Times a background job was preempted.
+    pub jobs_preempted: u64,
+    /// Arrivals of P0 (foreground) work.
+    pub p0_arrivals: u64,
+    /// Last-known queue depth (backlog) at snapshot time.
+    pub backlog_size: u64,
+    /// P3/P4 suspension events due to resource pressure.
+    pub degradation_events: u64,
+}
 
 /// Provenance + status explanation for a single memory (L6).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -47,6 +205,12 @@ pub struct MemoryHealthReport {
     pub knowledge_gaps: i64,
     pub enrichment_backlog: i64,
     pub outbox_pending: i64,
+    /// Application-level cryptographic shredding capability (MGR-041 / design §5.4).
+    /// Always `"unavailable — payload encryption not yet implemented; reliance on
+    /// host OS disk encryption only"` until real encryption + key-destruction
+    /// evidence exists.  Surfaced here so the "What KRIA believes about you"
+    /// surface never falsely claims cryptographic erasure.
+    pub crypto_shred_capability: String,
 }
 
 pub struct Observability {
@@ -178,6 +342,8 @@ impl Observability {
                     .map_err(StorageError::Sqlite)?,
                 by_type: Vec::new(),
                 by_staleness: Vec::new(),
+                // Populated below after the struct literal.
+                crypto_shred_capability: String::new(),
             };
 
             report.by_type = group_counts(
@@ -188,6 +354,11 @@ impl Observability {
                 conn,
                 "SELECT staleness_class, COUNT(*) FROM memories WHERE state='active' GROUP BY staleness_class",
             )?;
+            // MGR-041 / design §5.4: always "unavailable" — content is plaintext,
+            // no payload encryption exists.  shred_keys.status='destroyed' is a
+            // hard-delete flag only.  Never claim application-level unreadability.
+            report.crypto_shred_capability =
+                crate::memory::api::CRYPTO_SHRED_CAPABILITY.to_owned();
             Ok(report)
         })
     }
@@ -323,5 +494,132 @@ mod tests {
         assert!(r.avg_confidence > 0.8);
         assert_eq!(r.by_type, vec![("semantic".to_string(), 1)]);
         assert_eq!(r.knowledge_gaps, 0);
+    }
+
+    /// Validates: MGR-041 — the health report must explicitly disclose that
+    /// application-level cryptographic shredding is unavailable until payload
+    /// encryption, key destruction, and zero-plaintext evidence are all
+    /// implemented.  It must NOT claim "Crypto-Shredded" or imply unreadability.
+    #[test]
+    fn health_report_crypto_shred_capability_is_unavailable() {
+        let db = Arc::new(Database::open_in_memory().unwrap());
+        seed(&db);
+        let obs = Observability::new(db.clone());
+        let r = obs.health_report().unwrap();
+        // Must contain "unavailable" so the UI/caller cannot misread it as
+        // available or complete.
+        assert!(
+            r.crypto_shred_capability.contains("unavailable"),
+            "crypto_shred_capability must contain 'unavailable', got: {:?}",
+            r.crypto_shred_capability
+        );
+        // Must not claim cryptographic erasure is complete.
+        let lower = r.crypto_shred_capability.to_lowercase();
+        assert!(
+            !lower.contains("complete") && !lower.contains("available\u{201c}"),
+            "crypto_shred_capability must not claim completion, got: {:?}",
+            r.crypto_shred_capability
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // SchedulerMetrics — F3.8 / task 3.8.6
+    // -----------------------------------------------------------------------
+
+    /// Validates: MGR-009, MGR-022, MGR-028, MGR-039, MGR-042, MGR-045; MGD-015.
+    ///
+    /// `jobs_dispatched` counter starts at zero and increments by 1 per call.
+    #[test]
+    fn scheduler_metrics_jobs_dispatched_increments() {
+        let m = SchedulerMetrics::new();
+        assert_eq!(m.snapshot().jobs_dispatched, 0);
+        m.record_dispatched();
+        m.record_dispatched();
+        m.record_dispatched();
+        assert_eq!(m.snapshot().jobs_dispatched, 3);
+    }
+
+    /// Validates: MGR-009, MGR-022, MGR-039; MGD-015.
+    ///
+    /// `jobs_dropped_cap` counter starts at zero and increments by 1 per call.
+    #[test]
+    fn scheduler_metrics_jobs_dropped_cap_increments() {
+        let m = SchedulerMetrics::new();
+        assert_eq!(m.snapshot().jobs_dropped_cap, 0);
+        m.record_dropped_cap();
+        m.record_dropped_cap();
+        assert_eq!(m.snapshot().jobs_dropped_cap, 2);
+    }
+
+    /// Validates: MGR-009, MGR-022, MGR-039; MGD-015.
+    ///
+    /// `snapshot()` reads all seven fields and returns the correct values.
+    #[test]
+    fn scheduler_metrics_snapshot_captures_all_fields() {
+        let m = SchedulerMetrics::new();
+        m.record_dispatched();
+        m.record_dropped_cap();
+        m.record_coalesced();
+        m.record_preempted();
+        m.record_p0_arrival();
+        m.update_backlog_size(42);
+        m.record_degradation_event();
+
+        let s = m.snapshot();
+        assert_eq!(s.jobs_dispatched, 1, "jobs_dispatched");
+        assert_eq!(s.jobs_dropped_cap, 1, "jobs_dropped_cap");
+        assert_eq!(s.jobs_coalesced, 1, "jobs_coalesced");
+        assert_eq!(s.jobs_preempted, 1, "jobs_preempted");
+        assert_eq!(s.p0_arrivals, 1, "p0_arrivals");
+        assert_eq!(s.backlog_size, 42, "backlog_size");
+        assert_eq!(s.degradation_events, 1, "degradation_events");
+    }
+
+    /// Validates: MGR-009, MGR-022, MGR-039; MGD-015.
+    ///
+    /// Concurrent increments from multiple Tokio tasks produce the exact
+    /// expected sum, confirming the `AtomicU64` implementation is data-race-free.
+    #[tokio::test]
+    async fn scheduler_metrics_concurrent_increments_produce_correct_sum() {
+        let metrics = Arc::new(SchedulerMetrics::new());
+        let tasks = 8usize;
+        let per_task = 1_000usize;
+
+        let handles: Vec<_> = (0..tasks)
+            .map(|_| {
+                let m = Arc::clone(&metrics);
+                tokio::spawn(async move {
+                    for _ in 0..per_task {
+                        m.record_dispatched();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.await.expect("task panicked");
+        }
+
+        let expected = (tasks * per_task) as u64;
+        assert_eq!(
+            metrics.snapshot().jobs_dispatched,
+            expected,
+            "expected {} dispatched after concurrent increments",
+            expected
+        );
+    }
+
+    /// `SchedulerMetrics::new()` zero-initialises all counters.
+    #[test]
+    fn scheduler_metrics_new_zero_initialised() {
+        let s = SchedulerMetrics::new().snapshot();
+        assert_eq!(s, SchedulerMetricsSnapshot::default());
+    }
+
+    /// `Arc<SchedulerMetrics>` is `Send + Sync` — usable across threads.
+    #[test]
+    fn scheduler_metrics_arc_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Arc<SchedulerMetrics>>();
     }
 }

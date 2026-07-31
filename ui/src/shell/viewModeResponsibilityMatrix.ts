@@ -28,7 +28,7 @@
  *   | Chips          | yes                | yes                | hidden (palette)  | no                   |
  *   | ACS            | yes                | yes                | hidden            | no                   |
  *   | Orbit          | yes                | yes                | hidden            | no                   |
- *   | Hidden Dock    | on intent          | on intent          | palette only      | no                   |
+ *   | Navigation Rail| icon rail, expandable| compact, expandable | icon-only         | no                   |
  *   | Notifications  | suppressed→Focus   | suppressed→Focus   | critical only     | ember brighten       |
  *   | Conversation   | full               | full               | scrollable compact| opens Mini/Standard  |
  *
@@ -63,7 +63,7 @@ export type HomeElement =
   | "chips"
   | "acs"
   | "orbit"
-  | "hiddenDock"
+  | "navigationRail"
   | "notifications"
   | "conversation";
 
@@ -75,7 +75,7 @@ export const HOME_ELEMENTS: readonly HomeElement[] = [
   "chips",
   "acs",
   "orbit",
-  "hiddenDock",
+  "navigationRail",
   "notifications",
   "conversation",
 ] as const;
@@ -87,7 +87,7 @@ export const HOME_ELEMENTS: readonly HomeElement[] = [
  *                     silence, but it IS part of Standard's composition).
  *   • `hidden`      — not part of the composition at all in this mode.
  *   • `conditional` — never present at rest; appears ONLY on the named trigger
- *                     (e.g. Dock "on intent", Companion Composer "on click").
+ *                     (e.g. Companion Composer "on click").
  */
 export type ElementPresence = "shown" | "hidden" | "conditional";
 
@@ -131,7 +131,7 @@ export const VIEW_MODE_RESPONSIBILITY_MATRIX: Readonly<
     chips: shown("yes"),
     acs: shown("yes"),
     orbit: shown("yes"),
-    hiddenDock: cond("intent", "on intent"),
+    navigationRail: shown("icon rail, expandable"),
     notifications: shown("suppressed→Focus"),
     conversation: shown("full"),
   },
@@ -143,7 +143,7 @@ export const VIEW_MODE_RESPONSIBILITY_MATRIX: Readonly<
     chips: shown("yes"),
     acs: shown("yes"),
     orbit: shown("yes"),
-    hiddenDock: cond("intent", "on intent"),
+    navigationRail: shown("compact, expandable"),
     notifications: shown("suppressed→Focus"),
     conversation: shown("full"),
   },
@@ -155,7 +155,7 @@ export const VIEW_MODE_RESPONSIBILITY_MATRIX: Readonly<
     chips: hidden("hidden (palette)"),
     acs: hidden("hidden"),
     orbit: hidden("hidden"),
-    hiddenDock: cond("palette", "palette only"),
+    navigationRail: shown("icon-only"),
     notifications: cond("critical", "critical only"),
     conversation: shown("scrollable compact"),
   },
@@ -167,7 +167,7 @@ export const VIEW_MODE_RESPONSIBILITY_MATRIX: Readonly<
     chips: hidden("no"),
     acs: hidden("no"),
     orbit: hidden("no"),
-    hiddenDock: hidden("no"),
+    navigationRail: hidden("no"),
     notifications: cond("brighten", "ember brighten"),
     conversation: cond("open", "opens Mini/Standard"),
   },

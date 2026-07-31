@@ -1,0 +1,90 @@
+[
+  {
+    "id": "de0b4c5c-0f6a-40d4-5fe8-1b754dac74d5",
+    "link_type": "derived_from",
+    "source_kind": "summary",
+    "source_id": "0612aeff-49e6-cabd-b8e5-a91e52adb77e",
+    "target_kind": "memory",
+    "target_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "truth_state": "Current",
+    "valid": true,
+    "invalid_reason": null
+  },
+  {
+    "id": "871a4851-1446-f45a-c38e-11df52fab1ff",
+    "link_type": "supports",
+    "source_kind": "evidence",
+    "source_id": "37207936-6c15-5441-0334-4e2c9a39df0b",
+    "target_kind": "relationship",
+    "target_id": "27927092-1acb-4f0d-0cdf-de751f48f9a5",
+    "truth_state": "Current",
+    "valid": true,
+    "invalid_reason": null
+  },
+  {
+    "id": "bceac341-1013-3580-4a63-596bc6dded2c",
+    "link_type": "contradicts",
+    "source_kind": "evidence",
+    "source_id": "37207936-6c15-5441-0334-4e2c9a39df0b",
+    "target_kind": "memory",
+    "target_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "truth_state": "Current",
+    "valid": true,
+    "invalid_reason": null
+  },
+  {
+    "id": "30b6e06e-3820-7502-d968-b7cf83093f6a",
+    "link_type": "mentions_entity",
+    "source_kind": "mention",
+    "source_id": "11028b41-7bb2-2a6c-7d00-cdb81795bf52",
+    "target_kind": "entity",
+    "target_id": "3330b3cc-ce42-503b-4eaf-1cf1d531abb7",
+    "truth_state": "Current",
+    "valid": true,
+    "invalid_reason": null
+  },
+  {
+    "id": "5baa9703-f8c2-07d2-54ae-941e1a26565a",
+    "link_type": "superseded_by",
+    "source_kind": "memory",
+    "source_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "target_kind": "summary",
+    "target_id": "0612aeff-49e6-cabd-b8e5-a91e52adb77e",
+    "truth_state": "Current",
+    "valid": true,
+    "invalid_reason": null
+  },
+  {
+    "id": "868b7fd2-0b87-4c5e-eca8-5ccb09e0d3b7",
+    "link_type": "relates_to",
+    "source_kind": "memory",
+    "source_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "target_kind": "entity",
+    "target_id": "3330b3cc-ce42-503b-4eaf-1cf1d531abb7",
+    "truth_state": "Current",
+    "valid": false,
+    "invalid_reason": "unknown_link_type"
+  },
+  {
+    "id": "80fa8c85-9cd6-0683-000d-285b13cef0ef",
+    "link_type": "supports",
+    "source_kind": "evidence",
+    "source_id": "37207936-6c15-5441-0334-4e2c9a39df0b",
+    "target_kind": "relationship",
+    "target_id": "00000000-0000-0000-0000-000000000000",
+    "truth_state": "Current",
+    "valid": false,
+    "invalid_reason": "dangling_endpoint"
+  },
+  {
+    "id": "727f8e39-fba8-6425-70b7-1c27154d81c6",
+    "link_type": "superseded_by",
+    "source_kind": "memory",
+    "source_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "target_kind": "memory",
+    "target_id": "947bf295-21a0-ee02-bf75-78be71e570c9",
+    "truth_state": "Current",
+    "valid": false,
+    "invalid_reason": "reflexive_directed"
+  }
+]

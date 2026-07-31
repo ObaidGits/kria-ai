@@ -100,6 +100,11 @@ pub async fn health(ms: &MemorySystem) -> MemoryResult<Value> {
         "event_count": h.event_count,
         "memory_count": h.memory_count,
         "pending_enrichment": h.pending_enrichment,
+        // MGR-041 / design §5.4: honest cryptographic shredding capability.
+        // "unavailable" until payload encryption + key destruction + zero-plaintext
+        // evidence are all implemented.  Callers must not treat the
+        // shred_keys.status='destroyed' flag as proof of cryptographic erasure.
+        "crypto_shred_capability": h.crypto_shred_capability,
     }))
 }
 
@@ -239,7 +244,9 @@ pub fn remember(ms: &MemorySystem, text: impl Into<String>) -> MemoryResult<Valu
 }
 
 pub fn forget(ms: &MemorySystem, kind: &str, value: &str) -> MemoryResult<Value> {
-    let n = ms.forget(parse_scope(kind, value)?)?;
+    // No preview token required for contract/tool calls — None means
+    // "automated caller; no stale-revision guard needed".
+    let n = ms.forget(parse_scope(kind, value)?, None)?;
     Ok(json!({ "forgotten": n }))
 }
 

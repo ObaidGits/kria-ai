@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@solidjs/testing-library";
+import { render, screen, fireEvent, cleanup, waitFor } from "@solidjs/testing-library";
 import MemorySpace from "./MemorySpace";
 import { memoryStore, shellStore } from "../../stores";
 import type { MemoryFact } from "../../stores";
@@ -84,15 +84,28 @@ describe("MemorySpace — landing + segments (task 6.1, Req 5.1)", () => {
     expect(screen.getByRole("heading", { name: "Goals & Plans" })).toBeInTheDocument();
   });
 
-  it("mounts the immersive Knowledge Graph without requiring WebGL (Req 5.4/5.5)", () => {
+  it("mounts the v2 Knowledge destination (list-first, no synthetic universe) (Req 5.4/5.5)", async () => {
     render(() => <MemorySpace />);
     fireEvent.click(screen.getByRole("tab", { name: "Knowledge Graph" }));
     expect(currentRoute().segment).toBe("knowledgegraph");
-    // Deterministic SVG universe is the primary renderer on every device;
-    // the accessible table remains available from its in-graph control.
-    expect(document.querySelector("canvas")).toBeNull();
-    expect(document.querySelector(".memory-universe")).not.toBeNull();
-    expect(document.querySelectorAll(".memory-universe__hub")).toHaveLength(8);
+    // No legacy SVG universe — that renderer was deleted in F4.9.6.
+    expect(document.querySelector(".memory-universe")).toBeNull();
+    // v2 Knowledge destination renders its accessible list shell immediately.
+    expect(document.querySelector('[data-testid="knowledge-shell"]')).not.toBeNull();
+
+    // Items are now loaded from the backend (task: live-wired Knowledge).
+    // Under jsdom the Tauri `invoke` bridge is unavailable, so the load settles
+    // with zero items and the honest empty state appears. Wait for the
+    // in-flight load to resolve before asserting the settled state.
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="semantic-list-loading"]')).toBeNull();
+      expect(document.querySelector('[data-testid="empty-state"]')).not.toBeNull();
+    });
+
+    // The prototype workspace remains mounted so loading, empty, and recovery
+    // states retain the same spatial frame instead of swapping presentations.
+    expect(document.querySelector("canvas")).not.toBeNull();
+    expect(document.querySelector('[data-testid="empty-state"]')).not.toBeNull();
   });
 
   it("filters memories in Explorer by the header search (Req 5.1)", () => {

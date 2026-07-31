@@ -1,0 +1,142 @@
+{
+  "schema_version": "correctness-report/v1",
+  "suite_ids": [
+    "V-PERF-01",
+    "V-GRAPH-01",
+    "V-RET-01",
+    "V-RET-02",
+    "V-POLICY-02",
+    "V-TRUTH-01",
+    "V-LIFE-01"
+  ],
+  "requirement_ids": [
+    "MGR-004",
+    "MGR-006",
+    "MGR-007",
+    "MGR-009",
+    "MGR-013",
+    "MGR-015",
+    "MGR-036"
+  ],
+  "run_id": "run-001",
+  "gate": "F5",
+  "task": "5.1.2",
+  "utc_timestamp": "2026-07-29T09:17:13.115286720+00:00",
+  "fixture_id": "mg-release-v2",
+  "fixture_seed": "0x4D475204",
+  "record_count": 100000,
+  "link_count": 256118,
+  "status": "Pass",
+  "total_assertions": 88,
+  "total_passed": 88,
+  "total_failed": 0,
+  "elapsed_ms": 50935,
+  "categories": [
+    {
+      "category": "Search (FTS5)",
+      "suite_id": "V-RET-01",
+      "total_assertions": 12,
+      "passed": 12,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Five Strategies",
+      "suite_id": "V-RET-01",
+      "total_assertions": 7,
+      "passed": 7,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Graph depths/paths",
+      "suite_id": "V-GRAPH-01",
+      "total_assertions": 13,
+      "passed": 13,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Hidden intermediary (policy path omission)",
+      "suite_id": "V-GRAPH-01",
+      "total_assertions": 4,
+      "passed": 4,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Cycle-safe BFS",
+      "suite_id": "V-GRAPH-01",
+      "total_assertions": 5,
+      "passed": 5,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Time (temporal boundaries)",
+      "suite_id": "V-TRUTH-01",
+      "total_assertions": 7,
+      "passed": 7,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Goals (active-only)",
+      "suite_id": "V-RET-01",
+      "total_assertions": 5,
+      "passed": 5,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Traces",
+      "suite_id": "V-RET-02",
+      "total_assertions": 14,
+      "passed": 14,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Totals/cursors (pagination)",
+      "suite_id": "V-RET-01",
+      "total_assertions": 6,
+      "passed": 6,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Lifecycle exclusions",
+      "suite_id": "V-LIFE-01",
+      "total_assertions": 12,
+      "passed": 12,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    },
+    {
+      "category": "Policy-paired queries",
+      "suite_id": "V-POLICY-02",
+      "total_assertions": 3,
+      "passed": 3,
+      "failed": 0,
+      "failures": [],
+      "status": "Pass"
+    }
+  ],
+  "reviewer": {
+    "role": "owner-self-review",
+    "reviewer_id": "owner",
+    "utc_timestamp": "2026-07-29T09:17:13.115286720+00:00",
+    "verdict": "Pass",
+    "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md"
+  }
+}

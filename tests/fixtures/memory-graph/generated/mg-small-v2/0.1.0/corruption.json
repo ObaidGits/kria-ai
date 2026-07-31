@@ -1,0 +1,46 @@
+[
+  {
+    "id": "904a8ad7-0c85-6914-940e-b3d35d116b94",
+    "target": "row",
+    "failure_kind": "checksum_mismatch",
+    "record_kind": "memory",
+    "record_id": "d1f5cd9d-dac2-506c-7470-965cd991a5f3",
+    "expected_hash": "3caac897e4aa4f98b2c0814c83a8dc9357ed80684b23018250f99447970e7253",
+    "actual_hash": "00a43ccbefcc1100f2fbda2ddb67248220c2e7e652322c3346a863a5b9b7d877",
+    "revision": 1,
+    "detected_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "4d04bd93-b291-d29b-01da-d5d8c4eff4b0",
+    "target": "manifest",
+    "failure_kind": "manifest_membership_drift",
+    "record_kind": null,
+    "record_id": null,
+    "expected_hash": "b71b3a070b52635a4af105456798c04a2c48ba45c0ef0aea04b234cb5036abff",
+    "actual_hash": "e4dbe4b70662d9ff001bec027579548b3be6690f61674b9f804a9990064d08a2",
+    "revision": 2,
+    "detected_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "2d9ddade-4e37-9df4-8361-35eebf7ebd20",
+    "target": "index",
+    "failure_kind": "dangling_reference",
+    "record_kind": "skill",
+    "record_id": "67a0a114-d56b-8446-221b-a9a3c3542a03",
+    "expected_hash": "d8d9188ce08899d94366bab10fb546b054ca7b6bc75885bb2363c5f45c4e246a",
+    "actual_hash": "ba744ce2a4009e9f1816d205166df980af306331b05f9610db7f8aa4c680c581",
+    "revision": 3,
+    "detected_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "7e7c46ce-e63b-da45-8231-86b3f6371a68",
+    "target": "vector_blob",
+    "failure_kind": "truncated_vector_blob",
+    "record_kind": "rule",
+    "record_id": "f686208a-f6be-6312-b545-fd7a6bc0efbf",
+    "expected_hash": "3e50e91ce345fba952049ce8ce9868db5cb2614db1f9ff9680282b991fe0b261",
+    "actual_hash": "c89eb9c6f8b0fae5eff381c7e3e2c563a7d49b71fa15de48a4d4fd8b3e8f973e",
+    "revision": 4,
+    "detected_at": "2024-06-01T00:00:00Z"
+  }
+]

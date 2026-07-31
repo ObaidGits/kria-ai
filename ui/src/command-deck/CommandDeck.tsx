@@ -53,7 +53,7 @@ export function CommandDeck(props: { onExit?: () => void }) {
 
       <MissionHeader />
 
-      <main class="cd__zones" aria-label="Operations">
+      <main id="space-root" class="cd__zones" tabindex={-1} aria-label="Operations">
         <Show
           when={panels().length > 0}
           fallback={<div class="cd__empty">The Command Deck is ready. Operational panels will appear here.</div>}

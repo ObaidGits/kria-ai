@@ -21,6 +21,19 @@ pub type MemoryResult<T> = Result<T, MemoryError>;
 pub enum MemoryError {
     #[error("memory feature is disabled")]
     Disabled,
+    /// The system is in Recovery_Mode (design §5.3): durable writes are blocked
+    /// until a verified restore succeeds. Callers should surface the
+    /// `fault_class` and `correlation_id` to the user for recovery triage.
+    #[error(
+        "system is in Recovery_Mode (fault_class={fault_class}, correlation_id={correlation_id}): \
+         durable writes are blocked until a verified restore succeeds"
+    )]
+    InRecoveryMode {
+        /// Policy-safe fault classification (corruption class only, no content).
+        fault_class: String,
+        /// Stable correlation ID from the startup check that triggered this mode.
+        correlation_id: String,
+    },
     #[error("storage: {0}")]
     Storage(#[from] StorageError),
     #[error("retrieval: {0}")]
@@ -61,7 +74,9 @@ impl MemoryError {
     pub fn needs_recovery(&self) -> bool {
         matches!(
             self,
-            MemoryError::Storage(StorageError::Corruption(_)) | MemoryError::Recovery(_)
+            MemoryError::Storage(StorageError::Corruption(_))
+                | MemoryError::Recovery(_)
+                | MemoryError::InRecoveryMode { .. }
         )
     }
 }
@@ -90,6 +105,19 @@ pub enum StorageError {
     Busy,
     #[error("authority is on a network filesystem (L14): {0}")]
     NetworkFilesystem(String),
+    /// A connection-open pragma did not take effect (design §4/§4.4): the pragma
+    /// was set but reading it back returned an unexpected value, meaning a
+    /// durability or integrity invariant would be silently violated.
+    #[error("pragma assertion failed: {0}")]
+    PragmaAssertion(String),
+    /// A required SQLite capability (e.g. JSON1) is not compiled into the linked
+    /// library. The authority depends on it (design §4 uses `json_valid`).
+    #[error("required sqlite capability missing: {0}")]
+    CapabilityMissing(String),
+    /// A value failed canonical-encoding validation at the authority write
+    /// boundary (design §4: canonical time / UUID / boolean encodings).
+    #[error("canonical encoding violation: {0}")]
+    Encoding(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("serialization: {0}")]
@@ -186,6 +214,14 @@ pub enum RecoveryError {
     NoBackup,
     #[error("rebuild failed: {0}")]
     Rebuild(String),
+    /// Attempted to force-exit Recovery_Mode without a verified restore
+    /// (design §5.3: "no RecoveryMode → Healthy transition is allowed without
+    /// passing the startup checker").
+    #[error(
+        "cannot exit Recovery_Mode without a verified restore: \
+         call recovery_restore() with a valid backup source"
+    )]
+    CannotExitWithoutVerifiedRestore,
 }
 
 #[cfg(test)]
@@ -204,5 +240,21 @@ mod tests {
         assert!(MemoryError::from(StorageError::Corruption("bad page".into())).needs_recovery());
         assert!(MemoryError::from(RecoveryError::NoBackup).needs_recovery());
         assert!(!MemoryError::from(EmbeddingError::Unavailable).needs_recovery());
+    }
+
+    #[test]
+    fn in_recovery_mode_triggers_recovery() {
+        let err = MemoryError::InRecoveryMode {
+            fault_class: "sqlite_integrity_violation".to_string(),
+            correlation_id: "corr-1".to_string(),
+        };
+        assert!(err.needs_recovery());
+        assert!(!err.is_degradation());
+        // Error message must include fault_class and correlation_id but not
+        // protected content (verified by inspecting the format string only).
+        let s = err.to_string();
+        assert!(s.contains("Recovery_Mode"));
+        assert!(s.contains("sqlite_integrity_violation"));
+        assert!(s.contains("corr-1"));
     }
 }

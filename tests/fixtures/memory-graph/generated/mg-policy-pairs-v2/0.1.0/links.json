@@ -1,0 +1,60 @@
+[
+  {
+    "id": "b20da771-5183-431f-3148-ef004c3e8057",
+    "link_type": "derived_from",
+    "source_id": "2b33b327-4897-60cc-9037-7d43eec9bd34",
+    "target_id": "176e977b-d65f-26ff-ac8f-afc5c55bffec",
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "truth_state": "Current"
+  },
+  {
+    "id": "2e05a16a-29c0-60d6-eea6-576201525258",
+    "link_type": "derived_from",
+    "source_id": "176e977b-d65f-26ff-ac8f-afc5c55bffec",
+    "target_id": "53310b2b-984b-0b4b-b37a-5a8d9758822f",
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "truth_state": "Current"
+  },
+  {
+    "id": "f87cac5e-d543-4e0b-96d6-49c75c6dc743",
+    "link_type": "derived_from",
+    "source_id": "53310b2b-984b-0b4b-b37a-5a8d9758822f",
+    "target_id": "a41c68a6-a675-d593-2876-adb89a28785a",
+    "layer": "shared",
+    "worlds": [
+      "a",
+      "b"
+    ],
+    "truth_state": "Current"
+  },
+  {
+    "id": "7997113f-f091-0b7e-27a1-163cbf6a1274",
+    "link_type": "derived_from",
+    "source_id": "2b33b327-4897-60cc-9037-7d43eec9bd34",
+    "target_id": "e87761b5-7298-73d2-c390-2bf9e0bc17ae",
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "truth_state": "Current"
+  },
+  {
+    "id": "aba16a06-aff3-0d75-cca0-a45ed271e59f",
+    "link_type": "derived_from",
+    "source_id": "e87761b5-7298-73d2-c390-2bf9e0bc17ae",
+    "target_id": "906dc5f9-9514-6366-4b54-1078504e80de",
+    "layer": "protected",
+    "worlds": [
+      "b"
+    ],
+    "truth_state": "Current"
+  }
+]

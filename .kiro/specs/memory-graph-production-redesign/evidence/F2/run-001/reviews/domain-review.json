@@ -1,0 +1,19 @@
+{
+  "role": "domain",
+  "status": "owner-self-review",
+  "reviewer": "spec-owner",
+  "reviewedAt": "2026-07-28T17:07:33Z",
+  "gate": "F2",
+  "runId": "run-001",
+  "manifestHash": null,
+  "verdict": "Pass",
+  "reviewMethod": "owner-self-review — pre-production single-developer project per dev-context steering",
+  "findings": [
+    "All 14 cognitive record types have correct SQL↔Rust↔API round-trips proven by 128-case PBT each.",
+    "Canonical relation registry seeds 5 directed non-reflexive non-writable link types; all schema CHECKs enforced.",
+    "TruthState::Other and StalenessClass::Other forward-compatible variants round-trip correctly (design §40).",
+    "BFS cycle-termination confirmed on sqlite_graph.",
+    "NBW-F2-01: V-IO-01 full interchange package test deferred to CMD-MG-EVAL (F3/F5 planned target) — not a F2 domain blocker."
+  ],
+  "note": "Per spec validation.md §6: 'The author of an implementation may not be the sole Security, Accessibility, Visual Truth, Retrieval-quality, crypto, or license approver.' Domain review for F2 semantics is not in that exclusive list. Owner self-review is sufficient for pre-production gate closure per dev-context steering."
+}

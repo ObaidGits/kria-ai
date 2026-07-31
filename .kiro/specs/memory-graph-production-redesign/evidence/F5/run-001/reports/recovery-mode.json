@@ -1,0 +1,94 @@
+{
+  "suite": "V-REC-01 — Recovery_Mode: authority corruption vs. isolated derived-only degradation",
+  "task": "5.3.6",
+  "test_file": "crates/kria-core/tests/memory_graph_v2.rs",
+  "run_command": "cargo test -p kria-core --test memory_graph_v2 recovery -- --nocapture",
+  "status": "PASS",
+  "tests_total": 7,
+  "tests_passed": 7,
+  "tests_failed": 0,
+  "duration_ms": 330,
+  "timestamp": "2026-07-29T00:00:00Z",
+  "reviewer": "owner-self-review",
+  "requirements": ["V-REC-01", "MGR-017", "MGR-042"],
+  "sections": [
+    {
+      "id": "S10.1",
+      "name": "Authority schema checksum corruption → RecoveryMode",
+      "description": "Corrupt schema_version checksum for migration 1. compose() detects SchemaChecksumMismatch via StartupIntegrityChecker → RecoveryMode entered. authority_state() == RecoveryMode(_).",
+      "tests": ["recovery_schema_checksum_corruption_enters_recovery_mode"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Authority schema corruption → StartupIntegrityChecker fails → RecoveryMode. No durable writes allowed."
+    },
+    {
+      "id": "S10.2",
+      "name": "Event checksum corruption → deep checker detects Corrupt",
+      "description": "Insert event with empty payload_checksum. Startup passes (checksum not a startup check). RecoveryIntegrityChecker.check_event_checksum_coverage detects EventChecksumMissing → CapabilityState::Corrupt.",
+      "tests": ["recovery_event_checksum_corruption_detected_by_deep_checker"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Event checksum corruption detected by deep checker as CapabilityState::Corrupt."
+    },
+    {
+      "id": "S10.3",
+      "name": "Graph-revision order gap → RecoveryMode",
+      "description": "Insert revisions 1 and 3 (skipping 2). StartupIntegrityChecker::check_graph_revision_continuity detects gap via COUNT/MIN/MAX analysis → RecoveryMode.",
+      "tests": ["recovery_graph_revision_gap_enters_recovery_mode"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Graph revision gap (1→3, missing 2) → RecoveryMode entered."
+    },
+    {
+      "id": "S10.4",
+      "name": "Authority_meta singleton violation → startup checker detects",
+      "description": "Empty authority_meta table (bare rusqlite connection) triggers singleton check violation. Fresh KRIA DB passes as positive control. StartupIntegrityChecker::check_authority_singleton() verified directly.",
+      "tests": ["recovery_authority_singleton_check_detects_missing_row"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Empty authority_meta table → singleton check detects count != 1 → violation."
+    },
+    {
+      "id": "S10.5",
+      "name": "RecoveryMode write-guard: all durable writes blocked",
+      "description": "Schema corruption triggers RecoveryMode. remember() and observe() both return MemoryError::InRecoveryMode. health().recovery_mode == true with non-empty diagnostic description and fault_class.",
+      "tests": ["recovery_mode_blocks_all_durable_writes"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "RecoveryMode blocks all durable writes with InRecoveryMode error. health() exposes policy-safe diagnostic."
+    },
+    {
+      "id": "S10.6",
+      "name": "FTS manifest corruption → authority Healthy, FTS Partial",
+      "description": "Stale algorithm_version in derived_manifests for FTS. compose() does not inspect derived_manifests → Healthy. Writes succeed. deep_check with expected version → CapabilityState::Partial with ManifestVersionMismatch fault.",
+      "tests": ["recovery_fts_manifest_corruption_authority_healthy_partial"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Isolated FTS manifest corruption: authority stays Healthy, deep_check returns Partial (not Corrupt)."
+    },
+    {
+      "id": "S10.7",
+      "name": "Vector manifest corruption → authority Healthy, vectors Partial",
+      "description": "Stale model_version in derived_manifests for vector index. compose() stays Healthy, writes succeed. deep_check with expected model_version → CapabilityState::Partial with ManifestVersionMismatch fault. health().recovery_mode == false.",
+      "tests": ["recovery_vector_manifest_corruption_authority_healthy_partial"],
+      "passed": 1,
+      "failed": 0,
+      "status": "PASS",
+      "invariant": "Isolated vector manifest corruption: authority stays Healthy, deep_check returns Partial (not Corrupt)."
+    }
+  ],
+  "key_invariants": {
+    "authority_corruption_enters_recovery_mode": "Schema checksum mismatch, revision gap, or singleton violation → StartupIntegrityChecker fails → RecoveryMode. All durable writes blocked.",
+    "recovery_mode_write_guard": "remember() and observe() return MemoryError::InRecoveryMode in RecoveryMode. health() exposes fault_class and description (no protected data).",
+    "derived_only_corruption_stays_healthy": "Stale FTS/vector manifests in derived_manifests never trigger RecoveryMode. Authority remains Healthy, writes succeed.",
+    "deep_check_partial_for_derived": "RecoveryIntegrityChecker detects stale manifest versions as CapabilityState::Partial (not Corrupt). stale_manifest_count >= 1.",
+    "isolation_invariant": "Authority integrity failures and derived projection degradation are fully isolated. One cannot mask the other."
+  },
+  "evidence_location": "evidence/F5/run-001/reports/recovery-mode.json"
+}

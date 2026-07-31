@@ -52,7 +52,13 @@ fn manager_slot() -> &'static AsyncMutex<GatewayManagersRuntime> {
 
 /// Build one live manager set from current config. Remote-desktop monitoring is
 /// owned by the slot and exists only while that feature is enabled.
-async fn managers(config: &KriaConfig) -> Arc<GatewayManagers> {
+///
+/// The phone-facing session store is NOT opened here: it is borrowed from the
+/// desktop's single memory composition root via `AppState` (F1.2.4 — one
+/// authority `Database` per process). The gateway therefore reuses the exact
+/// `ConversationStore` vended by `MemorySystem` rather than opening a second
+/// independent authority handle to the same `kria_memory.db`.
+async fn managers(app: &AppState, config: &KriaConfig) -> Arc<GatewayManagers> {
     let mut runtime = manager_slot().lock().await;
     if let Some(current) = runtime.current.as_ref() {
         return current.clone();
@@ -112,14 +118,10 @@ async fn managers(config: &KriaConfig) -> Arc<GatewayManagers> {
         .ntfy
         .enabled
         .then(|| Arc::new(NtfyClient::new(config.ntfy.clone())));
-    let session_store =
-        kria_core::memory::db::Database::open(&paths.data_dir.join("kria_memory.db"))
-            .map(|db| {
-                Arc::new(kria_core::memory::conversation::ConversationStore::new(
-                    Arc::new(db),
-                ))
-            })
-            .ok();
+    // Reuse the shared conversation store held in `AppState` — it is built over
+    // the process's single authority `Database` handle by the memory
+    // composition root. No second `Database::open` here (F1.2.4).
+    let session_store = Some(app.conversation.clone());
 
     let managers = Arc::new(GatewayManagers {
         device_registry,
@@ -232,7 +234,7 @@ pub async fn mobile_gateway_status(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     let slot = server_slot().lock().await;
     let running = slot.is_some();
     let bound = slot.as_ref().map(|h| h.bound_addr.clone());
@@ -255,7 +257,7 @@ pub(super) async fn start_gateway(app: &AppState) -> Result<serde_json::Value, S
     if !config.mobile.enabled {
         return Err("Mobile gateway is disabled in Settings".into());
     }
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
 
     let mut slot = server_slot().lock().await;
     if let Some(h) = slot.as_ref() {
@@ -360,7 +362,7 @@ pub async fn mobile_begin_pairing(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     let host = {
         let slot = server_slot().lock().await;
         slot.as_ref()
@@ -389,7 +391,7 @@ pub async fn mobile_list_devices(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     let devices = mgrs
         .device_registry
         .list_devices()
@@ -404,7 +406,7 @@ pub async fn mobile_revoke_device(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     let revoked = mgrs
         .device_registry
         .revoke(&device_id)
@@ -418,7 +420,7 @@ pub async fn remote_desktop_status(
 ) -> Result<serde_json::Value, String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     Ok(serde_json::to_value(mgrs.remote_desktop.status()).unwrap_or_default())
 }
 
@@ -427,7 +429,7 @@ pub async fn remote_desktop_status(
 pub async fn remote_desktop_kill(state: State<'_, AppStateCell>) -> Result<(), String> {
     let app = cell(&state)?;
     let config = app.config.read().await.clone();
-    let mgrs = managers(&config).await;
+    let mgrs = managers(app, &config).await;
     mgrs.remote_desktop.stop();
     Ok(())
 }

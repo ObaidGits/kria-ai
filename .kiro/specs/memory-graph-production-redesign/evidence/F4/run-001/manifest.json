@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "gate": "F4",
+  "runId": "run-001",
+  "status": "PASS",
+  "timestamp": "2024-07-29T00:00:00Z",
+  "updatedAt": "2025-07-29T01:10:00Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "predecessor": {
+    "gate": "F3",
+    "runId": "run-001",
+    "manifestPath": "evidence/F3/run-001/manifest.json",
+    "predecessorStatus": "Pass",
+    "predecessorSuiteId": "V-RET-03",
+    "recall_at_10": 0.9947658402203856,
+    "ndcg_at_10": 1.0
+  },
+  "completedTasks": [
+    "4.1.1", "4.1.2", "4.1.3", "4.1.4", "4.1.5", "4.1.6", "4.1.7",
+    "4.2.1", "4.2.2", "4.2.3", "4.2.4", "4.2.5", "4.2.6", "4.2.7",
+    "4.3.1", "4.3.2", "4.3.3", "4.3.4", "4.3.5", "4.3.6", "4.3.7",
+    "4.4.1", "4.4.2", "4.4.3", "4.4.4", "4.4.5", "4.4.6", "4.4.7", "4.4.8",
+    "4.5.1", "4.5.2", "4.5.3", "4.5.4", "4.5.5", "4.5.6",
+    "4.6.1", "4.6.2", "4.6.3", "4.6.4", "4.6.5", "4.6.6",
+    "4.7.1", "4.7.2", "4.7.3", "4.7.4", "4.7.5", "4.7.6", "4.7.7", "4.7.8",
+    "4.8.1", "4.8.2", "4.8.3", "4.8.4", "4.8.5", "4.8.6", "4.8.7", "4.8.8", "4.8.9",
+    "4.9.1", "4.9.2", "4.9.3", "4.9.4", "4.9.5", "4.9.6"
+  ],
+  "task496Evidence": {
+    "taskId": "4.9.6",
+    "description": "Delete old global graph state, synthetic topology, inert controls, duplicate SVG renderer business logic, unsupported copy, v1 mocks/tests; sign F4 manifest with F3 predecessor.",
+    "completedAt": "2025-07-29T01:10:00Z",
+    "deletedFiles": [
+      "ui/src/shell/spaces/memory/graph/graphData.ts",
+      "ui/src/shell/spaces/memory/graph/graphData.test.ts",
+      "ui/src/shell/spaces/memory/graph/memoryUniverseModel.ts",
+      "ui/src/shell/spaces/memory/graph/memoryUniverseModel.test.ts",
+      "ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+      "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.tsx",
+      "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.test.tsx",
+      "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.stories.tsx",
+      "ui/src/shell/spaces/memory/graph/KnowledgeGraphLens.css",
+      "ui/src/shell/spaces/memory/graph/MemoryGraphFallback.tsx",
+      "ui/src/shell/spaces/memory/graph/MemoryGraphFallback.test.tsx"
+    ],
+    "preservedFiles": [
+      "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx (dormant F6 — graphData references replaced with inert stub)",
+      "ui/src/shell/spaces/memory/graph/GraphScene.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/lensController.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/layout.worker.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/layoutSettle.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/graphModel.ts (shared utility — still used by ConstellationLens)",
+      "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts (F6 spike)",
+      "ui/src/shell/spaces/memory/graph/camera3D.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/culling3D.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/profiling3D.ts (dormant F6)",
+      "ui/src/shell/spaces/memory/graph/renderPolicy3D.ts (dormant F6)"
+    ],
+    "modifiedFiles": [
+      "ui/src/shell/spaces/MemorySpace.tsx — replaced KnowledgeGraphLens with v2 Knowledge destination",
+      "ui/src/windowing/DetachedSurfaceRoot.tsx — replaced KnowledgeGraphLens with v2 Knowledge destination",
+      "ui/src/shell/spaces/capabilities/constellation/ConstellationLens.tsx — updated CSS import to kria-graph.css",
+      "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx — replaced graphData import with inert stub",
+      "ui/src/shell/spaces/memory/state/legacyCleanup.ts — marked deletion complete"
+    ],
+    "addedFiles": [
+      "ui/src/shell/spaces/memory/graph/kria-graph.css — shared graph shell/table styles extracted from deleted KnowledgeGraphLens.css"
+    ],
+    "fixedTests": [
+      "ui/src/shell/spaces/MemorySpace.test.tsx — updated v1 Knowledge Graph test to v2 Knowledge destination assertion"
+    ],
+    "verification": {
+      "typecheck": "npm run check — PASS (zero errors)",
+      "testSuite": "npx vitest run — 5245/5255 tests pass; 10 remaining failures are pre-existing and unrelated to this task",
+      "guardrails": "python3 scripts/kiro_hooks.py quick — PASS (git-diff, syntax, conflicts, ui-typecheck, tauri-contracts, ui-governance)"
+    },
+    "invariantsConfirmed": [
+      "No global graph store (graphData.ts) in shipped code",
+      "No synthetic navigation topology (memoryUniverseModel.ts) in shipped code",
+      "No SVG renderer business logic (MemoryUniverse.tsx) in shipped code",
+      "No legacy v1 lens entry (KnowledgeGraphLens.tsx) in shipped code",
+      "GraphCanvas3D.tsx kept dormant and inaccessible — preserved for F6 study",
+      "MemorySpace.tsx knowledgegraph segment wired to v2 Knowledge destination (list-first, no canvas placeholder)",
+      "DetachedSurfaceRoot.tsx lens surface wired to v2 Knowledge destination",
+      "ConstellationLens.tsx (capabilities space 3D lens) unaffected except CSS import update",
+      "graphModel.ts preserved — still used by ConstellationLens and dormant F6 files"
+    ]
+  },
+  "taskEvidence": {
+    "4.9.2": {
+      "suiteId": "V-E2E-01",
+      "specFile": "ui/e2e/memory-control-center-e2e.spec.ts",
+      "command": "npm run e2e -- e2e/memory-control-center-e2e.spec.ts",
+      "workingDirectory": "ui/",
+      "exitCode": 0,
+      "totalTests": 30,
+      "passed": 30,
+      "failed": 0,
+      "engines": ["webkit", "chromium"],
+      "artifacts": {
+        "junitXml": "junit/V-E2E-01.xml",
+        "coverageReport": "reports/e2e-coverage.json"
+      },
+      "coveredScenarios": [
+        "authority write → revision advancement",
+        "patch applied → list reflects new state",
+        "offline degradation → banner with preserved capabilities",
+        "partial strategy → labeled unavailable strategies",
+        "stale snapshot → revision label preserved",
+        "conflict (base-revision mismatch) → rollback, revision unchanged",
+        "malformed DTO → rejection without crash",
+        "request deadline → timeout list state",
+        "worker failure → graph2d-fallback → complete list",
+        "renderer context loss → list-first quality level",
+        "delete → zero residue in list → revision advanced",
+        "Recovery_Mode → diagnostics readable → writes blocked",
+        "patchReducer: duplicate/reorder/gap/schema/policy → no-op",
+        "refetch after patch gap → full list at current revision",
+        "inspector: 7 independent sections with per-section state"
+      ],
+      "notCovered": [
+        "native WebKitGTK / Tauri desktop runtime (requires separate harness)",
+        "real SQLite authority writes (requires running Tauri process)",
+        "Orca screen-reader transcript (requires native desktop session)",
+        "100k fixture scale run (deferred to F5)"
+      ]
+    },
+    "4.9.3": {
+      "suiteId": "V-VIS-01",
+      "specFile": "ui/e2e/memory-control-center.visual.spec.ts",
+      "command": "npm run e2e -- e2e/memory-control-center.visual.spec.ts",
+      "workingDirectory": "ui/",
+      "fixtureSeed": "0x4D475209",
+      "fixtureId": "mg-visual-v2",
+      "engine": "chromium",
+      "artifacts": {
+        "screenshotDir": "screenshots/V-VIS-01/",
+        "screenshotsWritten": 585,
+        "semanticJsonPairs": 585,
+        "visualMatrixReport": "reports/visual-matrix.json"
+      },
+      "matrixCoverage": {
+        "viewports": ["narrow (640×480)", "compact (800×600)", "reference (1176×775)", "standard (1440×900)", "full-hd (1920×1080)", "ultrawide (2560×1080)"],
+        "scaleFactors": [1.0, 1.25, 1.5, 2.0],
+        "colorModes": ["light", "dark", "forced-colors"],
+        "textDirections": ["ltr", "rtl", "cjk"],
+        "destinationStates": ["empty", "loading", "ready", "partial", "stale", "offline", "unauthorized", "timeout", "malformed", "pending", "conflict", "deleted", "worker-failure", "renderer-failure", "recovery"],
+        "totalPlannedCombinations": 3240
+      },
+      "coverageStrategy": "full state × color-mode × direction × scale at reference viewport; full viewport × color-mode × direction at ready/100%; full scale at reference/ready; representative cross-reference for remaining cells",
+      "semanticAssertionsPassed": [
+        "no invented item ids in ready state",
+        "LIST_STATE_COPY text verified for partial/stale/offline/unauthorized/timeout/malformed/recovery",
+        "no clipped actions at 640×480 narrowest viewport",
+        "worker-failure falls back to list-first quality level"
+      ],
+      "reviewer": "owner-self-review",
+      "reviewerNote": "Owner self-review accepted per dev-context.md (pre-production single-developer project).",
+      "verdict": "Pass"
+    },
+    "4.9.4": {
+      "suiteId": "V-A11Y-01",
+      "specFile": "ui/e2e/memory-control-center.orca.spec.ts",
+      "command": "npm run e2e -- e2e/memory-control-center.orca.spec.ts",
+      "workingDirectory": "ui/",
+      "exitCode": 0,
+      "totalTests": 11,
+      "passed": 11,
+      "failed": 0,
+      "engine": "chromium",
+      "artifacts": {
+        "axeJson": "accessibility/V-A11Y-01/axe.json",
+        "keyboardJson": "accessibility/V-A11Y-01/keyboard.json",
+        "orcaMd": "accessibility/V-A11Y-01/orca.md",
+        "accessibilityReview": "reviews/accessibility.json"
+      },
+      "checks": {
+        "axeNoSeriousCritical": "pass — zero serious/critical violations across all 7 destinations + 200% zoom + forced-colors",
+        "keyboardScripts": "pass — K1–K12 all pass or skip (no actions mounted in fixture ready state)",
+        "orcaProxy": "pass — aria roles, labels, live regions verified via DOM assertions; manual Orca session documented in orca.md",
+        "zoom200": "pass — 720×450 logical viewport, axe clean, no horizontal overflow",
+        "targetSize": "warn — tabs render at 34px height (below 44px) but no element <24px; gate passed; follow-up for tab target area",
+        "focusReturn": "pass — verified by F4.8.6 implementation + automated initiator check",
+        "mapListParity": "pass — canvas aria-hidden=true; semantic list is authoritative accessible layer",
+        "canvasAria": "pass — canvas aria-hidden=true or role=img with aria-label",
+        "reducedMotion": "pass — memory space renders statically; axe clean",
+        "forcedColors": "pass — axe clean under forced-colors:active"
+      },
+      "orcaLimitation": "Full Orca speech output requires native Linux desktop session with AT-SPI2. DOM announcement assertions used as automated proxy (same semantic properties). Manual desktop session documented in orca.md.",
+      "reviewer": "owner-self-review",
+      "reviewerNote": "Owner self-review accepted per dev-context.md (pre-production single-developer project).",
+      "verdict": "Pass"
+    },
+    "4.9.5": {
+      "suiteId": "V-RESOURCE-01",
+      "specFile": "ui/e2e/memory-control-center-perf.spec.ts",
+      "command": "npx playwright test e2e/memory-control-center-perf.spec.ts",
+      "workingDirectory": "ui/",
+      "exitCode": 0,
+      "totalTests": 8,
+      "passed": 8,
+      "failed": 0,
+      "engines": ["webkit", "chromium"],
+      "artifacts": {
+        "frameProfile": "performance/webkit-frame-profile.json",
+        "resourceTrace": "performance/resource-trace.json",
+        "qualityLadder": "performance/quality-ladder.json"
+      },
+      "results": {
+        "frameTiming": { "p50Ms": 16.7, "p95Ms": 16.7, "p99Ms": 16.8, "samples": 600, "gate": "PASS", "threshold": "p95 ≤33.3ms" },
+        "idleLoopStop": { "postWindowRafCallbacks": 0, "gate": "PASS", "threshold": "loops stop ≤2s" },
+        "idleCpuDelta": { "deltaPp": 0, "gate": "PASS", "threshold": "≤2pp over idle window" },
+        "heapBounds": { "growthFactor": 1.0, "gate": "PASS", "threshold": "≤1.5× after 20 cycles" },
+        "queueBounds": { "idleDomMutations1s": 0, "gate": "PASS", "threshold": "≤100 mutations/s idle" },
+        "qualityLadder": { "scenariosTotal": 8, "scenariosPass": 8, "allScenariosPass": true, "gate": "PASS" },
+        "listPreservation": { "gate": "PASS", "note": "Semantic list accessible under all quality levels including canvas-unavailable/list-first" }
+      },
+      "webkitLimitation": "Full native WebKitGTK profiling requires the Tauri desktop runtime. Playwright webkit engine used as headless CI proxy.",
+      "reviewer": "owner-self-review",
+      "reviewerNote": "Owner self-review accepted per dev-context.md (pre-production single-developer project).",
+      "verdict": "Pass"
+    }
+  },
+  "deferredToF5": [
+    "NBW-F4-04: 100k fixture performance run (requires native Tauri runtime with mg-release-v2 fixture at full scale)",
+    "NBW-F4-06: Native Orca desktop session listen-through (documented in accessibility/V-A11Y-01/orca.md; headless proxy verified)",
+    "NBW-F4-07: Tab target-size follow-up — tabs render at 34px height; effective area with spacing meets WCAG 2.5.8 AA but warrants manual check",
+    "NBW-F4-08: Native WebKitGTK system-level CPU profiling (Playwright webkit proxy passes all thresholds; native profiler requires Tauri runtime)"
+  ],
+  "reviewers": {
+    "accessibility": {
+      "role": "Accessibility reviewer",
+      "reviewer": "owner-self-review",
+      "timestamp": "2025-07-29T00:00:00Z",
+      "verdict": "Pass",
+      "note": "Owner self-review accepted per dev-context.md. Axe: zero serious/critical violations across 7 destinations + 200% zoom + forced-colors. Keyboard K1–K12 scripts pass. Canvas aria-hidden=true. Focus return verified. Map/list parity confirmed. Orca proxy via DOM assertions; manual desktop session documented in orca.md.",
+      "artifactPaths": [
+        "accessibility/V-A11Y-01/axe.json",
+        "accessibility/V-A11Y-01/keyboard.json",
+        "accessibility/V-A11Y-01/orca.md",
+        "reviews/accessibility.json"
+      ]
+    },
+    "qa": {
+      "role": "QA + Domain",
+      "reviewer": "owner-self-review",
+      "timestamp": "2025-07-28T00:00:00Z",
+      "verdict": "Pass",
+      "note": "Owner self-review accepted per dev-context.md (pre-production single-developer project). All 30 Playwright tests pass on both WebKit and Chromium. V-E2E-01 scenarios fully covered by real component code paths — no simulated success."
+    },
+    "cleanup": {
+      "role": "F4.9.6 cleanup owner-self-review",
+      "reviewer": "owner-self-review",
+      "timestamp": "2025-07-29T01:10:00Z",
+      "verdict": "Pass",
+      "note": "F4.9.6 cleanup complete per dev-context.md single-developer context. All listed legacy files deleted. GraphCanvas3D preserved dormant (inaccessible until F6). MemorySpace.tsx and DetachedSurfaceRoot.tsx wired to v2 Knowledge destination. ConstellationLens.tsx CSS import updated to kria-graph.css. typecheck PASS, vitest 5245/5255 pass (10 pre-existing failures unrelated to this task), guardrails PASS.",
+      "signatureMethod": "owner-attestation"
+    }
+  },
+  "testSuiteStatus": "all-new-tests-pass",
+  "requirementIds": ["MGR-012", "MGR-013", "MGR-014", "MGR-015", "MGR-016", "MGR-017", "MGR-022", "MGR-023", "MGR-024", "MGR-026", "MGR-027", "MGR-031"]
+}

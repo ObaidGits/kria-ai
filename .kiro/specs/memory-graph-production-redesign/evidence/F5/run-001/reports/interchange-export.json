@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "evidence-report/v1",
+  "suiteId": "V-IO-01",
+  "taskId": "5.4.1",
+  "gate": "F5",
+  "runId": "run-001",
+  "status": "Pass",
+  "utcTimestamp": "2026-07-29T00:00:00+00:00",
+  "command": "cargo test -p kria-core --test memory_graph_v2 interchange",
+  "workingDirectory": "/media/obaid/SSD/KRIA",
+  "testFile": "crates/kria-core/tests/memory_graph_v2.rs",
+  "section": "Section 11 — Interchange Export (Task 5.4.1 / V-IO-01)",
+  "requirementIds": ["MGR-032", "MGR-046", "MGR-029"],
+  "suiteIds": ["V-IO-01", "V-LIFE-01"],
+  "assertionTotals": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tests": [
+    {
+      "name": "interchange_export_five_records_all_checksums_present_and_correct",
+      "status": "Pass",
+      "description": "Export 5 records via ExportStream; verify emitted_count=5, each content_hash=SHA-256(content_json), package checksum matches PackageChecksumVerifier independent computation, IndependentParserValidator accepts every record, full import pipeline succeeds",
+      "validates": "V-IO-01 — package contains all exported records with correct checksums"
+    },
+    {
+      "name": "interchange_export_manifest_schema_version_present_and_nonzero",
+      "status": "Pass",
+      "description": "Manifest schema_versions.schema_version > 0; format_version and ontology_version non-empty; schema_version=0 fails InterchangeManifestValidator with InvalidSchemaVersion(0)",
+      "validates": "V-IO-01, MGR-032 — self-describing package with schema/ontology versions"
+    },
+    {
+      "name": "interchange_export_ordering_is_deterministic_by_record_id",
+      "status": "Pass",
+      "description": "ByKindThenId ordering: entity records sort before memory records; two independent sorts produce identical order; package checksums identical; sorted order differs from insertion order confirming actual sort happened",
+      "validates": "V-IO-01, MGR-029 — deterministic ordering for reproducibility"
+    },
+    {
+      "name": "interchange_export_by_revision_ordering_is_deterministic",
+      "status": "Pass",
+      "description": "ByRevision ordering sorts ascending by revision; two independent sorts produce identical checksum",
+      "validates": "V-IO-01, MGR-029 — ByRevision deterministic ordering"
+    },
+    {
+      "name": "interchange_export_no_out_of_scope_namespace_records_included",
+      "status": "Pass",
+      "description": "PolicyExportFilter with namespace_filter='user' passes 3 authorized records and rejects 3 'other-user' records; mixed-input simulation produces export with only authorized namespace; no unauthorized namespace in filtered output",
+      "validates": "V-IO-01 — no out-of-scope secrets: namespace isolation enforced at export"
+    },
+    {
+      "name": "interchange_export_policy_paired_worlds_produce_disjoint_exports",
+      "status": "Pass",
+      "description": "World A records pass scope_a but fail scope_b; World B records pass scope_b but fail scope_a; policy-paired worlds produce completely disjoint exports",
+      "validates": "V-IO-01, V-POLICY-02 — policy-paired world non-interference at export boundary"
+    },
+    {
+      "name": "interchange_export_deleted_records_excluded_from_package",
+      "status": "Pass",
+      "description": "Lifecycle filter (truth_state deleted/forgotten → excluded): 5 active records pass, 2 deleted and 1 forgotten are excluded; exported package contains 0 deleted/forgotten records; import validation succeeds on filtered export",
+      "validates": "V-IO-01, V-LIFE-01 — lifecycle exclusion: zero deleted content through export after reconciliation"
+    },
+    {
+      "name": "interchange_export_full_package_semantics_correct",
+      "status": "Pass",
+      "description": "Combined: policy-selected fixture export has canonical JSON (id+kind per record), provenance metadata (truth_state/content), version metadata (schema_version, format_version, ontology_version), ordering metadata (content_ordering), lifecycle-filtered records only, package SHA-256 covers all content files, no out-of-scope secrets, full import validation passes",
+      "validates": "V-IO-01 — full package semantics: canonical JSON, checksums, version, ordering, provenance, lifecycle, policy isolation all correct"
+    }
+  ],
+  "nonNegotiablesVerified": [
+    "No out-of-scope policy records in export — PolicyExportFilter.passes_filter enforces namespace_filter at export boundary",
+    "Deleted records excluded — lifecycle filter (truth_state=deleted/forgotten excluded) verified in interchange_export_deleted_records_excluded_from_package",
+    "Checksums present and verifiable — ExportRecord.verify_hash() passes for all records; PackageChecksumVerifier.compute_package_checksum matches ExportStream.finalize() output",
+    "schema_version > 0 present in every manifest — InterchangeManifestValidator rejects schema_version=0",
+    "Deterministic ordering — ByKindThenId sorts lexicographically by kind:record_id; ByRevision sorts ascending by revision number; both produce stable checksums"
+  ],
+  "reviewer": {
+    "role": "owner-self-review",
+    "verdict": "Pass",
+    "basis": "Owner self-review accepted per dev-context.md (single-developer pre-production repository)"
+  },
+  "notes": [
+    "Task 5.4.1: 8/8 interchange export tests pass in crates/kria-core/tests/memory_graph_v2.rs Section 11",
+    "Tests use the existing interchange module implementations: interchange.rs, interchange_export.rs, interchange_import.rs, interchange_fixtures.rs",
+    "No new implementation code was required — the interchange module was complete from task 2.7.x (F2 gate)",
+    "ExportStream.finalize() checksum verified to equal PackageChecksumVerifier.compute_package_checksum() independently",
+    "FixtureRecordFactory and InterchangeFixtureBuilder used for all_record_kinds and policy_paired_world fixtures"
+  ]
+}

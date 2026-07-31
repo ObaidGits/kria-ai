@@ -1,0 +1,54 @@
+{
+  "reviewId": "F3-SEC-REVIEW-001",
+  "gate": "F3",
+  "runId": "run-001",
+  "role": "Security",
+  "status": "owner-self-review",
+  "reviewer": "spec-owner",
+  "reviewedAt": "2026-07-28T23:47:50Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "projectStage": "pre-production single-developer",
+  "reviewBasis": "Dev-context steering: 'No heavy ceremony for data protection. Self-review is acceptable for pre-production gate closure.'",
+  "securitySurfaceReviewed": [
+    {
+      "area": "Retrieval authorization",
+      "finding": "All retrieval candidates are policy-prefiltered before scoring. No unauthorized records can reach the rank/fusion stage. Verified by policy-prefilter unit tests and paired-world property tests.",
+      "status": "Pass"
+    },
+    {
+      "area": "Graph traversal authorization",
+      "finding": "Hidden intermediaries are omitted from all traversal paths. Only authorized frontier/truncation tokens are emitted — no hidden IDs, counts, or topology leak. Verified by 3.3.2 test golden cases.",
+      "status": "Pass"
+    },
+    {
+      "area": "Tool learning / capability escalation",
+      "finding": "No observation, tool outcome, or learning record can escalate capability, scope, approval, core promotion, security, deletion, or override explicit correction or newer capability version. Negative tests in 3.7.6 pass.",
+      "status": "Pass"
+    },
+    {
+      "area": "v2 API DTO policy safety",
+      "finding": "v2 API response DTOs carry only policy-safe opaque exclusion tokens for unauthorized items — no counts, IDs, or content from excluded records leak through any v2 endpoint surface.",
+      "status": "Pass"
+    },
+    {
+      "area": "FTS5 injection safety",
+      "finding": "FTS5 MATCH expressions are compiled from parameterized bounded queries. Injection-shaped text inputs are handled correctly. fts5_validation_tests injection_or_1_equals_1 test passes.",
+      "status": "Pass"
+    },
+    {
+      "area": "Trace finalization integrity",
+      "finding": "Only injected trace membership can produce 'Used' attribution. Trace header carries policy hash/revision. Governed write path enforces transactional finalization. Verified by 3.5.7 tests.",
+      "status": "Pass"
+    }
+  ],
+  "inheritedOpenItems": [
+    {
+      "id": "NBW-F1-03",
+      "description": "Raw Connection::open in policy/read_authorization.rs and authority/integrity.rs. Unchanged from F1 and F2 manifests. Not a new F3 regression.",
+      "disposition": "Deferred to F5 cleanup. Documented in F1, F2, and F3 manifests."
+    }
+  ],
+  "verdict": "Pass",
+  "verdictRationale": "All material F3 security surfaces reviewed. Policy enforcement, authorization boundaries, injection safety, capability isolation, and trace integrity all verified by passing tests. No new security regressions introduced by F3 work. Pre-existing NBW-F1-03 carried forward unchanged.",
+  "plannedFollowUp": "NBW-F1-03 raw Connection::open cleanup at F5; full security audit at release gate"
+}

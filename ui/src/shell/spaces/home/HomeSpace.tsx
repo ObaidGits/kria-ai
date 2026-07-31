@@ -133,10 +133,8 @@ export function HomeSpace(props: HomeSpaceProps) {
             this copy; the static line keeps the surface never-blank until then. */}
         <h2 class="kria-home__title" data-slot="greeting">What can I help with?</h2>
 
-        {/* Presence Onboarding (design §17 "Onboarding", task 9.2): the first-run
-            teaching of the presence model — a one-time Core whisper, the Hidden
-            Dock discovery hint, and the Orbit capability reveal shown once the
-            Orbit engages. NOT a tour and NEVER repeats: each hint is an
+        {/* Presence Onboarding: one-time Core, shared navigation rail, and
+            Orbit capability cues. NOT a tour and NEVER repeats: each hint is an
             independent one-time cue persisted in the existing coach-hint ledger.
             Once every hint is retired it renders nothing, so it is additive and
             never a resting placeholder. Teaching/routing only — it never sends,

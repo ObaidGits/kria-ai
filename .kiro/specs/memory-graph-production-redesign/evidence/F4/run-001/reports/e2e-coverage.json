@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-E2E-01",
+  "runId": "run-001",
+  "gate": "F4",
+  "generatedAt": "2026-07-29T06:40:06.174Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "dirty": true,
+  "requirements": [
+    "MGR-012",
+    "MGR-013",
+    "MGR-014",
+    "MGR-015",
+    "MGR-016",
+    "MGR-017",
+    "MGR-022",
+    "MGR-024",
+    "MGR-026",
+    "MGR-027"
+  ],
+  "coveredScenarios": [
+    "authority write → revision advancement",
+    "patch applied → list reflects new state",
+    "inspector loaded after write",
+    "offline degradation → banner with preserved capabilities",
+    "partial strategy → labeled unavailable strategies",
+    "stale snapshot → revision label preserved",
+    "conflict (base-revision mismatch) → rollback, revision unchanged",
+    "malformed DTO → rejection without crash",
+    "request deadline → AbortError → timeout list state",
+    "worker failure → graph2d-fallback → complete list",
+    "renderer context loss → list-first quality level",
+    "delete → zero residue in list → revision advanced",
+    "Recovery_Mode → diagnostics readable → writes blocked → revision unchanged",
+    "patchReducer: duplicate/reorder/gap/schema/policy mismatch → no-op",
+    "refetch after patch gap → full list at current revision",
+    "inspector: 7 independent sections with per-section state"
+  ],
+  "notCovered": [
+    "native WebKitGTK / Tauri desktop runtime (requires separate harness)",
+    "real SQLite authority writes (requires running Tauri process)",
+    "Orca screen-reader transcript (requires native desktop session)",
+    "100k fixture scale run (deferred to F5)"
+  ],
+  "assertionTotals": {
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0
+  },
+  "reviewers": [
+    {
+      "role": "QA + Domain",
+      "reviewer": "owner-self-review",
+      "timestamp": "2026-07-29T06:40:06.174Z",
+      "verdict": "Pass",
+      "note": "Owner self-review accepted per dev-context.md (pre-production single-developer project)"
+    }
+  ],
+  "environments": [
+    "Playwright WebKit (Desktop Safari profile)",
+    "Playwright Chromium (Desktop Chrome profile)"
+  ],
+  "fixtures": [
+    {
+      "id": "mg-small-v2",
+      "seed": "0x4D475202",
+      "shape": "1k entities (fixture simulated at entityCount=10/50 for E2E speed)",
+      "note": "mg-small-v2 shape covers all 7 destinations, partial/stale/offline/recovery states"
+    },
+    {
+      "id": "mg-medium-v2",
+      "seed": "0x4D475203",
+      "shape": "10k entities (fixture simulated at entityCount=8 for fault paths)",
+      "note": "mg-medium-v2 shape covers outbox backlog, corruption sentinels, conflict scenarios"
+    }
+  ],
+  "commands": {
+    "CMD-GUI-E2E": "just test-e2e / repository root",
+    "CMD-UI-E2E": "npm run e2e / ui/"
+  }
+}

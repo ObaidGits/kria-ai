@@ -1,0 +1,33 @@
+{
+  "reviewId": "F3-COG-REVIEW-001",
+  "gate": "F3",
+  "runId": "run-001",
+  "role": "Cognition",
+  "status": "owner-self-review",
+  "reviewer": "spec-owner",
+  "reviewedAt": "2026-07-28T23:47:50Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "projectStage": "pre-production single-developer",
+  "reviewBasis": "Dev-context steering: 'No heavy ceremony for data protection. Self-review is acceptable for pre-production gate closure.'",
+  "scopeReviewed": [
+    "3.6 Active goals and deterministic consolidation",
+    "3.7 Paired tool/MCP/OpenClaw/sidecar learning without escalation",
+    "3.8 Priority scheduler, cancellation, offline and pressure behavior"
+  ],
+  "findings": [
+    {
+      "id": "F3-COG-001",
+      "severity": "info",
+      "description": "Consolidation pipeline (Episode→Summary→Skill→Rule) implemented and tested; end-to-end live consolidation run with realistic corpus not executed at F3 scale.",
+      "disposition": "Unit and property tests pass. Full-scale run deferred to F5."
+    }
+  ],
+  "testEvidence": {
+    "batch2CognitionTests": "32 passed, 0 failed",
+    "libUnitMemory": "1977 memory module tests pass (subset of 5106 lib total)",
+    "schedulerTests": "Covered in lib unit tests — preemption, fairness, coalescing, pressure behavior"
+  },
+  "verdict": "Pass",
+  "verdictRationale": "All cognition sub-tasks (3.6–3.8) implemented. Goal lifecycle transitions, bounded consolidation candidate selection, derivation lineage, diversity/evidence minimums, tool learning isolation (no escalation), priority scheduler with bounded queues, preemption, and resource pressure shedding all verified. batch2_cognition_tests 32/32 pass.",
+  "plannedFollowUp": "Full-scale consolidation run at F5 with realistic corpus fixture"
+}

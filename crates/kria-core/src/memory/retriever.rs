@@ -242,6 +242,13 @@ impl Retriever {
                 continue; // dangling index entry → skip (reconciliation repairs)
             };
             if !matches!(mem.state, MemoryState::Active | MemoryState::Promoted) {
+                // Authority-first residue protection (design §5.4, task 1.7.5):
+                // the state gate here is the IMMEDIATE safety barrier that
+                // prevents any Deleted, Forgotten, Archived, or Superseded
+                // memory from reaching the caller — even while an outbox purge
+                // for the same memory is still pending in the derived indexes.
+                // The outbox relay and the reconcile() residue check are eventual
+                // cleanup of the derived index; they are NOT the primary guard.
                 continue; // exclude superseded/archived/forgotten (L12)
             }
             // Defense-in-depth scope enforcement (L7/D-20).

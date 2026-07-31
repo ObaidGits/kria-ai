@@ -653,6 +653,134 @@ pub(super) fn is_sidecar_backed_tool_name(tool_name: &str) -> bool {
     )
 }
 
+/// Classify a completed tool call's durable-write provenance (task **F1.5.4**,
+/// design §7.4/§46.1, MGR-043 AC1/AC7).
+///
+/// [`crate::agent::loop_engine::AgentLoop::record_agent_outcome`] is the single
+/// hook every tool/MCP/OpenClaw/sidecar invocation's outcome flows through for
+/// every entry point (desktop, server, telegram — see its doc comment), but it
+/// used to tag **every** invocation uniformly as
+/// [`Source::Tool`](crate::memory::types::Source::Tool) regardless of which
+/// source actually ran. That silently collapsed the source-specific trust class
+/// MCP/OpenClaw/sidecar carry
+/// ([`Source::authority`](crate::memory::types::Source::authority)), skipped
+/// the injection-wall security scan an OpenClaw skill's output must pass
+/// (design §46.1/D-11 —
+/// [`Source::is_untrusted_content`](crate::memory::types::Source::is_untrusted_content)
+/// is `true` for [`Source::OpenClaw`](crate::memory::types::Source::OpenClaw)
+/// but `false` for `Source::Tool`, so a skill outcome mislabeled `Tool` never
+/// reached [`crate::memory::write_policy::security::scan`]), and dropped the
+/// `mcp/{server}`/`openclaw/{skill}` namespace assignment
+/// ([`crate::memory::integration::tool_outcome_candidate`]) in favor of the
+/// "core" default (MGR-043 AC1 requires a source-specific namespace).
+///
+/// This recovers the real [`Source`](crate::memory::types::Source) variant
+/// from the tool name using the same classification rules the agent loop
+/// already applies elsewhere for execution routing (MCP `mcp_` prefix — see
+/// [`register_mcp_tool`](crate::mcp::server_manager) —, the OpenClaw semantic
+/// dispatcher tool / legacy `oc_*` per-skill prefix, sidecar-backed tool names
+/// — [`is_sidecar_backed_tool_name`]). The CPP dispatcher
+/// ([`crate::tools::capability_dispatch::CapabilityDispatchHandler`]) does not
+/// yet surface which concrete skill/provider it routed to back through the
+/// generic `"openclaw"` `ToolResult`, so an OpenClaw outcome is tagged at the
+/// dispatcher-invocation granularity (`Source::OpenClaw("openclaw")`) rather
+/// than per-skill; per-skill attribution needs that dispatcher-level plumbing,
+/// which is out of scope here. This is still strictly more correct than the
+/// prior unconditional `Source::Tool` mislabeling.
+pub(super) fn classify_tool_outcome_source(tool_name: &str) -> crate::memory::types::Source {
+    use crate::memory::types::Source;
+
+    if let Some(rest) = tool_name.strip_prefix("mcp_") {
+        // Registered as `mcp_{server}_{tool}` (`register_mcp_tool`); configured
+        // MCP server names carry no underscore today, so the first `_`
+        // boundary deterministically recovers `server`. Falls back to the
+        // whole remainder as `server` with an empty `tool` if unstructured.
+        return match rest.split_once('_') {
+            Some((server, tool)) => Source::Mcp {
+                server: server.to_string(),
+                tool: tool.to_string(),
+            },
+            None => Source::Mcp {
+                server: rest.to_string(),
+                tool: String::new(),
+            },
+        };
+    }
+
+    if tool_name == "openclaw"
+        || tool_name == "list_installed_skills"
+        || tool_name.starts_with("oc_")
+    {
+        return Source::OpenClaw(tool_name.to_string());
+    }
+
+    if is_sidecar_backed_tool_name(tool_name) {
+        return Source::Sidecar(tool_name.to_string());
+    }
+
+    Source::Tool(tool_name.to_string())
+}
+
+#[cfg(test)]
+mod tool_outcome_source_tests {
+    use super::classify_tool_outcome_source;
+    use crate::memory::types::Source;
+
+    #[test]
+    fn mcp_tool_name_recovers_server_and_tool() {
+        assert_eq!(
+            classify_tool_outcome_source("mcp_github_search"),
+            Source::Mcp {
+                server: "github".into(),
+                tool: "search".into(),
+            }
+        );
+        assert_eq!(
+            classify_tool_outcome_source("mcp_colab-mcp_execute_cell"),
+            Source::Mcp {
+                server: "colab-mcp".into(),
+                tool: "execute_cell".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn openclaw_dispatcher_and_legacy_tools_are_openclaw_source() {
+        assert_eq!(
+            classify_tool_outcome_source("openclaw"),
+            Source::OpenClaw("openclaw".into())
+        );
+        assert_eq!(
+            classify_tool_outcome_source("list_installed_skills"),
+            Source::OpenClaw("list_installed_skills".into())
+        );
+        assert_eq!(
+            classify_tool_outcome_source("oc_pdf_parser"),
+            Source::OpenClaw("oc_pdf_parser".into())
+        );
+    }
+
+    #[test]
+    fn sidecar_backed_tool_is_sidecar_source() {
+        assert_eq!(
+            classify_tool_outcome_source("search_news"),
+            Source::Sidecar("search_news".into())
+        );
+        assert_eq!(
+            classify_tool_outcome_source("ocr_image"),
+            Source::Sidecar("ocr_image".into())
+        );
+    }
+
+    #[test]
+    fn native_tool_falls_back_to_tool_source() {
+        assert_eq!(
+            classify_tool_outcome_source("read_file"),
+            Source::Tool("read_file".into())
+        );
+    }
+}
+
 pub(super) fn user_requested_explicit_queue(user_text: &str) -> bool {
     let lower = user_text.to_ascii_lowercase();
     [

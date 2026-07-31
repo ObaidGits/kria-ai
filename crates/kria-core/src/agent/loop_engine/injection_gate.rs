@@ -73,6 +73,7 @@ impl Default for InjectionParams {
 
 /// Per-candidate explainable scoring record (persisted for observability).
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields written for trace/observability; consumed externally via InjectionDecision.
 pub struct InjectionScore {
     pub name: String,
     pub confidence: f32,

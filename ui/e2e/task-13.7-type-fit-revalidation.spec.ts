@@ -139,9 +139,9 @@ async function measureFit(page: Page): Promise<FitMeasurement> {
       return ox === "hidden" || ox === "clip";
     };
     // Content is contained (cannot push the shell out of bounds) when the element
-    // itself OR any ancestor up to the shell root clips on the x-axis. This is
-    // what makes the immersive edge-reveal Dock safe: `.kria-dock` clips, so its
-    // inner `.kria-dock__list` overflow is absorbed and never reaches the shell.
+    // itself OR any ancestor up to the shell root clips on the x-axis. The
+    // shared NavigationRail clips its own content, so compact labels never
+    // reach the shell overflow boundary.
     const containedByClip = (el: HTMLElement | null): boolean => {
       let node: HTMLElement | null = el;
       while (node && !node.classList.contains("kria-shell")) {
@@ -214,8 +214,8 @@ async function measureFit(page: Page): Promise<FitMeasurement> {
     // reachable via keyboard focus, and the collapsed rail cannot overflow the
     // shell. So when the Dock clips-x we require only that all seven buttons are
     // present; otherwise (standard/compact) every button must sit within bounds.
-    const dock = q<HTMLElement>(".kria-dock");
-    const dockButtons = dock ? Array.from(dock.querySelectorAll<HTMLElement>(".kria-dock__button")) : [];
+    const dock = q<HTMLElement>(".kria-navrail");
+    const dockButtons = dock ? Array.from(dock.querySelectorAll<HTMLElement>(".kria-navrail__button")) : [];
     const dockEdgeReveal = dock ? containedByClip(dock) || clipsX(dock) : false;
     const dockFit =
       noOverflow(dock) &&
@@ -240,7 +240,7 @@ async function measureFit(page: Page): Promise<FitMeasurement> {
       ["composer-controls", composerControls],
       ["statusline", statusline],
       ["dock", dock],
-      ["dock-list", q<HTMLElement>(".kria-dock__list")],
+      ["dock-list", q<HTMLElement>(".kria-navrail__list")],
     ];
     const overflow: Overflow[] = owners
       .filter((entry): entry is [string, HTMLElement] => entry[1] != null)

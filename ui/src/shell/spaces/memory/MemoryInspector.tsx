@@ -349,7 +349,7 @@ export function MemoryInspector(props: MemoryInspectorProps) {
               <Confirm
                 triggerLabel="Hard delete"
                 title="Permanently delete this memory?"
-                message="This crypto-shreds the memory and cannot be undone. Use Forget instead if you might want it back."
+                message="This permanently deletes the memory (Hard Delete — content marked for removal). No cryptographic erasure is available yet; data remains on disk until OS-level disk encryption or physical media destruction. Use Forget instead if you might want it back."
                 confirmLabel="Delete permanently"
                 cancelLabel="Keep memory"
                 risk="danger"

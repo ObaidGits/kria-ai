@@ -9,23 +9,17 @@ import { settingsStore, shellStore } from "../stores";
 import { registerCommands, type PaletteCommand } from "./commands";
 import { registerShortcuts, DEFAULT_SHORTCUTS } from "./shortcuts";
 import { requestWindowMode } from "../windowing/modeTransitionCoordinator";
-import { setFeatureFlag } from "../featureFlags";
+import { setSurface } from "../app/surface";
 
 function defaultCommands(): PaletteCommand[] {
   return [
     {
-      // Always-reachable Home: return to the Command Center homepage from any
-      // Space. Re-enables the home surface flag and reloads so the full-screen
-      // HUD mounts (the AppShell home gate resolves at boot).
       id: "cmd.home",
       title: "Home — Command Center",
       subtitle: "Return to the KRIA homepage",
       icon: "sparkles",
       keywords: "home homepage command center core start hud dashboard",
-      run: () => {
-        setFeatureFlag("home.command-center", true);
-        if (typeof window !== "undefined") window.location.reload();
-      },
+      run: () => setSurface("home"),
     },
     {
       id: "cmd.theme.toggle",

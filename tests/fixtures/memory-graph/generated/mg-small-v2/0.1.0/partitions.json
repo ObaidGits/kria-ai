@@ -1,0 +1,28 @@
+[
+  {
+    "partition_id": "all-MiniLM-L6-v2@r1",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r1",
+    "model_hash": "ec0644226350697ec6ac68945b2f5c7243df067836473819076d2909997ba072",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "e19c459f60595cc4b068df83ce95e30d2e83e17594d06e7930602561130212e6",
+    "status": "active",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "9fa2ee6ce95961fe7f282349cccd4cb562b9955bfd40f142f83ea09b70aae033"
+  },
+  {
+    "partition_id": "all-MiniLM-L6-v2@r2",
+    "model_identity": "all-MiniLM-L6-v2",
+    "model_revision": "r2",
+    "model_hash": "4f93e5df395c7b831bbd760bdc8b7b74ad21079f5dd5e844b06432255fcef16f",
+    "dim": 384,
+    "dtype": "f32le",
+    "normalized": true,
+    "tokenizer_hash": "f2e8516d512e789c89140529e1d0d6449f48db151f3b8a76c6884141bac2af24",
+    "status": "building",
+    "build_time": "2024-01-01T00:00:00Z",
+    "manifest_checksum": "7403a9d33b3d6121cd244796e3992fcef415af8e376610608ae1a708736e5600"
+  }
+]

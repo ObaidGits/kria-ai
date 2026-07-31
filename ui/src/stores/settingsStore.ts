@@ -28,14 +28,42 @@ export interface SettingsGroupDefinition {
 }
 
 export const SETTINGS_GROUPS: readonly SettingsGroupDefinition[] = [
-  { id: "you", label: "You", description: "Appearance and personal preferences" },
+  {
+    id: "you",
+    label: "General & Appearance",
+    description: "Theme, interface behavior, and how KRIA stays present",
+  },
   { id: "voice", label: "Voice", description: "Listening, speech, and audio behavior" },
-  { id: "intelligence", label: "Intelligence", description: "Models, reasoning, and orchestration" },
-  { id: "memory-privacy", label: "Memory & Privacy", description: "Recall, retention, and local data" },
-  { id: "safety-approvals", label: "Safety & Approvals", description: "Autonomy, policy, and consent" },
-  { id: "connections", label: "Connections", description: "External services and network links" },
-  { id: "system", label: "System", description: "Hardware, runtime, and desktop behavior" },
-  { id: "developer", label: "Developer", description: "Advanced runtime configuration" },
+  {
+    id: "intelligence",
+    label: "AI & Models",
+    description: "Models, reasoning, routing, and orchestration",
+  },
+  {
+    id: "memory-privacy",
+    label: "Memory & Awareness",
+    description: "Recall, retention, privacy, and optional desktop awareness",
+  },
+  {
+    id: "safety-approvals",
+    label: "Safety & Approvals",
+    description: "Autonomy, policy, consent, and approval boundaries",
+  },
+  {
+    id: "connections",
+    label: "Connections",
+    description: "External services and network links",
+  },
+  {
+    id: "system",
+    label: "System & Features",
+    description: "Feature services, hardware, runtime, and desktop behavior",
+  },
+  {
+    id: "developer",
+    label: "Advanced",
+    description: "Guarded runtime and developer configuration",
+  },
 ] as const;
 
 export const FEATURE_WORKSPACE_OWNERS = {
@@ -73,14 +101,56 @@ const SECTION_GROUP: Readonly<Record<string, SettingsGroup>> = {
   browser_agent: "developer",
 };
 
+export interface SettingOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface SettingSentinel {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface SettingDependency {
+  section: string;
+  field: string;
+  equals: string;
+  effect: "visible" | "enabled";
+  description: string;
+}
+
+interface ConfigPresentation {
+  label?: string;
+  description?: string;
+  group?: SettingsGroup;
+  subsection?: string;
+  subsection_description?: string;
+  order?: number;
+  editor?: string;
+  unit?: string | null;
+  step?: number | null;
+  visibility?: "normal" | "advanced" | "raw";
+}
+
 interface ConfigFieldSchema {
   risk?: string;
   restart_required?: boolean;
   env_locked?: boolean;
   env_lock_var?: string | null;
   secret?: boolean;
+  secret_action?: "none" | "external" | "manage";
   non_functional?: boolean;
   valid_values?: string[] | null;
+  options?: SettingOption[] | null;
+  synonyms?: string[] | null;
+  minimum?: number | null;
+  maximum?: number | null;
+  default_value?: unknown;
+  sentinels?: SettingSentinel[] | null;
+  dependency?: SettingDependency | null;
+  presentation?: ConfigPresentation | null;
 }
 
 type ConfigSchema = Record<string, Record<string, ConfigFieldSchema>>;
@@ -92,13 +162,28 @@ export interface SettingMeta {
   label: string;
   description?: string;
   group: SettingsGroup;
-  type: "string" | "number" | "boolean" | "select" | "json";
+  subsection?: string;
+  subsectionDescription?: string;
+  order?: number;
+  visibility?: "normal" | "advanced" | "raw";
+  editor?: string;
+  type: "string" | "number" | "boolean" | "select" | "json" | "list" | "range";
   risk: "none" | "low" | "medium" | "high";
   requiresRestart: boolean;
   envLocked: boolean;
   envLockVar?: string;
   secret: boolean;
-  options?: string[];
+  secretAction?: "none" | "external" | "manage";
+  options?: Array<string | SettingOption>;
+  synonyms?: string[];
+  unit?: string;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+  hasDefault?: boolean;
+  defaultValue?: unknown;
+  sentinels?: SettingSentinel[];
+  dependency?: SettingDependency;
 }
 
 export interface SettingsChangeRecord {
@@ -129,8 +214,15 @@ function humanize(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function settingType(value: unknown, options?: string[] | null): SettingMeta["type"] {
-  if (options?.length) return "select";
+function settingType(
+  value: unknown,
+  options?: readonly unknown[] | null,
+  editor?: string,
+): SettingMeta["type"] {
+  if (editor === "list") return "list";
+  if (editor === "range") return "range";
+  if (editor === "switch") return "boolean";
+  if (editor === "select" || options?.length) return "select";
   if (typeof value === "boolean") return "boolean";
   if (typeof value === "number") return "number";
   if (typeof value === "string") return "string";
@@ -168,23 +260,47 @@ export function normalizeSettingsSchema(
       if (meta.non_functional) continue;
       const value = (values as Record<string, unknown>)[field];
       if (value === undefined) continue;
+      const presentation = meta.presentation ?? {};
+      const visibility = presentation.visibility ?? "normal";
+      const richOptions = meta.options?.length ? meta.options : meta.valid_values;
+      const editor = presentation.editor ?? "auto";
       result.push({
         key: `${section}.${field}`,
         section,
         field,
-        label: humanize(field),
-        group: SECTION_GROUP[section] ?? "developer",
-        type: settingType(value, meta.valid_values),
+        label: presentation.label ?? humanize(field),
+        description: presentation.description,
+        group: visibility === "raw" ? "developer" : presentation.group ?? SECTION_GROUP[section] ?? "developer",
+        subsection: presentation.subsection ?? humanize(section),
+        subsectionDescription: presentation.subsection_description,
+        order: presentation.order ?? 10_000,
+        visibility,
+        editor,
+        type: settingType(value, richOptions, editor),
         risk: risk(meta.risk),
         requiresRestart: Boolean(meta.restart_required),
         envLocked: Boolean(meta.env_locked),
         envLockVar: meta.env_lock_var ?? undefined,
         secret: Boolean(meta.secret),
-        options: meta.valid_values ?? undefined,
+        secretAction: meta.secret_action ?? "none",
+        options: richOptions ?? undefined,
+        synonyms: meta.synonyms ?? [],
+        unit: presentation.unit ?? undefined,
+        minimum: meta.minimum ?? undefined,
+        maximum: meta.maximum ?? undefined,
+        step: presentation.step ?? undefined,
+        hasDefault: Object.prototype.hasOwnProperty.call(meta, "default_value")
+          && meta.default_value !== undefined,
+        defaultValue: meta.default_value,
+        sentinels: meta.sentinels ?? [],
+        dependency: meta.dependency ?? undefined,
       });
     }
   }
-  return result.sort((a, b) => a.label.localeCompare(b.label));
+  return result.sort((a, b) => {
+    const orderDifference = (a.order ?? 10_000) - (b.order ?? 10_000);
+    return orderDifference || a.label.localeCompare(b.label);
+  });
 }
 
 export function normalizeConfigHistory(payload: unknown): SettingsChangeRecord[] {
@@ -214,11 +330,48 @@ export function settingValue(config: Record<string, unknown>, meta: SettingMeta)
     : undefined;
 }
 
+function comparableValue(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+export function settingIsRelevant(meta: SettingMeta, config: Record<string, unknown>): boolean {
+  if (!meta.dependency) return true;
+  const section = config[meta.dependency.section];
+  const actual = section && typeof section === "object" && !Array.isArray(section)
+    ? (section as Record<string, unknown>)[meta.dependency.field]
+    : undefined;
+  return comparableValue(actual) === meta.dependency.equals;
+}
+
+export function settingIsDefault(meta: SettingMeta, value: unknown): boolean {
+  return Boolean(meta.hasDefault) && comparableValue(value) === comparableValue(meta.defaultValue);
+}
+
 export function settingMatches(meta: SettingMeta, value: unknown, query: string): boolean {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return true;
-  return [meta.label, meta.key, meta.group, String(value ?? "")]
-    .some((candidate) => candidate.toLocaleLowerCase().includes(needle));
+  const groupLabel = SETTINGS_GROUPS.find((group) => group.id === meta.group)?.label ?? meta.group;
+  const optionText = (meta.options ?? []).flatMap((option) => typeof option === "string"
+    ? [option]
+    : [option.value, option.label, option.description ?? ""]);
+  return [
+    meta.label,
+    meta.description ?? "",
+    meta.key,
+    meta.group,
+    groupLabel,
+    meta.subsection ?? "",
+    meta.subsectionDescription ?? "",
+    meta.unit ?? "",
+    comparableValue(value),
+    ...(meta.synonyms ?? []),
+    ...optionText,
+  ].some((candidate) => candidate.toLocaleLowerCase().includes(needle));
 }
 
 const [settings, setSettings] = createSignal<Record<string, unknown>>({});

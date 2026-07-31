@@ -209,123 +209,220 @@
   .kria-presencebar__notifications .has-pulse { animation: none; }
 }
 
-/* ── Body: Dock · SpaceRouter · Inspector ────────────────────────────────── */
+/* ── Body: NavigationRail · SurfaceHost · Inspector ─────────────────────── */
 .kria-shell__body {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-/* ── Dock ────────────────────────────────────────────────────────────────── */
-/* Unified sidebar — matches the homepage sidebar: navy glass panel, bounded
-   width, a cyan right-edge light strip, and rounded glass items with an active
-   gradient + accent bar. Uses design tokens only (they resolve to the migrated
-   HUD navy/cyan palette). */
-.kria-dock {
+.kria-surface-host {
+  grid-column: 2;
   position: relative;
-  inline-size: clamp(208px, 15vw, 244px);
-  border-right: 1px solid var(--color-border-strong);
-  /* Near-opaque navy panel — identical tone to the homepage sidedock gradient. */
-  background: linear-gradient(180deg, var(--color-neutral-2), var(--color-neutral-1));
-  backdrop-filter: blur(24px) saturate(1.1);
-  padding: 16px 12px;
-  overflow-y: auto;
-}
-/* Cyan right-edge glow (mirrors the homepage sidedock edge strip). */
-.kria-dock::after {
-  content: "";
-  position: absolute;
-  right: -1px;
-  top: 8%;
-  bottom: 8%;
-  inline-size: 2px;
-  border-radius: 2px;
-  background: var(--color-accent-default);
-  box-shadow: 0 0 14px var(--color-accent-border);
-  opacity: 0.7;
-  pointer-events: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.kria-dock__list {
-  list-style: none;
-  margin: 0;
+/* ── Shared navigation rail ──────────────────────────────────────────────── */
+.kria-navrail {
+  position: relative;
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  inline-size: 64px;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-2) 7px;
+  border-right: 1px solid var(--color-border-default);
+  background: linear-gradient(180deg, var(--color-neutral-2), var(--color-neutral-1));
+  backdrop-filter: blur(12px);
+  transition: inline-size 180ms var(--motion-easing-standard),
+    padding 180ms var(--motion-easing-standard);
+}
+
+.kria-navrail[data-expanded="true"] {
+  inline-size: 220px;
+  padding-inline: 9px;
+}
+
+.kria-navrail__head {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  overflow: hidden;
+}
+
+.kria-navrail[data-expanded="true"] .kria-navrail__head {
+  justify-content: space-between;
+  padding-inline-start: var(--space-2);
+}
+
+.kria-navrail__eyebrow {
+  display: none;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.kria-navrail[data-expanded="true"] .kria-navrail__eyebrow { display: inline; }
+
+.kria-navrail__expand {
+  display: grid;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  place-items: center;
   padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.kria-navrail__expand:hover {
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-default);
+}
+
+.kria-navrail[data-expanded="true"] .kria-navrail__expand svg { transform: rotate(180deg); }
+.kria-navrail__expand svg { transition: transform 180ms var(--motion-easing-standard); }
+
+.kria-navrail__spaces {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.kria-navrail__spaces::-webkit-scrollbar { display: none; }
+
+.kria-navrail__list {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-/* Item metrics match the homepage nav item exactly (padding 9/11, gap 11,
-   radius 8, 13px label, dim text). */
-.kria-dock__button {
+.kria-navrail__button {
   display: flex;
-  align-items: center;
-  gap: 11px;
   width: 100%;
-  padding: 9px 11px;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 7px 5px;
+  overflow: hidden;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  font-size: var(--font-size-caption);
   text-align: left;
-  transition: background var(--motion-duration-fast) var(--motion-easing-standard),
-    color var(--motion-duration-fast) var(--motion-easing-standard),
-    border-color var(--motion-duration-fast) var(--motion-easing-standard);
+  cursor: pointer;
+  transition: color 100ms var(--motion-easing-standard),
+    background 100ms var(--motion-easing-standard),
+    border-color 100ms var(--motion-easing-standard),
+    transform 90ms var(--motion-easing-standard);
 }
 
-.kria-dock__button:hover {
+.kria-navrail[data-expanded="true"] .kria-navrail__button {
+  justify-content: flex-start;
+  padding-inline: 9px;
+}
+
+.kria-navrail__button:hover {
   background: var(--color-surface-3);
   color: var(--color-text-primary);
 }
+.kria-navrail__button:active { transform: scale(0.98); }
 
-/* Active = homepage blue→violet gradient + inset cyan bar + soft blue glow. */
-.kria-dock__button.is-active {
+.kria-navrail__button.is-active {
+  border-color: color-mix(in srgb, var(--color-accent-default) 20%, transparent);
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--color-info-solid) 32%, transparent),
-    color-mix(in srgb, var(--color-accent-secondary) 14%, transparent)
+    color-mix(in srgb, var(--color-info-solid) 18%, transparent),
+    color-mix(in srgb, var(--color-accent-secondary) 7%, transparent)
   );
-  border-color: var(--color-border-strong);
   color: var(--color-text-primary);
-  box-shadow: inset 3px 0 0 var(--color-accent-default),
-    0 0 20px color-mix(in srgb, var(--color-info-solid) 25%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-accent-default);
 }
-.kria-dock__button.is-active :where(svg) { color: var(--color-accent-default); }
+.kria-navrail__button.is-active :where(svg) { color: var(--color-accent-default); }
 
-.kria-dock__label {
-  font-size: 13px;
+.kria-navrail__icon {
+  display: inline-flex;
+  flex: 0 0 20px;
+  width: 20px;
+  justify-content: center;
+}
+
+.kria-navrail__label {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
   font-weight: var(--font-weight-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.kria-navrail[data-expanded="true"] .kria-navrail__label { display: block; }
 
-/* Beginner-oriented grouping/emphasis (Req 7.2 / design §12; UIE-H-003).
-   PRESENTATION ONLY: emphasis + decorative separators never change the
-   canonical DOM/focus order of the seven Space buttons or add a route. */
-
-/* Uniform items to match the homepage sidebar (no per-item emphasis); the
-   Converse "primary" class is retained for governance/DOM but styled like the
-   rest so the rail reads identically to the homepage nav. */
-.kria-dock__button--primary .kria-dock__label {
-  font-weight: var(--font-weight-regular);
-  color: inherit;
-}
-
-/* Decorative group divider (supporting → system → utility). It is an
-   aria-hidden, non-focusable presentational list item, so it draws a visual
-   group boundary without becoming a focus stop or implying a new route. */
-.kria-dock__separator {
+.kria-navrail__separator {
   block-size: 1px;
   margin: var(--space-1) var(--space-2);
   background: var(--color-border-default);
 }
 
-/* Immersive rail collapses to icons; keep separator spacing subtle there too. */
-.kria-shell[data-window-mode="mini"] .kria-dock__separator,
-.kria-shell[data-window-mode="immersive"] .kria-dock__separator {
-  margin-inline: 0;
+.kria-navrail__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-default);
+}
+
+.kria-navrail__edge {
+  position: absolute;
+  inset-block: 8%;
+  inset-inline-end: -1px;
+  width: 1px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-default);
+  box-shadow: 0 0 10px var(--color-accent-border);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.kria-shell[data-window-mode="mini"] .kria-navrail {
+  inline-size: 56px;
+  padding-inline: 5px;
+}
+.kria-shell[data-window-mode="mini"] .kria-navrail__expand { display: none; }
+.kria-shell[data-window-mode="mini"] .kria-navrail__head { min-height: var(--space-1); }
+
+/* Immersive keeps an icon rail visible and keyboard-reachable. Expansion is
+   explicit through the focusable edge control; no navigation is hover-only. */
+.kria-shell[data-window-mode="immersive"] .kria-navrail:not([data-expanded="true"]) {
+  inline-size: 56px;
+  padding-inline: 5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kria-navrail,
+  .kria-navrail__expand svg,
+  .kria-navrail__button { transition: none; }
 }
 
 /* ── SpaceRouter ─────────────────────────────────────────────────────────── */
@@ -345,15 +442,8 @@
  * the `[data-active-space="converse"]` rule below (G1).
  */
 .kria-space-router {
-  /* Pin the workspace to the middle `1fr` track of the body grid
-     (`auto 1fr auto` = Dock | SpaceRouter | Inspector). This must be EXPLICIT:
-     when the Dock is out of flow (`position:fixed`) — the Hidden Dock on the
-     presence homepage, and the edge-reveal Dock in Immersive mode — it occupies
-     no grid cell, so without an explicit column the router would auto-place into
-     the leading `auto` track and shrink to its min-content width (a narrow left
-     strip with the rest of the screen empty). Forcing column 2 keeps the
-     workspace full-width regardless of whether the Dock is in flow. */
-  grid-column: 2;
+  width: 100%;
+  height: 100%;
   /* Shell-owned active Space edge contract. Most Spaces consume the inset as
      normal router padding; edge-filling Spaces may consume the inverse fill. */
   --kria-active-space-inset: var(--space-6);
@@ -499,10 +589,6 @@
 }
 
 /* ── Window-mode composition (Req 15.2 degrade-by-curation) ──────────────── */
-/* Mini: drop the Dock labels + the Inspector column (curated, not squished). */
-.kria-shell[data-window-mode="mini"] .kria-dock__label {
-  display: none;
-}
 .kria-shell[data-window-mode="mini"] .kria-intent-bar__hint {
   display: none;
 }
@@ -550,18 +636,32 @@
 .kria-shell[data-window-mode="mini"] .kria-machines [data-mode-region="terminal"] {
   display: none;
 }
-.kria-shell[data-window-mode="mini"] .kria-settings__groups,
-.kria-shell[data-window-mode="mini"] .kria-settings__history,
-.kria-shell[data-window-mode="mini"] .kria-settings__section-head,
-.kria-shell[data-window-mode="mini"] .kria-settings__rows > :not(:first-child) {
+.kria-shell[data-window-mode="mini"] .kria-settings__layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.kria-shell[data-window-mode="mini"] .kria-settings__groups {
+  position: static;
+  display: flex;
+  overflow-x: auto;
+}
+.kria-shell[data-window-mode="mini"] .kria-settings__groups ul {
+  flex-direction: row;
+}
+.kria-shell[data-window-mode="mini"] .kria-settings__group-button {
+  min-width: 160px;
+}
+.kria-shell[data-window-mode="mini"] .kria-settings__group-copy small,
+.kria-shell[data-window-mode="mini"] .kria-settings__nav-title {
   display: none;
 }
-.kria-shell[data-window-mode="mini"] .kria-settings__layout {
-  display: block;
-}
 .kria-shell[data-window-mode="mini"] .kria-settings__header {
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  flex-direction: column;
+}
+.kria-shell[data-window-mode="mini"] .kria-settings__header-actions {
+  justify-content: flex-start;
 }
 .kria-shell[data-window-mode="mini"] .kria-settings__search {
   width: 100%;
@@ -579,8 +679,8 @@
   grid-template-columns: 1fr;
 }
 
-/* Immersive gives canvas priority. Dock becomes edge-reveal; safety controls
-   remain in thinned PresenceBar and Inspector floats above content. */
+/* Immersive gives canvas priority while keeping the icon rail and safety
+   controls keyboard-reachable; Inspector floats above content. */
 .kria-shell[data-window-mode="immersive"] .kria-presencebar {
   gap: var(--space-2);
   padding-block: var(--space-1);
@@ -592,20 +692,6 @@
 }
 .kria-shell[data-window-mode="immersive"] .kria-presencebar__global-stop {
   flex: 0 0 auto;
-}
-.kria-shell[data-window-mode="immersive"] .kria-dock {
-  inline-size: var(--space-2);
-  overflow: hidden;
-  padding: 0;
-  opacity: 0.55;
-  z-index: var(--z-floating);
-}
-.kria-shell[data-window-mode="immersive"] .kria-dock:hover,
-.kria-shell[data-window-mode="immersive"] .kria-dock:focus-within {
-  inline-size: auto;
-  overflow-y: auto;
-  padding: var(--space-2);
-  opacity: 1;
 }
 .kria-shell[data-window-mode="immersive"] .kria-space-router {
   --kria-active-space-inset: var(--space-3);

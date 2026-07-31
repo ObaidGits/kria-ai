@@ -1,0 +1,193 @@
+/**
+ * kria-graph.css — Shared graph shell and table styles.
+ *
+ * Extracted from the old KnowledgeGraphLens.css (deleted in F4.9.6).
+ * Contains only the `.kria-graph*` classes used by both the Constellation
+ * lens and any future graph components. The legacy `.memory-universe*` and
+ * `.memory-inspector*` styles were part of the deleted v1 SVG renderer and
+ * are not included here.
+ *
+ * Consumers:
+ *   - ConstellationLens (capabilities space)
+ */
+
+.kria-graph {
+  position: relative;
+  min-height: 0;
+}
+
+.kria-graph__shell-tools {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: calc(var(--z-floating) + 5);
+}
+
+.kria-graph__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.kria-graph__fallback { display: flex; flex-direction: column; gap: var(--space-3); }
+.kria-graph__fallback-toolbar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.kria-graph__fallback-search { flex: 1 1 240px; max-width: 360px; }
+
+.kria-graph__count,
+.kria-graph__reason { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); }
+
+.kria-graph__table-wrap { overflow: auto; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
+.kria-graph__table { width: 100%; border-collapse: collapse; color: var(--color-text-primary); font-size: var(--font-size-body); }
+.kria-graph__table caption { text-align: left; }
+.kria-graph__table th,
+.kria-graph__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-default);
+  text-align: left;
+  vertical-align: middle;
+}
+.kria-graph__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--color-text-secondary);
+  background: var(--color-neutral-2);
+  font-size: var(--font-size-caption);
+}
+.kria-graph__table th[data-numeric="true"],
+.kria-graph__table td[data-numeric="true"] { text-align: right; font-variant-numeric: tabular-nums; }
+.kria-graph__table tbody tr[data-focused="true"] { background: var(--color-accent-soft); }
+
+.kria-graph__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kria-graph__entity { border: 0; padding: 0; color: var(--color-accent-text); background: none; font: inherit; cursor: pointer; }
+
+.kria-graph__row-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  padding: 0;
+  color: var(--color-accent-text);
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kria-graph__cell-entity { min-width: 140px; }
+.kria-graph__cell-actions { white-space: nowrap; }
+
+.kria-graph__row-actions { display: flex; gap: var(--space-1); }
+
+.kria-graph__focus {
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.kria-graph__focus-title { margin: 0 0 var(--space-2); font-size: var(--font-size-body); font-weight: var(--font-weight-medium); }
+
+.kria-graph__muted { color: var(--color-text-muted); font-size: var(--font-size-caption); }
+
+.kria-graph__status-real { display: inline-flex; align-items: center; gap: 4px; color: var(--color-success-text); font-size: var(--font-size-caption); }
+
+.kria-graph__pred { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) 0; color: var(--color-text-secondary); font-size: var(--font-size-caption); }
+
+/* ── 3D stage (restored in task 6.2.2) ──────────────────────────────────────
+ * These rules were lost when KnowledgeGraphLens.css was deleted in F4.9.6.
+ * Without an explicit stage height the WebGL canvas collapses to 0px and
+ * nothing is visible even when the scene has geometry.
+ */
+
+.kria-graph__stage {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-1);
+}
+
+.kria-graph__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* pointer-driven orbit owns the gesture */
+  cursor: grab;
+}
+
+.kria-graph__canvas:active {
+  cursor: grabbing;
+}
+
+/* Centred overlay used for loading / error / empty states. */
+.kria-graph__stage-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* HTML label overlay projected from the 3D scene. */
+.kria-graph__labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.kria-graph__label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.kria-graph__label[data-focused="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Focused-entity side panel (legacy predicted-links path). */
+.kria-graph__panel {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 260px;
+  max-height: calc(100% - var(--space-6));
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-2);
+}
+
+.kria-graph__panel-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}

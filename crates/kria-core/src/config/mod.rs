@@ -8,6 +8,7 @@ pub mod request_override;
 pub mod schema;
 pub mod secrets;
 pub mod service;
+pub mod settings_presentation;
 pub mod store;
 pub use request_override::{OverrideError, RequestOverride};
 pub use schema::{field_meta, validate_change, EffectKind, FieldMeta, SchemaError};
@@ -392,6 +393,64 @@ pub struct ServerConfig {
     pub port: u16,
     pub enable_auth: bool,
     pub jwt_secret: String,
+    /// Explicit opt-in required before the server may bind to a non-loopback
+    /// address (MGR-003 AC1/AC2/AC5 — F1.6.1). Loopback binds never require
+    /// this flag and are unaffected by it. When the resolved bind host is
+    /// non-loopback, startup additionally requires `enable_auth = true` and a
+    /// non-empty `jwt_secret` before the listener is opened; incomplete
+    /// configuration refuses remote startup while local Tauri operation is
+    /// unaffected (separate process). This is a partial hardening step: full
+    /// validated identity/session/replay semantics (F1.6.2) and origin
+    /// allowlisting/transport protection/rate limits are enforced when
+    /// `remote_enabled = true` — see `allowed_origins`/`require_protected_transport`
+    /// below and `kria-server::lib::build_router` (F1.6.3).
+    pub remote_enabled: bool,
+    /// Exact browser `Origin` allowlist enforced by the CORS layer whenever
+    /// `remote_enabled = true` (MGR-003 AC2 "restrictive origins"). Compared
+    /// byte-for-byte against the incoming `Origin` header — no wildcard/
+    /// subdomain matching. An **empty list in remote mode is fail-closed**:
+    /// it means "deny every cross-origin browser request", NOT "allow all".
+    /// Ignored in loopback/default mode (permissive CORS remains there — see
+    /// `remote_enabled` docs and `bind_security`/`auth_middleware`, which
+    /// already gate the *entire* remote security profile on this same flag).
+    pub allowed_origins: Vec<String>,
+    /// Whether the operator attests that a protected transport (TLS)
+    /// terminates in front of this server before requests reach it (MGR-003
+    /// AC2 "transport protection"). This server binds a plain TCP listener —
+    /// it does not terminate TLS itself (see `bind_security` module docs for
+    /// the rationale: a reverse proxy/tunnel is the deployment-appropriate
+    /// place for TLS on a single-laptop pre-production server, not a new
+    /// in-process TLS stack). When `remote_enabled = true` and this remains
+    /// `false` (the default), startup logs a loud warning and continues
+    /// (does NOT refuse to start — unlike `enable_auth`/`jwt_secret`, this
+    /// repo cannot verify from inside the process whether a reverse proxy is
+    /// actually in front of it, so a hard refusal here would be a false
+    /// promise of enforcement, not a real one).
+    pub require_protected_transport: bool,
+    /// Maximum request body size, in bytes, enforced on every route
+    /// (loopback and remote — MGR-009 boundedness applies regardless of
+    /// caller trust). Default matches
+    /// `kria_core::memory::authority::validation::DEFAULT_MAX_PAYLOAD_BYTES`
+    /// (256 KiB), the same bound the authority command bus already enforces
+    /// on a memory command payload — an HTTP request carrying one command
+    /// should not be allowed to exceed what the authority would accept
+    /// anyway.
+    pub max_body_bytes: usize,
+    /// Per-request deadline, in seconds, enforced on every route (loopback
+    /// and remote). Requests exceeding this are answered with `408` before
+    /// the handler completes.
+    pub request_timeout_secs: u64,
+    /// Maximum number of requests the server processes concurrently
+    /// (loopback and remote). Bounded for a single-laptop pre-production
+    /// deployment (dev-context: bounded laptop operation) — excess requests
+    /// queue behind the semaphore rather than being rejected outright.
+    pub max_concurrent_requests: usize,
+    /// Maximum requests per caller per rolling 60-second window, enforced
+    /// ONLY in remote mode (`remote_enabled = true`). Loopback mode has no
+    /// untrusted-identity concept to key a per-caller limit on, so it is not
+    /// rate-limited here (body/timeout/concurrency limits above already
+    /// apply universally as basic stability protection).
+    pub remote_rate_limit_per_minute: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1332,6 +1391,23 @@ impl Default for ServerConfig {
             port: 8088,
             enable_auth: false,
             jwt_secret: String::new(),
+            remote_enabled: false,
+            // Fail-closed (MGR-003 AC2): empty allowlist + remote mode denies
+            // every cross-origin browser request rather than permitting any.
+            allowed_origins: Vec::new(),
+            require_protected_transport: false,
+            // 256 KiB — matches the authority command bus's own
+            // `DEFAULT_MAX_PAYLOAD_BYTES` bound (see `ServerConfig::max_body_bytes` docs).
+            max_body_bytes: 256 * 1024,
+            request_timeout_secs: 30,
+            // 128 concurrent requests is a defensible single-laptop bound: high
+            // enough not to throttle normal desktop/mobile/server use, low
+            // enough to bound worst-case memory/FD usage on one process.
+            max_concurrent_requests: 128,
+            // 120 req/min/caller (~2/s sustained) is generous for a legitimate
+            // remote client (mobile app polling, single operator) while still
+            // bounding a runaway/hostile caller.
+            remote_rate_limit_per_minute: 120,
         }
     }
 }

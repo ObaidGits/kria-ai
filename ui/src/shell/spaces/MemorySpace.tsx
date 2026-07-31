@@ -13,8 +13,8 @@
  * region:
  *   • MemoryCard + Inspector detail ............... task 6.2
  *   • Cognition controls + result panel ........... task 6.3
- *   • Memory Graph: shipped 2D SVG + user-opened semantic table
- *     (`GraphCanvas3D` remains dormant pending MGR-030 Phase 7)
+ *   • Memory Graph: v2 Knowledge destination with list-first representation
+ *     (`GraphCanvas3D` remains dormant pending MGR-030 Phase 7 / F6)
  * Here each segment is a labelled region with a heading and either a basic list
  * (where the store already holds data) or an honest placeholder.
  *
@@ -26,13 +26,14 @@
  *
  * Requirements: 5.1
  */
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   createVirtualizer,
   observeElementRect,
   type Rect,
   type Virtualizer,
 } from "@tanstack/solid-virtual";
+import { bridgeInvoke } from "../../bridge/invoke";
 import { memoryStore, notificationStore, shellStore, type MemorySegment } from "../../stores";
 import { currentRoute, navigate } from "../router";
 import { Badge, Button, Card, EmptyState, Input, Search, Select, Tabs } from "../../kit";
@@ -41,7 +42,15 @@ import MemoryOnboarding from "../../components/memory/MemoryOnboarding";
 import { MemoryCard } from "./memory/MemoryCard";
 import { CognitionPanel } from "./memory/CognitionPanel";
 import { registerMemoryInspector } from "./memory/registerMemoryInspector";
-import KnowledgeGraphLens from "./memory/graph/KnowledgeGraphLens";
+import { Knowledge } from "./memory/destinations/Knowledge";
+import {
+  parseKnowledgeProjectionResponse,
+  type KnowledgeProjectionItem,
+  type KnowledgeProjectionResponse,
+} from "./memory/api";
+import { buildSemanticScene, type RawSceneItem } from "./memory/scene/sceneBuilder";
+import { buildLayoutHint } from "./memory/scene/sceneLayout";
+import { MemoryWindowSessionV2 } from "./memory/state/windowSession";
 import "./MemorySpace.css";
 
 // ─── Segment model ───────────────────────────────────────────────────────────
@@ -206,7 +215,7 @@ function SegmentRegion(props: { segment: MemorySegment; label: string }) {
         <ReasoningRegion />
       </Show>
       <Show when={props.segment === "knowledgegraph"}>
-        <KnowledgeGraphLens />
+        <KnowledgeRegion />
       </Show>
       <Show when={props.segment === "cognition"}>
         <CognitionPanel />
@@ -729,5 +738,205 @@ function ColdStartRegion() {
       </Show>
       <MemoryOnboarding onDone={() => void memoryStore.refreshProductionData()} />
     </div>
+  );
+}
+
+// ─── Knowledge Graph Region ────────────────────────────────────────────────
+
+let knowledgeSessionCounter = 0;
+
+function KnowledgeRegion() {
+  const [projection, setProjection] = createSignal<KnowledgeProjectionResponse | null>(null);
+  const items = createMemo<KnowledgeProjectionItem[]>(() => projection()?.items ?? []);
+  const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  const [focusTrail, setFocusTrail] = createSignal<string[]>([]);
+  const [filterQuery, setFilterQuery] = createSignal("");
+  const [isLoading, setIsLoading] = createSignal(false);
+  const [isSeeding, setIsSeeding] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const [seedMessage, setSeedMessage] = createSignal<string | null>(null);
+  const session = new MemoryWindowSessionV2({
+    instanceId: `knowledge-${++knowledgeSessionCounter}`,
+    policyHash: "local-desktop",
+    schemaVersion: "knowledge-v1",
+  });
+
+  const graphRevision = createMemo(() => projection()?.graphRevision ?? 0);
+
+  const filteredItems = createMemo(() => {
+    const query = filterQuery().trim().toLocaleLowerCase();
+    const source = items();
+    if (!query) return source;
+    const nodes = source.filter((item) =>
+      item.kind !== "relation" && item.label.toLocaleLowerCase().includes(query));
+    const nodeIds = new Set(nodes.map((item) => item.id));
+    const relations = source.filter((item) =>
+      item.kind === "relation" &&
+      item.sourceEndpointId != null &&
+      item.targetEndpointId != null &&
+      nodeIds.has(item.sourceEndpointId) &&
+      nodeIds.has(item.targetEndpointId));
+    return [...nodes, ...relations];
+  });
+
+  const scene = createMemo(() => {
+    const revision = graphRevision();
+    const currentSelection = selectedId();
+    const rawItems: RawSceneItem[] = filteredItems().map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      authorityClass: item.authorityClass,
+      label: item.label,
+      truthState: item.truthState,
+      graphRevision: item.revision,
+      direction: item.direction ?? null,
+      sourceEndpointId: item.sourceEndpointId ?? null,
+      targetEndpointId: item.targetEndpointId ?? null,
+      evidenceCount: null,
+      evidenceSummary: null,
+      provenanceSourceId: null,
+      provenanceMethod: null,
+      provenanceVersion: null,
+      provenanceActorLabel: null,
+      validTimeStart: null,
+      validTimeEnd: null,
+      isCurrentlyValid: true,
+      isSelected: item.id === currentSelection,
+      isFocused: item.id === currentSelection,
+      isInPath: false,
+      isPending: false,
+      hasError: false,
+      isAuthorized: true,
+    }));
+    const actions = rawItems
+      .filter((item) => item.kind !== "relation")
+      .flatMap((item) => ([
+        { targetItemId: item.id, kind: "select", label: "Select", isEnabled: true, isDangerous: false, requiresPreview: false, isAuthorized: true },
+        { targetItemId: item.id, kind: "expand", label: "Focus", isEnabled: true, isDangerous: false, requiresPreview: false, isAuthorized: true },
+      ]));
+    return buildSemanticScene({
+      items: rawItems,
+      actions,
+      graphRevision: revision,
+      layoutHint: buildLayoutHint({
+        queryKind: currentSelection ? "ego" : filterQuery().trim() ? "search" : "overview",
+        queryHash: filterQuery().trim() || "knowledge-overview",
+        graphRevision: revision,
+        primaryItemId: currentSelection,
+        maxDepth: currentSelection ? 2 : null,
+      }),
+    }).scene;
+  });
+
+  const listItems = createMemo(() => {
+    const sceneIds = new Set(scene().items.map((item) => item.id));
+    return filteredItems().filter((item) => item.kind !== "relation" && sceneIds.has(item.id));
+  });
+
+  const mapParityReady = createMemo(() => {
+    const currentScene = scene();
+    const ids = listItems().map((item) => item.id);
+    return ids.length > 0 && ids.every((id) =>
+      currentScene.actions.some((action) =>
+        action.targetItemId === id && action.kind === "expand" && action.isEnabled));
+  });
+
+  async function loadItems(): Promise<void> {
+    const token = session.beginRequest("knowledge-bootstrap");
+    setIsLoading(true);
+    setError(null);
+    const result = await bridgeInvoke<unknown>(
+      "memory_knowledge_items",
+      { limit: 50 },
+    );
+    if (token.signal.aborted) return;
+    if (result.ok) {
+      const parsed = parseKnowledgeProjectionResponse(result.data);
+      if (!parsed.ok) {
+        if (session.failRequest(token.generation)) {
+          setError(`Memory returned an invalid knowledge snapshot: ${parsed.message}. A previous snapshot is preserved if one was loaded.`);
+        }
+      } else if (session.completeRequest(token.generation, parsed.data.graphRevision)) {
+        setProjection(parsed.data);
+        if (parsed.omittedItemCount > 0) {
+          setError(`${parsed.omittedItemCount} malformed knowledge item(s) were safely omitted.`);
+        }
+        const validIds = new Set(parsed.data.items.map((item) => item.id));
+        if (selectedId() && !validIds.has(selectedId()!)) {
+          setSelectedId(null);
+          setFocusTrail([]);
+        }
+      }
+    } else if (session.failRequest(token.generation)) {
+      setError(result.code === "unavailable"
+        ? "Memory service is unavailable. A previous snapshot is preserved if one was loaded."
+        : `Could not load knowledge items: ${result.message}`);
+    }
+    if (token.generation === session.generation) setIsLoading(false);
+  }
+
+  async function seedDemo(): Promise<void> {
+    setIsSeeding(true);
+    setError(null);
+    setSeedMessage(null);
+    const result = await bridgeInvoke<{ message?: string }>("memory_seed_demo_knowledge");
+    if (result.ok) {
+      setSeedMessage(result.data.message ?? "Demo data seeded successfully.");
+      await loadItems();
+    } else {
+      setError(`Seeding failed: ${result.message}`);
+    }
+    setIsSeeding(false);
+  }
+
+  function focusItem(id: string): void {
+    setSelectedId(id);
+    setFocusTrail((trail) => trail[trail.length - 1] === id ? trail : [...trail, id].slice(-8));
+  }
+
+  function goBack(): void {
+    setFocusTrail((trail) => {
+      const next = trail.slice(0, -1);
+      setSelectedId(next[next.length - 1] ?? null);
+      return next;
+    });
+  }
+
+  function resetFocus(): void {
+    setSelectedId(null);
+    setFocusTrail([]);
+  }
+
+  onMount(() => void loadItems());
+  onCleanup(() => session.markDetached());
+
+  return (
+    <Knowledge
+      items={filteredItems()}
+      scene={scene()}
+      selectedId={selectedId()}
+      focusTrail={focusTrail()}
+      loadedNodeCount={items().filter((item) => item.kind !== "relation").length}
+      snapshotItemCount={projection()?.count ?? null}
+      graphRevision={projection()?.graphRevision ?? null}
+      snapshotTruncated={projection()?.truncated ?? false}
+      filterQuery={filterQuery()}
+      inspectorAvailable={false}
+      pathAvailable={false}
+      correctionAvailable={false}
+      mapParityReady={mapParityReady()}
+      isLoading={isLoading()}
+      isSeeding={isSeeding()}
+      error={error()}
+      seedMessage={seedMessage()}
+      onFilterQuery={(query) => { setFilterQuery(query); resetFocus(); }}
+      onSelectItem={focusItem}
+      onOpenInspector={() => {}}
+      onRequestPath={() => {}}
+      onBack={goBack}
+      onReset={resetFocus}
+      onRetry={() => void loadItems()}
+      onSeedDemo={import.meta.env.DEV ? seedDemo : undefined}
+    />
   );
 }

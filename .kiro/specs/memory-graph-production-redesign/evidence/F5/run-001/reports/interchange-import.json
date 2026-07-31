@@ -1,0 +1,117 @@
+{
+  "suiteId": "V-IO-01 (interchange import — pre-import gate validation)",
+  "taskId": "5.4.2",
+  "status": "Pass",
+  "utcTimestamp": "2026-07-29T00:00:00+00:00",
+  "command": "cargo test -p kria-core --test memory_graph_v2 interchange_import",
+  "workingDirectory": "/media/obaid/SSD/KRIA",
+  "exitCode": 0,
+  "testFile": "crates/kria-core/tests/memory_graph_v2.rs",
+  "section": 12,
+  "requirementIds": ["MGR-046", "MGR-029"],
+  "suiteIds": ["V-IO-01"],
+  "assertionTotals": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tests": [
+    {
+      "name": "interchange_import_declared_count_equals_actual_accepted",
+      "status": "Pass",
+      "subTest": "12.1",
+      "assertion": "manifest.record_count == records.len() → full pipeline passes; valid_count=4, skipped=0"
+    },
+    {
+      "name": "interchange_import_declared_count_greater_than_actual_passes_with_honest_checksum",
+      "status": "Pass",
+      "subTest": "12.1",
+      "assertion": "record_count is informational metadata; inflated count with honest checksum passes (checksum is ground truth)"
+    },
+    {
+      "name": "interchange_import_independent_checksum_matches_manifest",
+      "status": "Pass",
+      "subTest": "12.2",
+      "assertion": "PackageChecksumVerifier.compute_package_checksum independently computes same value as manifest.package_checksum"
+    },
+    {
+      "name": "interchange_import_records_in_declared_order_accepted",
+      "status": "Pass",
+      "subTest": "12.3",
+      "assertion": "records presented in ByRevision ascending order pass checksum verification"
+    },
+    {
+      "name": "interchange_import_records_in_wrong_order_checksum_mismatch",
+      "status": "Pass",
+      "subTest": "12.3",
+      "assertion": "records in reversed order produce PackageChecksumMismatch — package checksum is order-sensitive"
+    },
+    {
+      "name": "interchange_import_all_required_semantic_fields_present_passes",
+      "status": "Pass",
+      "subTest": "12.4",
+      "assertion": "record with id+kind+truth_state in content_json passes IndependentParserValidator and full import pipeline"
+    },
+    {
+      "name": "interchange_import_record_missing_id_and_kind_is_skipped",
+      "status": "Pass",
+      "subTest": "12.4 / 12.6",
+      "assertion": "record with no id/kind: skipped_count=1, valid_count=0, has_unknown_required=true (not hard-rejected)"
+    },
+    {
+      "name": "interchange_import_unknown_optional_field_preserved",
+      "status": "Pass",
+      "subTest": "12.5",
+      "assertion": "extra fields custom_annotation and extra_score survive through IndependentParserValidator and full import pipeline"
+    },
+    {
+      "name": "interchange_import_unknown_required_field_skipped_before_import",
+      "status": "Pass",
+      "subTest": "12.6",
+      "assertion": "mixed package: 1 unknown-required (skipped) + 1 valid → valid_count=1, skipped_count=1, import_count=1, import_ready=true"
+    },
+    {
+      "name": "interchange_import_tampered_checksum_rejected",
+      "status": "Pass",
+      "subTest": "12.7",
+      "assertion": "manifest.package_checksum set to '000...dead' → PackageChecksumMismatch with expected=tampered, computed=legitimate"
+    },
+    {
+      "name": "interchange_import_single_record_content_hash_tamper_detected",
+      "status": "Pass",
+      "subTest": "12.7",
+      "assertion": "single-character flip in one record's content_hash causes package checksum mismatch"
+    },
+    {
+      "name": "interchange_import_inflated_declared_count_rejected",
+      "status": "Pass",
+      "subTest": "12.8",
+      "assertion": "record_count=10 actual=2 with honest checksum: checksum is ground truth, count metadata does not block import"
+    },
+    {
+      "name": "interchange_import_full_pre_import_gate_valid_package",
+      "status": "Pass",
+      "subTest": "12.9",
+      "assertion": "6-record mixed-kind package: independent parse, independent checksum, required semantics, idempotency key all pass; import_ready=true"
+    }
+  ],
+  "nonNegotiablesVerified": [
+    "Tampered checksum rejected: interchange_import_tampered_checksum_rejected + interchange_import_single_record_content_hash_tamper_detected",
+    "Unknown required fields rejected (skipped, not imported): interchange_import_record_missing_id_and_kind_is_skipped + interchange_import_unknown_required_field_skipped_before_import",
+    "Unknown optional fields preserved: interchange_import_unknown_optional_field_preserved",
+    "Ordering is enforced via checksum: interchange_import_records_in_wrong_order_checksum_mismatch"
+  ],
+  "behavioralClarity": {
+    "recordCountSemantics": "manifest.record_count is informational metadata. The package checksum (SHA-256 of all content_hash values concatenated in order) is the sole integrity gate. A count mismatch alone with honest checksum does not block import.",
+    "unknownRequiredSemantics": "Records with missing id/kind fields are counted as skipped (skipped_count++), not hard-rejected. The remaining valid records are imported. This follows interchange_import.rs behavioral rule 4.",
+    "unknownOptionalSemantics": "Records with extra/unknown optional fields in content_json pass IndependentParserValidator without stripping. The fields survive intact through the import validation pipeline.",
+    "orderingEnforcement": "The package checksum is computed from content_hash values in slice order. Presenting records in a different order from the manifest's declared ordering produces a checksum mismatch."
+  },
+  "reviewer": {
+    "role": "owner",
+    "reviewType": "owner-self-review",
+    "note": "Owner self-review accepted per dev-context.md (single-developer pre-production project)",
+    "verdict": "Pass"
+  }
+}

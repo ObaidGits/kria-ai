@@ -1,0 +1,390 @@
+{
+  "schema_version": "1.0.0",
+  "gate": "F6",
+  "run_id": "run-001",
+  "artifact_type": "protocol_schema_only",
+  "description": "Protocol schema for all required technical checks that must be executed on the study commit (the commit used to run F6 study sessions, task 6.3.1) on reference hardware RHW-001. No measurements are taken here — all statuses are PENDING_EXECUTION until the study commit is known and hardware execution occurs.",
+  "created_at": "2025-07-29T00:00:00Z",
+  "preregistration_reference": "evidence/F6/run-001/study/preregistration.json#task_6_1_4",
+
+  "dependency_chain": {
+    "description": "These checks MUST be run on the SAME commit used for study sessions (task 6.3.1). Running technical checks on a different commit breaks the evidence chain: the GO/NO-GO decision requires that the performance, accessibility, and regression evidence corresponds to the exact code participants used.",
+    "required_commit_source": "The study commit SHA recorded in the study session logs produced by task 6.3.1. All checks below are blocked until that commit is identified and tagged.",
+    "ordering": [
+      {
+        "step": 1,
+        "task_ref": "6.3.1",
+        "description": "Complete study sessions and record the study commit SHA in the session logs.",
+        "produces": "study_commit_sha — the Git commit hash of the build used in all study sessions"
+      },
+      {
+        "step": 2,
+        "task_ref": "6.3.2",
+        "description": "Confirm study commit integrity: verify the build artifact checksums against the commit SHA before running technical checks.",
+        "produces": "build_artifact_checksums — confirms the binary under test matches the study sessions"
+      },
+      {
+        "step": 3,
+        "task_ref": "6.3.3",
+        "description": "Execute all technical checks in this file on RHW-001 against the study commit. Each check must record the commit SHA and build artifact checksum it was run against.",
+        "produces": "All check result artifacts listed in this file"
+      }
+    ],
+    "violation_condition": "Running any technical check below against a commit or build other than the study commit identified in step 1 is a protocol violation. The evidence would not correspond to the code participants actually used and the GO/NO-GO decision would be invalid.",
+    "hardware_constraint": "All checks must be run on RHW-001 (reference hardware as defined in task 0.5.1 baseline). Results from other hardware are informational only and do not affect GO."
+  },
+
+  "conjunctive_rule": {
+    "statement": "All 9 checks below are required for GO. A FAIL, INCONCLUSIVE, or PENDING_EXECUTION result on any single check at GO decision time is a NO-GO.",
+    "preregistration_reference": "preregistration.json#task_6_1_4.conjunctive_rule",
+    "missing_data_rule": "INCONCLUSIVE is treated as FAIL for GO purposes.",
+    "degradation_override": "Any degradation of an existing F5 baseline metric is a NO-GO regardless of threshold margin."
+  },
+
+  "checks": [
+    {
+      "id": "fps_check",
+      "name": "WebKitGTK real-scene ≥30 FPS p95 frame time",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.fps_threshold",
+        "metric": "p95 frame time in milliseconds (95th percentile of ≥30 warm frame samples after discarding first 10 warm-up frames)",
+        "pass_value": "p95 frame time ≤ 33.3 ms (equivalent to ≥30 FPS at the 95th percentile; 1000 ms / 30 frames)",
+        "fixture": "mg-medium-v2/0.1.0 — the largest preregistered 3-hop path result scene (maximum node count among the 30 immutable_path_pairs in task_6_1_3)",
+        "renderer": "WebKitGTK on RHW-001",
+        "minimum_warm_samples": 30,
+        "load_conditions": [
+          {
+            "condition": "idle",
+            "pass_criterion": "p95 frame time ≤ 33.3 ms — no competing local processes"
+          },
+          {
+            "condition": "competing_load",
+            "description": "Local all-MiniLM-L6-v2 ONNX inference running concurrently (CMD-MG-CONTENTION-LOAD, one batch per 200ms against mg-medium-v2 entity records)",
+            "pass_criterion": "p95 frame time ≤ 33.3 ms under competing local model inference"
+          }
+        ],
+        "both_conditions_required": true,
+        "fail_conditions": [
+          "p95 frame time > 33.3 ms under idle load",
+          "p95 frame time > 33.3 ms under competing local model inference load",
+          "Fewer than 30 warm frame samples in either condition",
+          "Not run on RHW-001",
+          "Not run against mg-medium-v2 maximum-path-size real scene",
+          "WebKitGTK renderer not used"
+        ]
+      },
+      "instrumentation_module": "ui/src/shell/spaces/memory/graph/profiling3D.ts — ProfilingSession.addFrameSample() called at each rAF callback in graphCanvas3DSpike.ts; ProfilingSession.computeP95FrameTime() after ≥30 samples",
+      "command": "CMD-MG-PROFILE-SPIKE — runs both idle and contention load conditions against mg-medium-v2 max-path scene; outputs evidence/F6/run-001/performance/results/idle-condition.json and contention-condition.json",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "build artifact checksums must be verified (task 6.3.2 complete)",
+        "RHW-001 reference hardware available",
+        "mg-medium-v2/0.1.0 fixture materialized at tests/fixtures/memory-graph/generated/mg-medium-v2/0.1.0/",
+        "CMD-MG-CONTENTION-LOAD command implemented"
+      ],
+      "result_artifact": "evidence/F6/run-001/performance/results/idle-condition.json + contention-condition.json",
+      "go_group": "fps_threshold"
+    },
+
+    {
+      "id": "idle_quiet_check",
+      "name": "rAF stops ≤2000ms after last input; idle CPU delta ≤2pp above F5 baseline",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.idle_quiet_threshold",
+        "raf_stop": {
+          "metric": "Elapsed time from last user input event (or last path query result render) until rAF callbacks cease for ≥500ms",
+          "pass_value": "rAF stops within ≤ 2000 ms of trigger timestamp"
+        },
+        "cpu_delta": {
+          "metric": "Process CPU usage delta once the render loop is in the stopped state: mean_stopped_cpu − F5_idle_baseline_cpu",
+          "pass_value": "≤ 2 percentage points above the F5 idle CPU baseline recorded in the F5 performance evidence manifest",
+          "baseline_reference": "F5 idle CPU baseline in the F5 evidence manifest (evidence/F5/run-001/)"
+        },
+        "fail_conditions": [
+          "rAF continues firing more than 2000 ms after last user input event or last path query result render",
+          "CPU delta in stopped state exceeds 2 percentage points above F5 idle baseline",
+          "Render loop never enters a stopped state (continuously polling)",
+          "Measurement not run or timing instrumentation not present"
+        ]
+      },
+      "instrumentation_module": "ui/src/shell/spaces/memory/graph/profiling3D.ts — ProfilingSession idle phase; graphCanvas3DSpike.ts shouldStopRendering() / rAF timestamp logging; CPU sampled via /proc/[pid]/stat at 500ms intervals (CMD-MG-PROFILE-CPU sidecar)",
+      "command": "CMD-MG-PROFILE-SPIKE idle phase (phase: 'idle', duration 5s) — verify shouldStopRendering fires at >2000ms per design §4.8.9; compare CPU reading to F5 idle baseline",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "build artifact checksums must be verified (task 6.3.2 complete)",
+        "F5 idle CPU baseline recorded in F5 evidence manifest",
+        "RHW-001 reference hardware available",
+        "shouldStopRendering instrumentation present in graphCanvas3DSpike.ts"
+      ],
+      "result_artifact": "evidence/F6/run-001/performance/results/idle-condition.json (idle phase section)",
+      "go_group": "idle_quiet_threshold"
+    },
+
+    {
+      "id": "resource_parity_check",
+      "name": "Peak heap ≤1.5× 2D; no GC pause ≥50ms; VRAM delta ≤256MB",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.resource_parity_threshold",
+        "reference_baseline": "2D/list resource measurements from the same mg-medium-v2 path exploration session in the 2D/list condition on RHW-001",
+        "heap_memory": {
+          "metric": "Peak JS heap size (bytes) during full path exploration session, via performance.memory API or WebKitGTK memory instrumentation",
+          "pass_value": "3D peak heap ≤ 2D/list peak heap × 1.5"
+        },
+        "gc_pressure": {
+          "metric": "Individual GC pause durations via PerformanceObserver entries of type 'gc' or WebKitGTK GC tracing, scoped from path query submission to correct entity confirmed in Inspector",
+          "pass_value": "No individual GC pause ≥ 50 ms"
+        },
+        "vram": {
+          "metric": "VRAM delta = VRAM during 3D path exploration session peak − VRAM at application idle with no scene loaded, measured on RHW-001",
+          "pass_value": "≤ 256 MB additional VRAM vs idle baseline",
+          "hardware_note": "Applies only to RHW-001; other hardware is informational only"
+        },
+        "fail_conditions": [
+          "3D peak heap > 2D/list peak heap × 1.5",
+          "Any GC pause ≥ 50 ms during a path exploration session",
+          "VRAM delta > 256 MB vs idle baseline",
+          "Measurements not collected on RHW-001",
+          "2D/list baseline measurements not available for comparison"
+        ]
+      },
+      "instrumentation_module": "ui/src/shell/spaces/memory/graph/profiling3D.ts — ProfilingSession.addHeapSample() every 500ms; ProfilingSession.addGcPauseSample() from PerformanceObserver GC handler; VRAM via nvidia-smi / intel_gpu_top / radeontop on RHW-001; 2D/list baseline from CMD-MG-PROFILE-SPIKE in 2D mode",
+      "command": "CMD-MG-PROFILE-SPIKE — run once in 2D/list mode to capture baseline heap/VRAM, then once in 3D mode; compare results; output evidence/F6/run-001/performance/results/raw-heap-samples.json, raw-gc-samples.json, system-metrics.json",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "build artifact checksums must be verified (task 6.3.2 complete)",
+        "2D/list baseline heap/VRAM run on same RHW-001 session",
+        "RHW-001 reference hardware available with GPU monitoring tools"
+      ],
+      "result_artifact": "evidence/F6/run-001/performance/results/raw-heap-samples.json + raw-gc-samples.json + system-metrics.json",
+      "go_group": "resource_parity_threshold"
+    },
+
+    {
+      "id": "context_loss_recovery_check",
+      "name": "Simulated WebGL context loss falls back to 2D/list with same query/focus/pending state, ≤2s",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.a11y_parity_threshold.focus_containment + task_6_1_3.context_loss_a11y_protocol.webgl_context_loss_protocol",
+        "trigger": "Simulated WebGL context loss via WEBGL_lose_context.loseContext() using the renderer's debug context loss trigger",
+        "pass_criteria": [
+          "The same path query result is visible in SemanticList and Graph2D within ≤ 2 seconds of context loss (fallback_latency_ms ≤ 2000)",
+          "The participant's current focus and pending entity selection state is preserved after fallback (focus_preserved = true)",
+          "Pending Inspector entity_confirmed events are not lost or duplicated (pending_state_preserved = true)",
+          "Keyboard focus returns to the same logical state as in the 2D/list condition after fallback"
+        ],
+        "observation_fields": "context_loss_event entry: timestamp_ms, trial_index, path_pair_id, clock_state, fallback_completed (bool), fallback_latency_ms, focus_preserved (bool), pending_state_preserved (bool)",
+        "fail_conditions": [
+          "Fallback to 2D/list not completed within 2000 ms",
+          "Focus lost, orphaned, or placed on logically incorrect element after fallback",
+          "Pending state (query, entity selection) not preserved after fallback",
+          "Simulation trigger not available or not run",
+          "Fallback not verified at least once per 3D session"
+        ]
+      },
+      "instrumentation_module": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts — webglcontextlost event handler with window.performance.now() timestamp; fallback path activation; focus management after fallback; session log context_loss_event emitter",
+      "command": "During CMD-MG-PROFILE-SPIKE context_loss_simulation phase: trigger WEBGL_lose_context.loseContext() via renderer debug trigger; observe fallback_latency_ms and focus state; record context_loss_event in session log. Also run as standalone observation after each 3D session per task_6_1_3.context_loss_a11y_protocol.webgl_context_loss_protocol.fallback_verification.",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "3D renderer spike implemented with webglcontextlost handler and debug trigger",
+        "Session log context_loss_event emitter implemented",
+        "RHW-001 reference hardware available"
+      ],
+      "result_artifact": "evidence/F6/run-001/performance/results/idle-condition.json (context_loss_simulation phase) + session log context_loss_event entries",
+      "go_group": "a11y_parity_threshold"
+    },
+
+    {
+      "id": "keyboard_parity_check",
+      "name": "All 5 keyboard navigation steps pass in 3D condition",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.a11y_parity_threshold.keyboard_parity + task_6_1_3.context_loss_a11y_protocol.keyboard_only_navigation_baseline",
+        "steps": [
+          "Tab to Knowledge destination",
+          "Navigate entity list with arrow keys",
+          "Activate Find Path",
+          "Navigate path result",
+          "Activate Inspector on destination entity and confirm (keyboard only, no mouse)"
+        ],
+        "pass_value": "5 of 5 steps completable by keyboard alone with visible focus at each step in the 3D condition (same criterion as 2D/list condition)",
+        "when_run": "Once per condition, immediately before the first study trial for that condition (after training)",
+        "observation_fields": "keyboard_baseline entry: condition, pass (bool), steps_failed (list), notes",
+        "fail_conditions": [
+          "Any single step among the 5 fails keyboard navigation in the 3D condition",
+          "Focus not visible at any step",
+          "Interactive element not reachable in logical tab order",
+          "Check not run before first study trial for the 3D condition"
+        ]
+      },
+      "instrumentation_module": "Manual observation with mouse disconnected / pointer events disabled in devtools; session log keyboard_baseline entry; ui/src/shell/spaces/memory/destinations/Knowledge.tsx and path result components must expose accessible keyboard targets",
+      "command": "Manual protocol: disconnect mouse (or disable pointer events), navigate the full Find Path workflow using keyboard only, record keyboard_baseline entry in session log. Run CMD-GUI-E2E with keyboard-navigation assertions as supporting automated check.",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "3D renderer spike implemented with accessible keyboard targets in path result view",
+        "RHW-001 reference hardware with keyboard available",
+        "Session log keyboard_baseline emitter implemented"
+      ],
+      "result_artifact": "Session log keyboard_baseline entry for 3D condition + CMD-GUI-E2E keyboard navigation test output",
+      "go_group": "a11y_parity_threshold"
+    },
+
+    {
+      "id": "orca_parity_check",
+      "name": "Entity names and Inspector confirmation announced in 3D",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.a11y_parity_threshold.orca_parity + task_6_1_3.context_loss_a11y_protocol.orca_screen_reader_observation",
+        "required_announcements": [
+          "Entity display names for path result nodes (node_names_announced = true)",
+          "Inspector entity confirmation announcement when correct destination entity is activated (inspector_confirmation_announced = true)"
+        ],
+        "pass_value": "Both node_names_announced = true AND inspector_confirmation_announced = true in the 3D condition orca_observation record",
+        "when_run": "Once per condition as a standalone observation session separate from study trials (Orca disabled during actual study trials)",
+        "observation_fields": "orca_observation entry: condition, path_pair_used, node_names_announced (bool), hop_structure_announced (bool), inspector_confirmation_announced (bool), orca_transcript_excerpt (first 500 chars), issues (list)",
+        "fail_conditions": [
+          "node_names_announced = false in the 3D condition orca_observation",
+          "inspector_confirmation_announced = false in the 3D condition orca_observation",
+          "Orca observation not run for 3D condition",
+          "2D/list baseline Orca observation not available for comparison"
+        ]
+      },
+      "instrumentation_module": "orca --replace on RHW-001; path result nodes and Inspector panel must have proper ARIA labels / live regions in Knowledge.tsx and path result components; orca_observation entry in session log",
+      "command": "Manual observation protocol: enable Orca (orca --replace), navigate to Knowledge, submit path query, observe and record orca_observation entry. Compare announcements between 2D/list and 3D conditions. Note: Orca must be disabled during actual study trials.",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "Orca screen reader available on RHW-001",
+        "3D path result view emits accessible ARIA labels for node names and Inspector confirmation",
+        "2D/list baseline Orca observation recorded"
+      ],
+      "result_artifact": "Session log orca_observation entries for both conditions",
+      "go_group": "a11y_parity_threshold"
+    },
+
+    {
+      "id": "axe_scan_check",
+      "name": "No new serious/critical axe-core findings vs 2D/list baseline",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.a11y_parity_threshold.axe_scan",
+        "scope": "Knowledge destination and path exploration workflow only; other destinations are out of scope",
+        "method": "Run axe-core scan on Knowledge destination with 3D renderer active; run same scan with 2D/list renderer; diff findings at severity serious and critical",
+        "pass_value": "No new serious or critical axe-core findings present in the 3D scan that are absent from the 2D/list baseline scan",
+        "fail_conditions": [
+          "One or more new serious or critical axe-core findings in 3D scan absent from 2D/list baseline scan",
+          "axe scan not run for 3D condition",
+          "2D/list baseline axe scan not available for comparison"
+        ]
+      },
+      "instrumentation_module": "axe-core via CMD-UI-A11Y (axe-playwright or axe-webdriverio integration in the E2E suite); scoped to Knowledge destination; diff output comparing 3D vs 2D/list findings",
+      "command": "CMD-UI-A11Y — run axe-core scan twice: once with 3D renderer enabled (3D-enabled build on study commit), once with 2D/list only; produce JSON diff of findings; flag any new serious/critical entries introduced by 3D renderer",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "build artifact checksums must be verified (task 6.3.2 complete)",
+        "CMD-UI-A11Y implemented and available",
+        "2D/list baseline axe scan available from F5 or run on same session",
+        "RHW-001 reference hardware available with WebKitGTK"
+      ],
+      "result_artifact": "evidence/F6/run-001/axe-scan/3d-condition.json + baseline-diff.json",
+      "go_group": "a11y_parity_threshold"
+    },
+
+    {
+      "id": "core_task_e2e_check",
+      "name": "F5 E2E suite passes against 3D-enabled build — zero regressions",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.core_task_parity_threshold",
+        "suite_reference": "The F5 E2E test suite as defined in the F5 evidence manifest (evidence/F5/run-001/). No new tests added for this check; existing suite run unmodified.",
+        "scope": "All seven destinations: Overview, Recall, Knowledge, Timeline, Goals, Sources, Health. 3D renderer active only for Knowledge path exploration view; all other destinations must be unaffected.",
+        "pass_value": "All tests that pass in the F5 2D/list baseline build also pass in the 3D-enabled build. Zero regressions.",
+        "regression_definition": "A test regression is any test that passes in the F5 baseline build but fails in the 3D-enabled build. Flaky tests failing intermittently in both builds are not regressions but must be documented.",
+        "fail_conditions": [
+          "Any E2E test that passes in the F5 2D/list baseline build fails in the 3D-enabled build",
+          "The F5 E2E test suite cannot be run against the 3D-enabled build (build failure, missing configuration)",
+          "F5 E2E test suite results not available for comparison",
+          "Any destination other than Knowledge 3D path view exhibits changed behaviour attributable to the 3D renderer"
+        ]
+      },
+      "instrumentation_module": "ui/e2e/ test suite (CMD-GUI-E2E); must be run against a build of the application with the 3D renderer enabled at the study commit SHA; compare JUnit XML output against F5 baseline JUnit XML",
+      "command": "CMD-GUI-E2E — run the complete F5 E2E suite against the 3D-enabled build on the study commit; compare pass/fail per test against the F5 baseline evidence/F5/run-001/junit/ output; report any new failures as regressions",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "build artifact checksums must be verified (task 6.3.2 complete)",
+        "F5 E2E suite passes on F5 baseline build (prerequisite evidence in evidence/F5/run-001/)",
+        "3D-enabled build successfully compiles on study commit",
+        "RHW-001 reference hardware available with WebKitGTK"
+      ],
+      "result_artifact": "evidence/F6/run-001/junit/core-task-e2e.xml + regression-diff.json",
+      "go_group": "core_task_parity_threshold"
+    },
+
+    {
+      "id": "sbom_diff_check",
+      "name": "All new dependencies have approved FOSS dispositions and Supply Chain sign-off",
+      "status": "PENDING_EXECUTION",
+      "threshold": {
+        "preregistration_ref": "task_6_1_4.foss_closure_threshold",
+        "method": "Generate SBOM for F6 3D-spike build; diff against F5 release SBOM closure (evidence/F5/run-001/supply-chain/)",
+        "scope": "All new dependencies (Rust crates, npm packages, Python packages, system libraries, WASM modules, bundled assets) in F6 closure absent from F5 closure",
+        "required_fields_per_new_dependency": [
+          "name: exact package/crate/module name and version",
+          "license: exact SPDX license identifier (e.g., MIT, Apache-2.0) — inferred or assumed licenses not accepted",
+          "source_url: canonical repository or package registry URL",
+          "checksum: SHA-256 or equivalent cryptographic hash of the artifact as downloaded",
+          "foss_disposition: one of [approved, rejected, pending] — must be 'approved' for GO",
+          "reviewer: identity of the person who reviewed and approved the disposition",
+          "review_timestamp: UTC timestamp of the review"
+        ],
+        "pass_value": "Every new dependency has recorded license, source URL, checksum, and foss_disposition = 'approved'. Supply Chain review sign-off recorded in F6 evidence manifest.",
+        "supply_chain_signoff": "Must be a recorded entry in the F6 evidence manifest with reviewer identity, reviewed artifact hash, and UTC timestamp. Self-review by owner/developer is accepted per dev-context.md single-developer pre-production context, but must be explicitly recorded as a separate step.",
+        "f5_sbom_baseline_reference": "evidence/F5/run-001/supply-chain/",
+        "f5_known_versions": {
+          "three": "0.169.0",
+          "note": "Any version bumps to three, @types/three, ngraph.forcelayout, ngraph.graph introduced by F6 spike must be listed in the diff and approved"
+        },
+        "fail_conditions": [
+          "Any new dependency has unknown, unrecorded, or unresolved license",
+          "Any new dependency has proprietary, non-FOSS, or project-incompatible license",
+          "Any new dependency is missing a checksum",
+          "Any new dependency has foss_disposition = 'pending' or 'rejected' at GO decision time",
+          "Supply Chain review sign-off not recorded",
+          "SBOM diff not generated or incomplete",
+          "F5 release SBOM baseline not available for comparison"
+        ]
+      },
+      "instrumentation_module": "scripts/memory_graph/ SBOM tooling (cargo-sbom / syft for Rust; npm audit / license-checker for npm); diff against F5 closure; human review for each new entry",
+      "command": "CMD-MG-SBOM-DIFF — generate SBOM for F6 3D-spike build on study commit; diff against F5 SBOM baseline; for each new entry populate the required fields and record Supply Chain sign-off; output evidence/F6/run-001/supply-chain/sbom-diff.json",
+      "blocking_on": [
+        "study_commit_sha must be recorded (task 6.3.1 complete)",
+        "F5 release SBOM available at evidence/F5/run-001/supply-chain/",
+        "SBOM tooling available (cargo-sbom / syft / license-checker)",
+        "3D-enabled build successfully compiles on study commit (Cargo.lock and package-lock.json reflect F6 spike dependencies)"
+      ],
+      "result_artifact": "evidence/F6/run-001/supply-chain/sbom-diff.json + F6 evidence manifest supply_chain_signoff entry",
+      "go_group": "foss_closure_threshold"
+    }
+  ],
+
+  "summary": {
+    "total_checks": 9,
+    "checks_pending": 9,
+    "checks_passed": 0,
+    "checks_failed": 0,
+    "checks_inconclusive": 0,
+    "go_groups_covered": [
+      "fps_threshold",
+      "idle_quiet_threshold",
+      "resource_parity_threshold",
+      "a11y_parity_threshold",
+      "core_task_parity_threshold",
+      "foss_closure_threshold"
+    ],
+    "go_groups_not_covered_here": [
+      "task_benefit_threshold — covered by study sessions (task 6.3.1) and analysis (task 6.3.2), not by this technical checks file"
+    ],
+    "overall_go_status": "PENDING_EXECUTION — no technical checks have been run; all checks require the study commit (task 6.3.1) and RHW-001 hardware"
+  }
+}

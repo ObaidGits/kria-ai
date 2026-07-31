@@ -10,20 +10,36 @@ kria-core = { path = "../kria-core" }
 kria-connection-control = { path = "../kria-connection-control" }
 axum = { version = "0.8", features = ["ws", "json"] }
 axum-extra = { version = "0.10", features = ["typed-header"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
-jsonwebtoken = "9"
+# MGR-003 / F1.6.3 — `limit` enables `tower::limit::concurrency::ConcurrencyLimitLayer`
+# (server-wide concurrency bound). `tower::limit::rate::RateLimitLayer` also lives
+# behind this feature but is NOT used directly: it is a single global bucket, not
+# per-caller, so per-caller rate limiting is a small custom middleware instead
+# (see `rate_limit.rs`).
+tower = { version = "0.5", features = ["limit"] }
+# MGR-003 / F1.6.3 — `limit` enables `tower_http::limit::RequestBodyLimitLayer`
+# (body-size cap) and `timeout` enables `tower_http::timeout::TimeoutLayer`
+# (per-request deadline). Both are pinned, no-new-dependency additions to the
+# already-pinned `tower-http` crate.
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "limit", "timeout"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 dirs = { workspace = true }
+# MGR-003 / F1.6.2 — HMAC-signed bearer token auth (auth.rs). Reuses the
+# workspace-pinned crypto primitives already used by kria-core's mobile
+# device-token scheme, rather than adding a jsonwebtoken/JOSE dependency.
+hmac = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
 async-stream = "0.3"
 tokio-stream = "0.1"
 tokio-postgres = "0.7"
@@ -36,3 +52,4 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "scre
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio-tungstenite = "0.24"
+tempfile = "3"

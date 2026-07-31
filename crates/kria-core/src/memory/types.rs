@@ -127,14 +127,26 @@ string_enum! {
 }
 
 string_enum! {
-    /// Memory mode, enforced at the write gate (design §23).
+    /// Memory mode, enforced at the write gate (design §23) and the redesign's
+    /// canonical mode gate ([`crate::memory::modes`], task F1.4.4).
+    ///
+    /// MGR-035 / the glossary define **five canonical `Memory_Mode` classes** —
+    /// `Permanent`, `Temporary`, `Session_Only`, `Read_Only`, `Disabled`. Every
+    /// variant below maps onto exactly one of those classes via
+    /// [`MemoryMode::class`](crate::memory::modes::ModeClass); the extra
+    /// variants are finer-grained product modes that share a canonical class's
+    /// admission/read/purge semantics (e.g. `Developer`/`Research` are
+    /// `Permanent`-class, `Incognito`/`Guest` are `Read_Only`-class). An unknown
+    /// `Other` value has **no** class and fails closed (no durable fallback).
     pub enum MemoryMode {
         Permanent => "permanent",
         Temporary => "temporary",
+        SessionOnly => "session_only",
         Incognito => "incognito",
         Workspace => "workspace",
         LibraryOnly => "library_only",
         ReadOnly => "read_only",
+        Disabled => "disabled",
         Guest => "guest",
         Developer => "developer",
         Benchmark => "benchmark",
@@ -178,6 +190,11 @@ string_enum! {
 /// Provenance of the originating content/actor for a write (design §46.1 maps
 /// the tool layer's `TriggerProvenance` onto this). Serialized as a tagged
 /// string like `tool:file_ops`, `mcp:github:search`, `openclaw:pdf-skill`.
+///
+/// **Superseded by** the structured [`crate::memory::model::Provenance`] +
+/// [`crate::memory::model::SourceRef`] (canonical v2 provenance). Retained as
+/// the live write-path provenance tag until the F1.5 write cutover; see the
+/// ledger in [`crate::memory::model::legacy_mapping`] (task F2.1.6).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Source {
     /// Directly stated by the user (highest reliability).
@@ -422,6 +439,12 @@ string_enum! {
 }
 
 /// A derived, durable, mutable knowledge unit (design §12/§17, L4).
+///
+/// **Superseded by** [`crate::memory::model::Record`]
+/// (`RecordKind::Memory`) + [`crate::memory::model::Provenance`] (canonical v2
+/// cognitive record). Retained as the live persistence/retrieval row until the
+/// F1.5 write cutover + F3 retrieval-on-v2; see the ledger in
+/// [`crate::memory::model::legacy_mapping`] (task F2.1.6).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Memory {
     pub id: Uuid,
@@ -624,6 +647,12 @@ mod tests {
 // ── Storage-port supporting types (design §16) ─────────────────────────────
 
 /// A graph entity (person/project/tool/concept/…). Design §12.
+///
+/// **Superseded by** [`crate::memory::model::Entity`] (`entities_v2`) +
+/// [`crate::memory::model::Alias`]/[`crate::memory::model::Mention`] (canonical
+/// v2 graph identity). Retained as the live `GraphStore` read/write model until
+/// F2.2 (relation registry canonical) + F1.5; see the ledger in
+/// [`crate::memory::model::legacy_mapping`] (task F2.1.6).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: Uuid,
@@ -633,26 +662,11 @@ pub struct Entity {
     pub created_at: Timestamp,
 }
 
-/// A typed, weighted, time-valid graph edge. Design §12.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Relationship {
-    pub id: Uuid,
-    pub source_id: Uuid,
-    pub target_id: Uuid,
-    pub rel_type: String,
-    pub strength: f32,
-    pub valid_from: Timestamp,
-    pub valid_until: Option<Timestamp>,
-    pub evidence_event_id: Option<Uuid>,
-}
-
-/// A graph-traversal result: an entity reached at `distance` hops via `path`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct GraphHit {
-    pub entity: Entity,
-    pub distance: u8,
-    pub path: Vec<Uuid>,
-}
+// `Relationship` (legacy free-text edge) and `GraphHit` (legacy traversal result)
+// were deleted in task F2.2.7. The canonical replacements are:
+//   - `relationships_v2` table + registry-governed write path (F2.2.3–2.2.5)
+//   - F3.3 traversal result over `crate::memory::model::Entity` (v2)
+// See `crate::memory::model::legacy_mapping` for the cutover ledger.
 
 /// Which derived index an outbox entry targets (design §14/§16).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -736,6 +750,11 @@ pub struct OutboxEntry {
     pub attempts: u32,
     pub status: OutboxStatus,
     pub created_at: Timestamp,
+    /// When set, the relay must not apply this entry before this UTC instant
+    /// (exponential backoff gate, task 1.8.4). `None` = eligible immediately.
+    pub next_attempt_at: Option<Timestamp>,
+    /// The last recorded failure reason (dead-letter observability, task 1.8.4).
+    pub error_code: Option<String>,
 }
 
 impl OutboxEntry {
@@ -750,6 +769,8 @@ impl OutboxEntry {
             attempts: 0,
             status: OutboxStatus::Pending,
             created_at: chrono::Utc::now(),
+            next_attempt_at: None,
+            error_code: None,
         }
     }
 
@@ -764,6 +785,8 @@ impl OutboxEntry {
             attempts: 0,
             status: OutboxStatus::Pending,
             created_at: chrono::Utc::now(),
+            next_attempt_at: None,
+            error_code: None,
         }
     }
 }

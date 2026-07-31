@@ -24,7 +24,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within, cleanup } from "@solidjs/testing-library";
-import { Dock } from "./Dock";
+import { NavigationRail as Dock } from "./NavigationRail";
 import { SpaceRouter } from "./SpaceRouter";
 import {
   navigate,
@@ -247,7 +247,7 @@ describe("Dock screen-reader navigation structure (task 7.8)", () => {
     const nav = await screen.findByRole("navigation", { name: "Spaces" });
 
     // Separators are presentational and aria-hidden — never announced or a stop.
-    const separators = nav.querySelectorAll(".kria-dock__separator");
+    const separators = nav.querySelectorAll(".kria-navrail__separator");
     expect(separators.length).toBeGreaterThan(0);
     for (const sep of Array.from(separators)) {
       expect(sep.getAttribute("aria-hidden")).toBe("true");

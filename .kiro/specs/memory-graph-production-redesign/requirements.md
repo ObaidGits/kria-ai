@@ -454,7 +454,7 @@ Priorities: **P0** release blocker, **P1** required production capability, **P2*
 5. WHEN a merge preview is requested, THE Entity_Resolution_Engine SHALL report surviving identity, affected aliases, relationships, Evidence, scopes, contradictions, and reversal behavior at one Graph_Revision.
 6. WHEN source authorization or lifecycle changes, THE Cognitive_Memory_System SHALL recalculate entity and relationship visibility without revealing orphaned hidden contributors.
 
-**Traceability:** MG-M13, MG-M14, MG-O03, MG-O12; risk R-DATA-01.
+**Traceability:** MG-M13, MG-M14, MG-O03, MG-O12; risks R-WRONG-MERGE, R-POLICY-LEAK.
 
 ### Requirement 20: MGR-020 — Transport Capability Parity
 

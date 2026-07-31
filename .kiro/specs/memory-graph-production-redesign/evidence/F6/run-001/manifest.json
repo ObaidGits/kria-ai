@@ -1,0 +1,353 @@
+{
+  "schema_version": "evidence-manifest/v1",
+  "gate": "F6",
+  "run_id": "run-001",
+  "status": "DEFERRED",
+  "created_at": "2025-07-30T12:00:00Z",
+  "task_ref": "6.3.6",
+
+  "_note": "The F6 manifest chain is optional and can only be signed AFTER F5 is signed. F5's signed manifest is the sole prerequisite for F6; F6 does not block F5 public readiness. This manifest records the DEFERRED state of F6 — all threshold evidence is PENDING_EXECUTION because no study has been run and no 3D spike commit exists. Status transitions from DEFERRED to either GO or NO_GO only after all prerequisite evidence arrives.",
+
+  "predecessor_chain": {
+    "description": "F0→F1→F2→F3→F4→F5 is the mandatory gate sequence. F6 is optional and extends from F5. The F5 signed manifest is the sole prerequisite for F6. F6 does not block F5 public readiness.",
+    "gates": [
+      {
+        "gate": "F0",
+        "status": "signed",
+        "manifest_path": "evidence/F0/run-001/manifest.json",
+        "description": "Evidence reset and contract freeze"
+      },
+      {
+        "gate": "F1",
+        "status": "signed",
+        "manifest_path": "evidence/F1/run-001/manifest.json",
+        "description": "SQLite authority, security, lifecycle, and recovery"
+      },
+      {
+        "gate": "F2",
+        "status": "signed",
+        "manifest_path": "evidence/F2/run-001/manifest.json",
+        "description": "Records, links, truth, entities, sources, and interchange base"
+      },
+      {
+        "gate": "F3",
+        "status": "signed",
+        "manifest_path": "evidence/F3/run-001/manifest.json",
+        "description": "Retrieval, cognition, canonical API, and backend gates"
+      },
+      {
+        "gate": "F4",
+        "status": "signed",
+        "manifest_path": "evidence/F4/run-001/manifest.json",
+        "description": "Seven-destination Digital Twin, semantic list first, then conditional Canvas2D"
+      },
+      {
+        "gate": "F5",
+        "status": "signed",
+        "manifest_path": "evidence/F5/run-001/manifest.json",
+        "predecessor_sha256": "b4c1693e58bf3c89a1b02ec7afa20412d81af9005bcd8233e23a183f861ace1a",
+        "description": "Production hardening, cutover, and release evidence — the sole signed predecessor for F6",
+        "note": "F5 status=Pass per evidence/F5/run-001/manifest.json. 2D/list product (all 7 destinations) is complete, public-ready, and independent of F6 outcome."
+      },
+      {
+        "gate": "F6",
+        "status": "DEFERRED",
+        "manifest_path": "evidence/F6/run-001/manifest.json",
+        "predecessor_sha256": "UNKNOWN — F6 cannot be self-certifying; this hash is populated by CMD-MG-COVERAGE after F6 signing",
+        "description": "Optional preregistered 3D GO or complete deletion. Extends from F5 optionally."
+      }
+    ],
+    "chain_rule": "F6 may start only from a signed F5 manifest. The F5 predecessor hash (sha256:b4c1693e58bf3c89a1b02ec7afa20412d81af9005bcd8233e23a183f861ace1a) is the cryptographic anchor for this chain. F6 signing requires the predecessor_sha256 field to match the on-disk F5 manifest hash."
+  },
+
+  "f5_public_readiness_unchanged": {
+    "value": true,
+    "invariant": "The F5 product — 2D/list SemanticList + Graph2D across all 7 destinations (Overview, Recall, Knowledge, Timeline, Goals, Sources, Health) — is complete and public-ready independent of F6 outcome. This invariant holds regardless of whether F6 reaches GO or NO_GO or remains DEFERRED indefinitely. F6 is strictly additive and optional; it cannot degrade, modify, or precondition the F5 product.",
+    "evidence_ref": "evidence/F5/run-001/manifest.json (status=Pass, utcTimestamp=2026-07-29T10:08:58.052270254+00:00)",
+    "destinations": [
+      "Overview",
+      "Recall",
+      "Knowledge",
+      "Timeline",
+      "Goals",
+      "Sources",
+      "Health"
+    ],
+    "non_negotiable": "No F6 work may modify F5 source files, routes, schemas, or test suites in a way that conditions F5 correctness on F6 outcome. Any such modification is a protocol violation and must be reverted before F5 readiness can be re-asserted."
+  },
+
+  "f6_outcome": {
+    "value": "PENDING",
+    "possible_values": {
+      "GO": "All 7 conjunctive threshold groups record PASS, study analysis returns STUDY_GO, and all 4 review sign-offs are recorded. The capability-gated optional 3D path renderer is integrated into the F5 product behind CAPABILITY_3D_PATH_RENDERER. The 2D/list product remains the default.",
+      "NO_GO": "Any single threshold group returns FAIL, INCONCLUSIVE, or PENDING at decision time. All F6 spike code (11 new source files, 4 modified files, F6-exclusive npm/Rust dependencies, documentation claims) is deleted per the mandatory deletion plan in evidence/F6/run-001/no-go-branch-decision.json. The F5 product is returned to its unmodified baseline state.",
+      "DEFERRED": "Current state. No study has been run. All threshold evidence is PENDING_EXECUTION. No GO or NO_GO determination can be made."
+    },
+    "decision_ref": {
+      "go_branch": "evidence/F6/run-001/go-branch-decision.json",
+      "no_go_branch": "evidence/F6/run-001/no-go-branch-decision.json",
+      "conjunctive_rule_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4"
+    }
+  },
+
+  "gate_artifacts": [
+    {
+      "path": "evidence/F6/run-001/study/preregistration.json",
+      "task_ref": "6.1.1, 6.1.2, 6.1.3, 6.1.4, 6.1.5",
+      "artifact_type": "study_preregistration",
+      "status": "DEFERRED",
+      "description": "Frozen pre-registration of the F6 study protocol: z-axis formula, 7 conjunctive GO thresholds, deletion inventory, spike inventory, immutable path pairs, and analysis plan. Frozen before any spike implementation or study data collection.",
+      "non_negotiable": "The protocol in this file is frozen at task 6.1.x and cannot be changed post-hoc to accommodate study outcomes."
+    },
+    {
+      "path": "evidence/F6/run-001/performance/profiling-protocol.json",
+      "task_ref": "6.2.6",
+      "artifact_type": "profiling_protocol",
+      "status": "DEFERRED",
+      "description": "Protocol and schema for performance profiling of the 3D spike: FPS measurement, idle quiet detection, heap/GC/VRAM sampling, and contention load conditions. Defines ProfilingSession API wired into graphCanvas3DSpike.ts. No measurements taken — protocol only."
+    },
+    {
+      "path": "evidence/F6/run-001/study/study-protocol-status.json",
+      "task_ref": "6.3.1",
+      "artifact_type": "study_protocol_status",
+      "status": "DEFERRED",
+      "description": "Study execution status: participant enrollment, session completion, randomisation log, counterbalance status, and study commit SHA. Status DEFERRED — no sessions have been run."
+    },
+    {
+      "path": "evidence/F6/run-001/study/analysis-schema.json",
+      "task_ref": "6.3.2",
+      "artifact_type": "analysis_schema",
+      "status": "DEFERRED",
+      "description": "Schema for the study analysis output artifact (evidence/F6/run-001/study/analysis/results.json). Defines the go_no_go_determination.verdict field, Wilcoxon test fields, valid_pairs_count, and median_percentage_difference fields that the analysis script must produce."
+    },
+    {
+      "path": "evidence/F6/run-001/technical-checks-status.json",
+      "task_ref": "6.3.3",
+      "artifact_type": "technical_checks_status",
+      "status": "PENDING_EXECUTION",
+      "description": "Protocol schema for all 9 required technical checks (FPS, idle quiet, resource parity, 4 a11y sub-checks, core E2E, SBOM diff). All 9 checks are PENDING_EXECUTION — none can run until the study commit SHA is known and RHW-001 hardware is available.",
+      "checks_summary": {
+        "total": 9,
+        "pending": 9,
+        "passed": 0,
+        "failed": 0
+      }
+    },
+    {
+      "path": "evidence/F6/run-001/go-branch-decision.json",
+      "task_ref": "6.3.4",
+      "artifact_type": "go_branch_decision",
+      "status": "PENDING",
+      "description": "GO branch decision schema: prerequisite checks for all 7 conjunctive threshold groups, go_activation_rule, go_branch_actions (capability-gated 3D renderer integration), and required review sign-offs. Activates only when all 7 groups record PASS and all 4 reviews are signed."
+    },
+    {
+      "path": "evidence/F6/run-001/no-go-branch-decision.json",
+      "task_ref": "6.3.5",
+      "artifact_type": "no_go_branch_decision",
+      "status": "DEFERRED",
+      "description": "NO-GO branch deletion plan: activation conditions (any single threshold failure triggers NO-GO), 10-step ordered deletion sequence, 20 MVI checks (13 original + 7 delta), and post-deletion verification requirements. Executes when any GO threshold fails or remains PENDING at decision time."
+    }
+  ],
+
+  "machine_inventory_validation": {
+    "_description": "Defines what the machine-inventory command (CMD-MG-COVERAGE) must verify to confirm either GO or NO-GO outcome. These checks are assertions, not evidence — they validate that the evidence chain is consistent with the declared outcome.",
+
+    "go_outcome_assertions": {
+      "_precondition": "All conditions below must be simultaneously true for a GO outcome to be recorded. Any single failure is an inventory violation.",
+      "assertions": [
+        {
+          "id": "GO-INV-01",
+          "name": "qualified_optional_view",
+          "check": "The F6 go-branch-decision.json decision_status field equals 'GO'",
+          "field": "evidence/F6/run-001/go-branch-decision.json#decision_status",
+          "pass_value": "GO"
+        },
+        {
+          "id": "GO-INV-02",
+          "name": "capability_gated_3d_renderer_present",
+          "check": "CAPABILITY_3D_PATH_RENDERER constant exists in ui/src/platform/renderMode.ts and defaults to false",
+          "command": "grep -n 'CAPABILITY_3D_PATH_RENDERER' ui/src/platform/renderMode.ts",
+          "pass_criterion": "Match found; constant is declared and exported; default value is false"
+        },
+        {
+          "id": "GO-INV-03",
+          "name": "all_go_threshold_verdicts_pass",
+          "check": "All 7 threshold groups in go-branch-decision.json prerequisite_checks record PASS verdicts",
+          "fields": [
+            "go-branch-decision.json#prerequisite_checks.task_benefit_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.fps_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.idle_quiet_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.resource_parity_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.a11y_parity_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.core_task_parity_threshold.verdict == 'PASS'",
+            "go-branch-decision.json#prerequisite_checks.foss_closure_threshold.verdict == 'PASS'"
+          ]
+        },
+        {
+          "id": "GO-INV-04",
+          "name": "all_review_signoffs_recorded",
+          "check": "All 4 required review sign-offs in go-branch-decision.json review_requirements have verdict=PASS, non-null reviewer_identity, and non-null timestamp_utc",
+          "fields": [
+            "go-branch-decision.json#review_requirements.product_review.verdict == 'PASS'",
+            "go-branch-decision.json#review_requirements.accessibility_review.verdict == 'PASS'",
+            "go-branch-decision.json#review_requirements.performance_review.verdict == 'PASS'",
+            "go-branch-decision.json#review_requirements.supply_chain_review.verdict == 'PASS'"
+          ]
+        },
+        {
+          "id": "GO-INV-05",
+          "name": "study_go_verdict",
+          "check": "The study analysis results.json records go_no_go_determination.verdict == 'STUDY_GO'",
+          "field": "evidence/F6/run-001/study/analysis/results.json#go_no_go_determination.verdict",
+          "pass_value": "STUDY_GO"
+        },
+        {
+          "id": "GO-INV-06",
+          "name": "f5_e2e_passes_with_3d_enabled",
+          "check": "F5 E2E suite passes against 3D-enabled build with zero regressions (core_task_e2e_check PASS)",
+          "artifact_ref": "evidence/F6/run-001/technical-checks-status.json#checks[core_task_e2e_check].status",
+          "pass_value": "PASS"
+        },
+        {
+          "id": "GO-INV-07",
+          "name": "f5_public_readiness_unchanged",
+          "check": "f5_public_readiness_unchanged.value is true in this manifest",
+          "field": "manifest.json#f5_public_readiness_unchanged.value",
+          "pass_value": true
+        }
+      ]
+    },
+
+    "no_go_outcome_assertions": {
+      "_precondition": "All conditions below must be simultaneously true for a NO-GO outcome to be recorded. Any single failure is an inventory miss and blocks recording the NO-GO.",
+      "assertions": [
+        {
+          "id": "NG-INV-01",
+          "name": "complete_deletion",
+          "check": "The no-go-branch-decision.json decision_status field equals 'NO-GO'",
+          "field": "evidence/F6/run-001/no-go-branch-decision.json#decision_status",
+          "pass_value": "NO-GO"
+        },
+        {
+          "id": "NG-INV-02",
+          "name": "all_20_mvi_checks_pass",
+          "check": "All 20 MVI checks pass (13 original MVI-1..MVI-13 + 7 delta MVI-D-01..MVI-D-07)",
+          "source": "evidence/F6/run-001/no-go-branch-decision.json#mvi_checks_reference",
+          "total_required": 20,
+          "ids": [
+            "MVI-1", "MVI-2", "MVI-3", "MVI-4", "MVI-5", "MVI-6", "MVI-7",
+            "MVI-8", "MVI-9", "MVI-10", "MVI-11", "MVI-12", "MVI-13",
+            "MVI-D-01", "MVI-D-02", "MVI-D-03", "MVI-D-04", "MVI-D-05",
+            "MVI-D-06", "MVI-D-07"
+          ]
+        },
+        {
+          "id": "NG-INV-03",
+          "name": "typescript_build_passes",
+          "check": "TypeScript build passes after NO-GO deletion",
+          "command": "cd ui && npm run typecheck",
+          "pass_criterion": "Exit code 0, zero TypeScript errors"
+        },
+        {
+          "id": "NG-INV-04",
+          "name": "f5_e2e_suite_passes",
+          "check": "F5 E2E suite passes with zero regressions after deletion",
+          "command": "CMD-GUI-E2E",
+          "pass_criterion": "All tests pass; zero regressions; suite identical to F5 baseline"
+        },
+        {
+          "id": "NG-INV-05",
+          "name": "sbom_matches_f5_baseline",
+          "check": "Post-deletion SBOM matches F5 SBOM baseline with no new entries",
+          "f5_sbom_baseline_ref": "evidence/F5/run-001/supply-chain/",
+          "pass_criterion": "Zero new dependencies vs F5 SBOM baseline; all F6-exclusive entries absent"
+        },
+        {
+          "id": "NG-INV-06",
+          "name": "no_spike_files_in_working_tree",
+          "check": "No untracked spike files and no uncommitted modifications to reverted files remain in working tree",
+          "command": "git status --short ui/src/shell/spaces/memory/graph/",
+          "pass_criterion": "Clean with respect to all F6 spike changes"
+        },
+        {
+          "id": "NG-INV-07",
+          "name": "f5_public_readiness_unchanged",
+          "check": "f5_public_readiness_unchanged.value is true in this manifest",
+          "field": "manifest.json#f5_public_readiness_unchanged.value",
+          "pass_value": true
+        }
+      ]
+    }
+  },
+
+  "validation_command": {
+    "id": "CMD-MG-COVERAGE",
+    "description": "Coverage linter that validates the manifest chain and checks all F6 assertions. The primary gate-level validation command for confirming either qualified_optional_view (GO) or complete_deletion (NO_GO) as the F6 outcome.",
+    "defined_in": "evidence/F0/run-001/commands/CMD-MG-COVERAGE.json",
+    "expected_assertions": [
+      {
+        "assertion_id": "CV-F6-01",
+        "name": "predecessor_chain_integrity",
+        "description": "Verify the F5 manifest SHA-256 matches the predecessor_sha256 recorded in this manifest",
+        "expected": "sha256(evidence/F5/run-001/manifest.json) == b4c1693e58bf3c89a1b02ec7afa20412d81af9005bcd8233e23a183f861ace1a"
+      },
+      {
+        "assertion_id": "CV-F6-02",
+        "name": "f5_public_readiness_invariant",
+        "description": "Confirm f5_public_readiness_unchanged.value is true and F5 manifest status is Pass",
+        "expected": "manifest.json#f5_public_readiness_unchanged.value == true AND evidence/F5/run-001/manifest.json#status == 'Pass'"
+      },
+      {
+        "assertion_id": "CV-F6-03",
+        "name": "gate_artifacts_present",
+        "description": "All 7 gate_artifacts referenced in this manifest must exist on disk",
+        "expected": "All artifact paths in gate_artifacts[] resolve to existing files"
+      },
+      {
+        "assertion_id": "CV-F6-04",
+        "name": "outcome_consistency",
+        "description": "The f6_outcome.value must be consistent with the evidence: PENDING if any threshold is PENDING_EXECUTION or DEFERRED; GO only if all GO-INV assertions pass; NO_GO only if all NG-INV assertions pass",
+        "expected": "f6_outcome.value ∈ {PENDING, GO, NO_GO}; PENDING while any evidence is missing or PENDING_EXECUTION"
+      },
+      {
+        "assertion_id": "CV-F6-05",
+        "name": "go_branch_decision_consistency",
+        "description": "If f6_outcome.value == 'GO', then go-branch-decision.json#decision_status must equal 'GO' and all 4 review_requirements verdicts must be PASS",
+        "expected": "go-branch-decision.json#decision_status == 'GO' AND all review_requirements.*.verdict == 'PASS' when f6_outcome.value == 'GO'"
+      },
+      {
+        "assertion_id": "CV-F6-06",
+        "name": "no_go_branch_deletion_complete",
+        "description": "If f6_outcome.value == 'NO_GO', then no-go-branch-decision.json#decision_status must equal 'NO-GO' and all 20 MVI checks must pass",
+        "expected": "no-go-branch-decision.json#decision_status == 'NO-GO' AND all 20 MVI checks pass when f6_outcome.value == 'NO_GO'"
+      },
+      {
+        "assertion_id": "CV-F6-07",
+        "name": "technical_checks_go_status",
+        "description": "If f6_outcome.value == 'GO', all 9 checks in technical-checks-status.json must show status == 'PASS'",
+        "expected": "technical-checks-status.json#summary.checks_pending == 0 AND checks_passed == 9 when f6_outcome.value == 'GO'"
+      },
+      {
+        "assertion_id": "CV-F6-08",
+        "name": "no_orphan_f6_task_references",
+        "description": "Every task_ref in gate_artifacts[] must map to a real task in tasks.md; no orphan IDs",
+        "expected": "All task_ref values (6.1.1–6.1.5, 6.2.6, 6.3.1–6.3.5) exist in tasks.md"
+      }
+    ],
+    "exit_behavior": {
+      "success": "Exit 0 when all CV-F6-01 through CV-F6-08 assertions pass for the declared f6_outcome.value",
+      "failure": "Exit nonzero with a JSON diagnostic report identifying each failing assertion and the specific field/file/hash mismatch"
+    }
+  },
+
+  "reviews": [],
+
+  "notes": [
+    "F6 status is DEFERRED. No 3D spike exists. No study has been run. All threshold evidence is PENDING_EXECUTION.",
+    "F5 public readiness is confirmed independent of F6 outcome (f5_public_readiness_unchanged = true).",
+    "F6 outcome will be GO (qualified optional view) or NO_GO (complete deletion) when evidence arrives.",
+    "The predecessor SHA-256 of the F5 manifest is b4c1693e58bf3c89a1b02ec7afa20412d81af9005bcd8233e23a183f861ace1a — this is the cryptographic anchor for the F6 chain.",
+    "F6 cannot be signed until F5 is signed. F5 is signed (status=Pass, utcTimestamp=2026-07-29T10:08:58.052270254+00:00).",
+    "Reports directory (evidence/F6/run-001/reports/) is reserved for future CMD-MG-COVERAGE output artifacts."
+  ]
+}

@@ -133,8 +133,6 @@ const [previousState, setPreviousState] = createSignal<HomeState>("rest");
 
 const [viewMode, setViewModeSignal] = createSignal<HomeViewMode>("standard");
 const [renderMode, setRenderModeSignal] = createSignal<HomeRenderMode>("auto");
-const [dockRevealed, setDockRevealedSignal] = createSignal(false);
-const [dockPinned, setDockPinnedSignal] = createSignal(false);
 const [orbitEngaged, setOrbitEngagedSignal] = createSignal(false);
 const [companionBrightened, setCompanionBrightenedSignal] = createSignal(false);
 const [companionPosition, setCompanionPositionSignal] = createSignal<EdgeAnchor | undefined>(
@@ -326,20 +324,6 @@ function setRenderMode(mode: HomeRenderMode): void {
   setRenderModeSignal(mode);
 }
 
-/** Reveal / hide the Hidden Dock (edge/Alt/⌘K/pin/AT-focus, Req 7.1). */
-function setDockRevealed(revealed: boolean): void {
-  // A pinned dock stays revealed; only an explicit unpin can hide it.
-  if (!revealed && dockPinned()) return;
-  setDockRevealedSignal(revealed);
-}
-
-function setDockPinned(pinned: boolean): void {
-  batch(() => {
-    setDockPinnedSignal(pinned);
-    if (pinned) setDockRevealedSignal(true);
-  });
-}
-
 function setOrbitEngaged(engaged: boolean): void {
   setOrbitEngagedSignal(engaged);
 }
@@ -363,8 +347,6 @@ function reset(): void {
     setPreviousState("rest");
     setViewModeSignal("standard");
     setRenderModeSignal("auto");
-    setDockRevealedSignal(false);
-    setDockPinnedSignal(false);
     setOrbitEngagedSignal(false);
     setCompanionBrightenedSignal(false);
     setCompanionPositionSignal(undefined);
@@ -383,8 +365,6 @@ export const homeStore = {
   previousState,
   viewMode,
   renderMode,
-  dockRevealed,
-  dockPinned,
   orbitEngaged,
   companion,
   readingMode,
@@ -411,8 +391,6 @@ export const homeStore = {
   // Local UI slice setters
   setViewMode,
   setRenderMode,
-  setDockRevealed,
-  setDockPinned,
   setOrbitEngaged,
 
   // Shared-context preservation

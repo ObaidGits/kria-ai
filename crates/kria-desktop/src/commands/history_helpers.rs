@@ -107,9 +107,13 @@ pub(super) fn observe_capability_lifecycle(
         "openclaw {event}: skill '{skill_id}' ({})",
         if success { "ok" } else { "failed" }
     );
+    // Tagged `Source::OpenClaw` (not `Source::Tool`, task F1.5.4) so this
+    // skill-lifecycle event carries OpenClaw's actual trust class and
+    // `openclaw/{skill}` namespace (MGR-043 AC1) rather than being collapsed
+    // into the generic native-tool source.
     if let Err(e) = memory_system.record_capability(
         memory_session_uuid("openclaw:lifecycle"),
-        kria_core::memory::types::Source::Tool("openclaw".to_string()),
+        kria_core::memory::types::Source::OpenClaw(skill_id.to_string()),
         success,
         detail,
     ) {
@@ -127,31 +131,20 @@ pub(super) fn preference_record(
     }
 }
 
-/// Heuristic auto-extraction of durable user-preference facts from a turn.
+/// Auto-extraction of durable user-preference facts from a turn.
 ///
 /// Replaces the removed legacy `FactManager` fast path: when the user message
-/// matches a first-person preference pattern, the message is persisted as a
-/// `user_preference` fact through the unified memory runtime (authority DB +
+/// matches the first-person preference classification `kria_core` owns
+/// (`governance::is_preference_statement`, task F1.5.2 — this adapter carries
+/// no standalone domain-classification decision), the message is persisted as
+/// a `user_preference` fact through the unified memory runtime (authority DB +
 /// FTS). Full LLM-driven extraction flows through `SemanticMemoryParser` into
 /// `MemoryTurnWrite::extraction`. Returns the number of facts stored (0 or 1).
 pub(super) fn auto_extract_facts(
     store: &dyn MemoryRuntime,
     user_message: &str,
 ) -> anyhow::Result<usize> {
-    const PATTERNS: [&str; 10] = [
-        "i prefer ",
-        "i like ",
-        "my name is ",
-        "i am a ",
-        "i work ",
-        "i use ",
-        "my favorite ",
-        "i always ",
-        "i never ",
-        "i live ",
-    ];
-    let lower = user_message.to_lowercase();
-    if PATTERNS.iter().any(|p| lower.contains(p)) {
+    if kria_core::memory::governance::is_preference_statement(user_message) {
         let now = Utc::now();
         store.store_fact(&kria_core::memory::MemoryFact {
             id: None,

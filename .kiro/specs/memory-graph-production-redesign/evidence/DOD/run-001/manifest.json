@@ -1,0 +1,25 @@
+{
+  "gate": "DOD",
+  "runId": "run-001",
+  "timestamp": "2024-07-29T00:00:00Z",
+  "status": "PARTIAL",
+  "prerequisiteChain": "F0→F1→F2→F3→F4→F5→(F6 optional)",
+  "completedGates": ["F0", "F1", "F2", "F3", "F4"],
+  "pendingGates": ["F5 (heavy campaigns NBW)", "F6 (deferred pending F5)"],
+  "note": "DOD requires F5 manifest sign-off with actual performance/SBOM/release data. Current status reflects completed implementation gates F0-F4 with passing unit tests. F5 heavy runs are the blocking items.",
+  "dod": {
+    "DOD.1": { "status": "partial", "note": "F0→F4 chain valid; F5→F6 pending" },
+    "DOD.2": { "status": "partial", "note": "Unit tests documented; E2E/Orca/visual sessions pending" },
+    "DOD.3": { "status": "partial", "note": "Machine coverage pending F5 sign-off" },
+    "DOD.4": { "status": "pass", "note": "SQLite v2 authority implemented and tested in F1" },
+    "DOD.5": { "status": "pass", "note": "F2/F3 semantic records, interchange, retrieval implemented and tested" },
+    "DOD.6": { "status": "partial", "note": "Five strategies implemented; judged queries and 100k run deferred to F5" },
+    "DOD.7": { "status": "pass", "note": "v2 API contracts, Tauri/Axum adapters implemented" },
+    "DOD.8": { "status": "pass", "note": "Seven destinations, list/inspector/canvas F4 work complete" },
+    "DOD.9": { "status": "partial", "note": "Motion/a11y/visual tokens implemented; matrix runs deferred to F5" },
+    "DOD.10": { "status": "partial", "note": "Fault campaigns deferred to F5" },
+    "DOD.11": { "status": "partial", "note": "SBOM deferred to F5 when release closure frozen" },
+    "DOD.12": { "status": "partial", "note": "Dead code deletion deferred to F5 after E2E parity" },
+    "DOD.13": { "status": "partial", "note": "Final sign-offs pending F5 completion" }
+  }
+}

@@ -7,7 +7,7 @@
  *   • a one-time **Core whisper** — "This is KRIA. Talk, type, or click me.";
  *   • a one-time **Orbit capability reveal** (memory / automation / desktop /
  *     local) shown the first time the user engages and the Orbit lights;
- *   • a one-time **Hidden Dock discovery hint** (⌘K / screen edge).
+ *   • a one-time **Navigation Rail hint** (Home + seven Spaces).
  *
  * It is deliberately **not a tour** and it **never repeats** (design §17): each
  * hint is an independent, in-context one-time cue, not a forced sequential
@@ -77,7 +77,7 @@ export const ONBOARDING_HINTS: readonly OnboardingHint[] = [
   {
     id: "dock-hint",
     coachId: ONBOARDING_COACH_IDS["dock-hint"],
-    message: "Press ⌘K, or reach the left edge, to move around.",
+    message: "Use the left navigation rail to move between Home and your Spaces.",
   },
 ] as const;
 

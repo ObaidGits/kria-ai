@@ -1,0 +1,25 @@
+{
+  "caseId": "empty__standard__1x__forced-colors__ltr__chromium",
+  "capturedAt": "2026-07-29T06:54:18.220Z",
+  "targetState": "empty",
+  "items": [],
+  "itemCount": 0,
+  "degradation": {
+    "present": false
+  },
+  "recovery": {
+    "present": false
+  },
+  "focus": {
+    "focusedTag": "button",
+    "focusedVisible": true
+  },
+  "legend": [],
+  "graph": {
+    "canvasPresent": false,
+    "fallbackPresent": false,
+    "fallbackLabel": null
+  },
+  "spacePresent": true,
+  "violations": []
+}

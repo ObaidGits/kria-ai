@@ -11,7 +11,7 @@
 use crate::gateway::PhoneGatewayState;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Html,
     routing::{get, post},
     Json, Router,
@@ -35,6 +35,56 @@ pub fn mobile_routes() -> Router<Arc<PhoneGatewayState>> {
 /// required — this is the bootstrap step, intended for localhost/trusted use.
 async fn pair_page() -> Html<&'static str> {
     Html(PAIR_PAGE_HTML)
+}
+
+/// Extract a device token from `Authorization: Bearer …` (device-management
+/// endpoints are never called with a `?token=` query param — see
+/// `remote_desktop_routes::extract_token` for the WS/query-param variant
+/// used by client-facing routes only).
+fn extract_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|t| t.to_string())
+}
+
+/// Enforce device-token auth on a device-MANAGEMENT endpoint (list/revoke),
+/// when configured (F1.6.6 — MGR-003 AC2/AC6: no route registration bypasses
+/// the equivalent-strength device-token boundary the gateway already applies
+/// to `remote_desktop_routes`/`ws.rs`).
+///
+/// `pair/begin` and `pair/complete` are deliberately EXEMPT (see their own
+/// doc comments: pairing is the bootstrap step a not-yet-paired phone must
+/// reach, and `pair/complete` is itself the credential-issuing operation —
+/// gating it on a token would be circular). `list_devices`/`revoke_device`
+/// read/mutate the registry of ALREADY-paired devices and have no such
+/// bootstrap requirement, so — before this fix — they were reachable by ANY
+/// caller that reached the gateway's mesh/LAN listener with no token at all,
+/// even though the sibling `remote_desktop_routes::authorize` already gates
+/// its own analogous control-plane endpoints (`request`/`confirm`/`stop`/
+/// `status`) on exactly this same check. This closes that inconsistency
+/// rather than inventing a new security model: same gate, same config flag,
+/// same non-revealing `401` shape as `remote_desktop_routes::authorize`.
+fn authorize_device_management(
+    state: &Arc<PhoneGatewayState>,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    if !state.config.mobile.require_device_auth {
+        return Ok(());
+    }
+    let Some(registry) = state.device_registry.as_ref() else {
+        return Ok(());
+    };
+    match extract_token(headers).map(|t| registry.verify_token(&t)) {
+        Some(Ok(_)) => Ok(()),
+        _ => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(
+                serde_json::json!({ "status": "error", "message": "valid device token required" }),
+            ),
+        )),
+    }
 }
 
 const PAIR_PAGE_HTML: &str = r#"<!DOCTYPE html>
@@ -169,7 +219,9 @@ async fn pair_complete(
 
 async fn list_devices(
     State(state): State<Arc<PhoneGatewayState>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    authorize_device_management(&state, &headers)?;
     let reg = registry(&state)?;
     let devices = reg.list_devices().map_err(|e| {
         (
@@ -184,8 +236,10 @@ async fn list_devices(
 
 async fn revoke_device(
     State(state): State<Arc<PhoneGatewayState>>,
+    headers: HeaderMap,
     Path(device_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    authorize_device_management(&state, &headers)?;
     let reg = registry(&state)?;
     let existed = reg.revoke(&device_id).map_err(|e| {
         (

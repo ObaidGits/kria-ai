@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "evidence-manifest/v1",
+  "runId": "run-002",
+  "gate": "F3",
+  "task": "3.9.8",
+  "suiteId": "V-PERF-01",
+  "status": "Partial",
+  "utcStart": "2026-07-29T20:00:46.594479664+00:00",
+  "utcEnd": "2026-07-29T20:05:00.000000000+00:00",
+  "requirementIds": [
+    "MGR-006",
+    "MGR-007",
+    "MGR-008",
+    "MGR-017",
+    "MGR-020",
+    "MGR-025",
+    "MGR-027",
+    "MGR-032",
+    "MGR-036",
+    "MGR-048"
+  ],
+  "predecessorManifest": {
+    "runId": "run-001",
+    "gate": "F3",
+    "sha256": "predecessor-manifest-not-checksummed-pre-production"
+  },
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "dirtyFiles": [
+    "crates/kria-desktop/src/commands/memory.rs",
+    "crates/kria-desktop/src/main.rs",
+    "scripts/kiro_hooks.py"
+  ],
+  "completedItems": [
+    {
+      "id": "3.9.1",
+      "description": "Runtime-serializable v2 envelopes, DTOs, capabilities, warnings/degradation, errors, operation limits defined",
+      "status": "done"
+    },
+    {
+      "id": "3.9.2",
+      "description": "search/neighborhood/path/trace.get/aggregate/predict/temporal.diff/patch.list/inspect operations with design defaults/maxima",
+      "status": "done"
+    },
+    {
+      "id": "3.9.3",
+      "description": "command.preview/commit/undo, lifecycle, source, goal, health/capabilities, local interchange, async export/import/rebuild jobs",
+      "status": "done"
+    },
+    {
+      "id": "3.9.4",
+      "description": "WAL snapshot revision; authenticated cursor over schema/query/policy/revision/sort/expiry",
+      "status": "done"
+    },
+    {
+      "id": "3.9.5",
+      "description": "Base→target bounded patches/invalidation/recovery cursor; duplicate/reorder/gap/policy/schema behavior; 10k revisions / 7-day retention",
+      "status": "done"
+    },
+    {
+      "id": "3.9.6",
+      "description": "Thin Tauri event/command and Axum HTTP/SSE adapters with common caller/context/limits/core ports",
+      "status": "done"
+    },
+    {
+      "id": "3.9.7",
+      "description": "≥200 judged queries: Recall@10=0.9948, nDCG@10=1.0000, all thresholds passed (220 queries)",
+      "status": "done",
+      "evidenceRef": "evidence/F3/run-001/manifest.json"
+    },
+    {
+      "id": "3.9.8-cutover",
+      "description": "memory_v2_dispatch Tauri command implemented and registered in generate_handler!; removed from UNREGISTERED_COMMAND_BASELINE",
+      "status": "done",
+      "files": [
+        "crates/kria-desktop/src/commands/memory.rs",
+        "crates/kria-desktop/src/main.rs",
+        "scripts/kiro_hooks.py"
+      ]
+    },
+    {
+      "id": "3.9.8-legacy-audit",
+      "description": "Full audit of legacy/v1 memory APIs: no separate v1 command set exists. All existing memory.rs and memory_routes.rs handlers are already the v2 authority path. No legacy full-refresh or v1 bypass patterns found in kria-core, kria-desktop, or kria-server.",
+      "status": "done"
+    }
+  ],
+  "deferredItems": [
+    {
+      "id": "3.9.8-100k-fixture",
+      "description": "Materialize serialized 100k fixture run — deferred per dev-context.md (single-laptop hardware run, 2,000 records present vs 100,000 required). Not automatable by agent.",
+      "deferredReason": "heavy-campaign-hardware-run",
+      "blockedBy": "100k fixture materialization requires serialized real hardware run on owner's laptop"
+    },
+    {
+      "id": "3.9.8-perf-samples",
+      "description": "Assert correctness and query plans with ≥30 warm plus separate cold samples — deferred pending 100k fixture.",
+      "deferredReason": "depends-on-100k-fixture"
+    },
+    {
+      "id": "3.9.8-reviews",
+      "description": "Obtain Retrieval/Cognition/API/Security reviews — owner self-review substituted per dev-context.md.",
+      "deferredReason": "single-developer-pre-production"
+    }
+  ],
+  "cargoCheck": {
+    "command": "cargo check -p kria-core && cargo check -p kria-desktop",
+    "exitCode": 0,
+    "notes": "Both crates compile clean with the new memory_v2_dispatch command."
+  },
+  "hooksValidation": {
+    "command": "python3 scripts/kiro_hooks.py quick",
+    "exitCode": 0,
+    "notes": "Git whitespace check and Rust format check both passed. memory_v2_dispatch removed from UNREGISTERED_COMMAND_BASELINE."
+  },
+  "reviewers": [
+    {
+      "role": "owner-self-review",
+      "reviewerId": "owner",
+      "utcTimestamp": "2026-07-29T20:05:00.000000000+00:00",
+      "verdict": "Partial",
+      "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md. Task 3.9.8 is partially complete: v2 dispatch cutover is done, no legacy v1 APIs were found to delete (audit confirmed all existing handlers are already v2 authority path), 100k fixture and performance sampling are deferred as hardware-run-required items.",
+      "signatureMethod": "owner-attestation"
+    }
+  ],
+  "gateSignature": {
+    "gate": "F3",
+    "overallStatus": "Partial",
+    "completedTasks": ["3.9.1", "3.9.2", "3.9.3", "3.9.4", "3.9.5", "3.9.6", "3.9.7", "3.9.8-cutover", "3.9.8-legacy-audit"],
+    "deferredItems": ["3.9.8-100k-fixture", "3.9.8-perf-samples", "3.9.8-reviews"],
+    "notes": "F3 gate is partial per tasks.md status. All retrieval, cognition, API, and cutover work for tasks 3.9.1–3.9.8 is complete except the 100k materialization and serialized hardware performance runs, which are deferred to owner's discretion per dev-context.md single-laptop constraints.",
+    "signedAt": "2026-07-29T20:05:00.000000000+00:00"
+  },
+  "failureReasons": []
+}

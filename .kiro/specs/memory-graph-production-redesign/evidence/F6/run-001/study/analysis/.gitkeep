@@ -1,0 +1,3 @@
+# This directory will contain results.json after the study analysis runs.
+# Status: PENDING_EXECUTION — populated by scripts/memory_graph/study_analysis.py
+# after task 6.3.1 (study data collection) is complete.

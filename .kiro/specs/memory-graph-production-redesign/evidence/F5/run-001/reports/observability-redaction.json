@@ -1,0 +1,29 @@
+{
+  "task": "5.5.1",
+  "suite": "V-POLICY-02 (observability redaction allowlist)",
+  "verdict": "Pass",
+  "timestamp": "2026-07-29T12:00:00Z",
+  "violationsFound": 0,
+  "violationsFixed": 0,
+  "allowlistVerified": true,
+  "surfacesAudited": [
+    "crates/kria-core/src/memory/observability.rs — SchedulerMetrics, SchedulerMetricsSnapshot, MemoryExplanation, MemoryHealthReport, Observability",
+    "crates/kria-core/src/memory/api/mod.rs — tracing::warn/info/debug macros",
+    "crates/kria-core/src/memory/maintenance.rs — tracing::error/warn/info/debug macros (outbox relay, rebuild, reconcile)",
+    "crates/kria-core/src/memory/scheduler.rs — tracing::warn (background job failure)",
+    "crates/kria-core/src/memory/jobs.rs — tracing::info (background job counts)",
+    "crates/kria-core/src/memory/write_policy/slow.rs — tracing::warn/debug (slow-path enrichment)",
+    "crates/kria-core/src/memory/stores/sqlite_vector_rebuild.rs — tracing::warn (dead-letter)",
+    "crates/kria-core/src/memory/embeddings.rs — tracing::info/warn (model loading)",
+    "crates/kria-core/src/memory/db/mod.rs — tracing::info/warn (schema version, rollback)",
+    "crates/kria-core/src/memory/db/migrations.rs — tracing::info (migration applied)",
+    "crates/kria-core/src/memory/contract.rs — hit_json, explain, timeline, health, metrics (UI Tauri IPC surfaces)",
+    "crates/kria-desktop/src/commands/memory.rs — Tauri command JSON responses",
+    "crates/kria-core/src/memory/api/v2/ — dto.rs, operations.rs, capabilities.rs, contract.rs, commands.rs, cursor.rs, error.rs, patch.rs, validation.rs, adapters.rs (no tracing)",
+    "crates/kria-core/src/memory/authority/ — all 16 files (no tracing macros found)",
+    "ui/src/shell/spaces/memory/destinations/Health.tsx — UI health destination (structural metadata only)",
+    "ui/src/stores/memoryStore.ts — no console.log content emissions",
+    "ui/src/shell/spaces/memory/ — all component files (no content in console.log)"
+  ],
+  "notes": "Full audit of all tracing::* log macros in crates/kria-core/src/memory/ found zero instances emitting raw content, content_json, payload_plain, or full record payloads. All tracing log fields are structural metadata: error codes (%e), IDs (memory_id, event_id), counts (dead_letter_count, missing_fts_count, missing_vector_count, rows_deleted, generation, etc.), target strings, model paths, schema versions, and boolean/numeric state. The MemoryExplanation struct has a 'content: String' field but it is an intentional UI read path (Tauri IPC → SolidJS inspector), not a log/metric/trace emission. MemoryHealthReport exposes only aggregate counts, capability state strings, and the crypto_shred_capability constant ('unavailable...') — no record content. SchedulerMetrics and SchedulerMetricsSnapshot contain only u64 aggregate counters (jobs_dispatched, jobs_dropped_cap, jobs_coalesced, etc.) — no user content or IDs per MGR-039. The health Tauri command (contract::health and memory_health_report) exposes only: total_active/archived/superseded/forgotten counts, by_type/by_staleness count histograms, avg_confidence float, unresolved_contradictions count, knowledge_gaps count, enrichment_backlog count, outbox_pending count, crypto_shred_capability string. The v2 API subdirectory has no tracing macros at all. The authority subdirectory has no tracing macros at all. Cold-start skipped-secret tracing::debug emits only the file path, not the secret or content that triggered the skip. cargo check -p kria-core exits 0 with no changes required."
+}

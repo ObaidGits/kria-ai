@@ -30,6 +30,12 @@ async fn spawn_ws_server() -> String {
         notifier: None,
         session_store: None,
         memory_system: None,
+        caller: kria_core::memory::model::CallerContext::authenticated_remote(
+            "test-server",
+            "test-server",
+            kria_core::memory::model::PolicyPartition::new("user", "chat", 0).unwrap(),
+        )
+        .unwrap(),
         remote_desktop: None,
         remote_desktop_backend: None,
     });

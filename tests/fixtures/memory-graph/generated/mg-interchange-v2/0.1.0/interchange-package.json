@@ -1,0 +1,350 @@
+{
+  "schema_version": "memory-graph-interchange/v1",
+  "ontology_version": 1,
+  "relation_registry_version": 1,
+  "algorithm_version": 1,
+  "model_version": "all-MiniLM-L6-v2",
+  "scope": "namespace:personal;scope:private",
+  "generated_at": "2024-06-01T00:00:00Z",
+  "records": [
+    {
+      "order": 0,
+      "id": "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "record_kind": "memory",
+      "truth_state": "Current",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "label": "interchange record 0",
+      "note": "known optional note 0",
+      "ext": {
+        "x_experimental_weight": 0,
+        "x_render_hint": "pinned",
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "1670789cb2b6a2652eac76c5d225e5901351a8a1315367a31894cc3227199a53"
+    },
+    {
+      "order": 1,
+      "id": "b445f3f3-b7f2-cc3a-7f65-60604bb0fb00",
+      "record_kind": "summary",
+      "truth_state": "Confirmed",
+      "memory_mode": "Temporary",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "5ee649e5-f9ee-9fec-6cb1-e0f42b73babe",
+      "label": "interchange record 1",
+      "checksum": "088d3df5630cea6addd017b1c207d0f8b8c0fd5426303ca8e159a9aca7bd6bd2"
+    },
+    {
+      "order": 2,
+      "id": "8853bd7e-0c64-2dfe-92bc-b1da90afd99e",
+      "record_kind": "skill",
+      "truth_state": "Inferred",
+      "memory_mode": "Session_Only",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "2a0caaf3-a695-ad3c-4b50-f625abd205cf",
+      "label": "interchange record 2",
+      "ext": {
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "d19043aec450b0a4874b44d055ca3663049574eeb3b64d29c93c08213e71522f"
+    },
+    {
+      "order": 3,
+      "id": "2928c818-2c03-d137-35e4-04b56adf7361",
+      "record_kind": "rule",
+      "truth_state": "Superseded",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "29101ee7-ff6d-c65c-7c57-3e269d2b004a",
+      "label": "interchange record 3",
+      "ext": {
+        "x_render_hint": "pinned"
+      },
+      "checksum": "433a2c61a1328bac808f9e47fb926cf9c945f65cd010923ca6f3dab4e91fb350"
+    },
+    {
+      "order": 4,
+      "id": "3ec40be1-9551-b957-2bf0-90ad60e5796c",
+      "record_kind": "memory",
+      "truth_state": "Current",
+      "memory_mode": "Temporary",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "959a8ed9-afac-dbbb-ea78-d1f8e4dd6bfc",
+      "label": "interchange record 4",
+      "note": "known optional note 4",
+      "ext": {
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "4c27b40c433c263b78e6ee234f62741074ae2bd6a9ed02cfc0f1bc9e80cd3b9b"
+    },
+    {
+      "order": 5,
+      "id": "c11c81cb-0b61-d32a-8e7a-d706a87c3b73",
+      "record_kind": "summary",
+      "truth_state": "Confirmed",
+      "memory_mode": "Session_Only",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "50670f34-8d9a-0296-976c-9564576c0a59",
+      "label": "interchange record 5",
+      "ext": {
+        "x_experimental_weight": 5
+      },
+      "checksum": "e3de9f861eefb28d5c0af8a13907ef37fc74987b114983e51369c7b9e6ce9152"
+    },
+    {
+      "order": 6,
+      "id": "dc2351ce-0aaf-b62f-5f0c-85b06f2baab9",
+      "record_kind": "skill",
+      "truth_state": "Inferred",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "label": "interchange record 6",
+      "ext": {
+        "x_render_hint": "pinned",
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "80fe4973e0b0563f75fffc7f0a4f3748d61d7a50e33b48bb9af539ebb5935ab4"
+    },
+    {
+      "order": 7,
+      "id": "c1b86869-1248-a31b-24b8-fdca0a0a97ab",
+      "record_kind": "rule",
+      "truth_state": "Superseded",
+      "memory_mode": "Temporary",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "5ee649e5-f9ee-9fec-6cb1-e0f42b73babe",
+      "label": "interchange record 7",
+      "checksum": "eee7fa100e75dcd9943fa31998eb35f09cad4ce5e2fe894a4cdaac43af217ff1"
+    },
+    {
+      "order": 8,
+      "id": "abcc47f3-e29d-58f2-726d-c529e5724189",
+      "record_kind": "memory",
+      "truth_state": "Current",
+      "memory_mode": "Session_Only",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "2a0caaf3-a695-ad3c-4b50-f625abd205cf",
+      "label": "interchange record 8",
+      "note": "known optional note 8",
+      "ext": {
+        "x_vendor_tag": "kria"
+      },
+      "checksum": "404ceef386922c17cd7ea3e8aeb2e8e0fabed6817e56e22eb519ee246fbb1cd6"
+    },
+    {
+      "order": 9,
+      "id": "9928bf04-069b-defc-113e-5e31fdb7fffa",
+      "record_kind": "summary",
+      "truth_state": "Confirmed",
+      "memory_mode": "Permanent",
+      "scope": "namespace:personal;scope:private",
+      "provenance_id": "29101ee7-ff6d-c65c-7c57-3e269d2b004a",
+      "label": "interchange record 9",
+      "ext": {
+        "x_render_hint": "pinned"
+      },
+      "checksum": "354d295a2d79f1216d2fd00869d01f6d52a231d541079dee36a873930296c88f"
+    }
+  ],
+  "events": [
+    {
+      "order": 0,
+      "id": "d04dab67-6279-a10a-68f0-d560b8ada132",
+      "event_kind": "start",
+      "outcome": "success",
+      "source_kind": "filesystem",
+      "invocation_id": "inv-000",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "f242f1627478c355dff5d12bc730f2b2608e7dd0da60a2ae3cc888dee20e2687",
+      "checksum": "80c925353a658f1b888779963038212fa3cba2f1cac632c6ced55872dbeaa39c"
+    },
+    {
+      "order": 1,
+      "id": "4b26ed42-8b96-542d-6873-8c04c7435181",
+      "event_kind": "completion",
+      "outcome": "partial",
+      "source_kind": "repository",
+      "invocation_id": "inv-001",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "a9abbb22710fbf816a5a12587ad6a2bb37941a6a207e36a4d6390beb8531116f",
+      "ext": {
+        "x_trace_span": "span-1"
+      },
+      "checksum": "ddf745d62b7db73449c40327488057c3fcc573ce656d0478ec14fffdcb257f52"
+    },
+    {
+      "order": 2,
+      "id": "1e0303e5-951b-5c3e-bda1-af4419c320ef",
+      "event_kind": "observation",
+      "outcome": "correction",
+      "source_kind": "manual_entry",
+      "invocation_id": "inv-002",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "67b93526b88d76abc7e2a025821c1a40b2d7d8651282218a0b0ebe9ea721acb1",
+      "checksum": "9973badac28059737d3d2304a7a95ddf7bc0ff8e48928f87a42922c504cb443e"
+    },
+    {
+      "order": 3,
+      "id": "748d4b39-cd49-1777-9e9e-3f4b4eac9a7f",
+      "event_kind": "start",
+      "outcome": "success",
+      "source_kind": "filesystem",
+      "invocation_id": "inv-003",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "0afac0742c18deb3ff92bd0c20e97bb2a6c3035edde872d25ad5f57e96fe453e",
+      "checksum": "a45538f3c965d6cc9c140c31ad56390e4afba00f011da6e84a5dc2f3eedf360c"
+    },
+    {
+      "order": 4,
+      "id": "39aa98ae-1c7e-8fe8-8b9a-22ae9978c084",
+      "event_kind": "completion",
+      "outcome": "partial",
+      "source_kind": "repository",
+      "invocation_id": "inv-004",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "f9b7326d0ed8fa28154705f611e6ce7f361197fd90b3b391bed5385275882074",
+      "ext": {
+        "x_trace_span": "span-4"
+      },
+      "checksum": "91f4a434c97fe9de21fe7357041ac100816c62eb75c3c89fa22ec204f2024534"
+    },
+    {
+      "order": 5,
+      "id": "b5e03776-8c1c-dfdd-6c60-719ede392ee7",
+      "event_kind": "observation",
+      "outcome": "correction",
+      "source_kind": "manual_entry",
+      "invocation_id": "inv-005",
+      "occurred_at": "2024-06-01T00:00:00Z",
+      "policy_hash": "200c6560807951656c74950785fe27822674b5138e6ea8bd2f0402acce8dbb0e",
+      "checksum": "4c781112b7e71a30893c1c663f30b953e51480d8dffa31df31961bc52b911a4a"
+    }
+  ],
+  "links": [
+    {
+      "order": 0,
+      "id": "c2cd7824-d2ea-c627-7187-0cda6109a37d",
+      "link_kind": "derived_from",
+      "source_id": "d47ec62f-1e0e-cd57-15ef-d3dffabc6db2",
+      "target_id": "b445f3f3-b7f2-cc3a-7f65-60604bb0fb00",
+      "truth_state": "Current",
+      "ext": {
+        "x_edge_weight": 1
+      },
+      "checksum": "d245dd5c1ae2aa07809e3d21488a09ab831c64d2413aca6bef7ec92272261cd7"
+    },
+    {
+      "order": 1,
+      "id": "4e5f0510-21ef-d202-0c42-7be1f882f76f",
+      "link_kind": "supports",
+      "source_id": "8853bd7e-0c64-2dfe-92bc-b1da90afd99e",
+      "target_id": "2928c818-2c03-d137-35e4-04b56adf7361",
+      "truth_state": "Current",
+      "checksum": "7c0916f5afd129db8366cfac085193dc60e56371158720a6644b62c9bd255626"
+    },
+    {
+      "order": 2,
+      "id": "49ef5d2c-da9b-be4c-b016-772a7a3d8d26",
+      "link_kind": "contradicts",
+      "source_id": "3ec40be1-9551-b957-2bf0-90ad60e5796c",
+      "target_id": "c11c81cb-0b61-d32a-8e7a-d706a87c3b73",
+      "truth_state": "Current",
+      "ext": {
+        "x_edge_weight": 3
+      },
+      "checksum": "5e298391cb634544c0f17323fddef1cbb233b8a771ef4eed6eba3aac1d31f99a"
+    },
+    {
+      "order": 3,
+      "id": "7949a1a4-b213-5ec0-9082-477b555c4da6",
+      "link_kind": "mentions_entity",
+      "source_id": "dc2351ce-0aaf-b62f-5f0c-85b06f2baab9",
+      "target_id": "c1b86869-1248-a31b-24b8-fdca0a0a97ab",
+      "truth_state": "Current",
+      "checksum": "7f22144fb4869233aed613fc4e3bbc303434efc5871b30e55026c9b4c36a08ee"
+    },
+    {
+      "order": 4,
+      "id": "453a38fe-4d96-88bf-b660-628a389ac98f",
+      "link_kind": "superseded_by",
+      "source_id": "abcc47f3-e29d-58f2-726d-c529e5724189",
+      "target_id": "9928bf04-069b-defc-113e-5e31fdb7fffa",
+      "truth_state": "Current",
+      "ext": {
+        "x_edge_weight": 5
+      },
+      "checksum": "db491d1afda98b224c59275a7e5cc36320637786ac7456181d7d075ca95d2a86"
+    }
+  ],
+  "provenance": [
+    {
+      "order": 0,
+      "id": "25d93dad-2056-cccc-f246-0a436cd4d02a",
+      "source_kind": "filesystem",
+      "source_id": "src-000",
+      "source_revision": "rev-1",
+      "method": "deterministic_import",
+      "confidence_pct": 70,
+      "ext": {
+        "x_ingest_batch": "batch-000"
+      },
+      "checksum": "769a977c170ba185c94985099ed13858a71195b879701126dd05b816b3d50286"
+    },
+    {
+      "order": 1,
+      "id": "5ee649e5-f9ee-9fec-6cb1-e0f42b73babe",
+      "source_kind": "repository",
+      "source_id": "src-001",
+      "source_revision": "rev-2",
+      "method": "deterministic_import",
+      "confidence_pct": 71,
+      "checksum": "05c146beb911ec4ea0f4714dfc92ad64c38a87c6376d49369a9486083a2b2d0c"
+    },
+    {
+      "order": 2,
+      "id": "2a0caaf3-a695-ad3c-4b50-f625abd205cf",
+      "source_kind": "manual_entry",
+      "source_id": "src-002",
+      "source_revision": "rev-3",
+      "method": "deterministic_import",
+      "confidence_pct": 72,
+      "checksum": "4500070148498604bd994d4194c4fe460d743cbd04c3e7f90e04c2371bc5e250"
+    },
+    {
+      "order": 3,
+      "id": "29101ee7-ff6d-c65c-7c57-3e269d2b004a",
+      "source_kind": "filesystem",
+      "source_id": "src-003",
+      "source_revision": "rev-4",
+      "method": "deterministic_import",
+      "confidence_pct": 73,
+      "ext": {
+        "x_ingest_batch": "batch-003"
+      },
+      "checksum": "dc6fa53be876690221a517fa012c575e2ca882f1d1c0d973ec1de30de5c1798a"
+    },
+    {
+      "order": 4,
+      "id": "959a8ed9-afac-dbbb-ea78-d1f8e4dd6bfc",
+      "source_kind": "repository",
+      "source_id": "src-004",
+      "source_revision": "rev-5",
+      "method": "deterministic_import",
+      "confidence_pct": 74,
+      "checksum": "5fa4c89a3f870ef53bd2cdaa9571e30d1a3947dcbf174cc5230d48d85cc4511d"
+    },
+    {
+      "order": 5,
+      "id": "50670f34-8d9a-0296-976c-9564576c0a59",
+      "source_kind": "manual_entry",
+      "source_id": "src-005",
+      "source_revision": "rev-6",
+      "method": "deterministic_import",
+      "confidence_pct": 75,
+      "checksum": "7996ce30362c14fc4090d7a39c867025cfaf2304b4a16ab7351cf37d0e416021"
+    }
+  ],
+  "package_checksum": "b3ad2be53fbaf289e81310ff5b4fc18bb0fef7c2ebdc81cdeffb54b9819edd13"
+}

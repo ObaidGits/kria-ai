@@ -1,2 +1,8 @@
 [alias]
 kria-test = "run -p kria-core --bin kria-test --"
+
+# ── Storage management ───────────────────────────────────────────────────
+# Keep incremental OFF by default — it's the biggest disk killer (was 118GB).
+# Turn ON temporarily with CARGO_INCREMENTAL=1 if you need fast rebuilds.
+[build]
+incremental = false

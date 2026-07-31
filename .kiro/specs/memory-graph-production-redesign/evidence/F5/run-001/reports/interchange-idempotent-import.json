@@ -1,0 +1,91 @@
+{
+  "suiteId": "V-IO-01 (interchange import — idempotent AuthorityTx import)",
+  "taskId": "5.4.3",
+  "status": "Pass",
+  "utcTimestamp": "2026-07-29T13:04:09+00:00",
+  "command": "cargo test -p kria-core --test memory_graph_v2 idempotent_import -- --nocapture",
+  "workingDirectory": "/media/obaid/SSD/KRIA",
+  "exitCode": 0,
+  "testFile": "crates/kria-core/tests/memory_graph_v2.rs",
+  "section": 13,
+  "requirementIds": ["MGR-046", "MGR-029"],
+  "suiteIds": ["V-IO-01"],
+  "assertionTotals": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tests": [
+    {
+      "name": "idempotent_import_replay_same_key_is_noop",
+      "status": "Pass",
+      "subTest": "13.1",
+      "assertion": "Same package imported twice: first=Committed(rev=1), second=Replayed; revision does not advance; no duplicate rows"
+    },
+    {
+      "name": "idempotent_import_tamper_rejected_before_write",
+      "status": "Pass",
+      "subTest": "13.2",
+      "assertion": "Tampered manifest.package_checksum → PackageChecksumMismatch at validation; bus never invoked; revision unchanged"
+    },
+    {
+      "name": "idempotent_import_unknown_required_skipped_not_aborted",
+      "status": "Pass",
+      "subTest": "13.3",
+      "assertion": "Record with no id/kind: skipped_count=1, valid_count=2, import_count=2; import commits for valid records"
+    },
+    {
+      "name": "idempotent_import_unknown_optional_preserved",
+      "status": "Pass",
+      "subTest": "13.4",
+      "assertion": "Records with custom_tag and score extra fields: all 3 records valid; fields intact after validation; import commits"
+    },
+    {
+      "name": "idempotent_import_quota_record_count_rejected_before_write",
+      "status": "Pass",
+      "subTest": "13.5",
+      "assertion": "max_records=2 but 3 records → RecordCountExceedsLimit(3, max=2); revision unchanged"
+    },
+    {
+      "name": "idempotent_import_quota_bytes_rejected_before_write",
+      "status": "Pass",
+      "subTest": "13.5",
+      "assertion": "max_total_bytes = actual_bytes - 1 → TotalBytesExceedsLimit; zero authority writes"
+    },
+    {
+      "name": "idempotent_import_cancellation_leaves_no_partial_writes",
+      "status": "Pass",
+      "subTest": "13.6",
+      "assertion": "Validation passes but bus.submit_deferred is not called (cancellation); revision unchanged; event_count=0"
+    },
+    {
+      "name": "idempotent_import_crash_retry_is_idempotent",
+      "status": "Pass",
+      "subTest": "13.7",
+      "assertion": "Original=Committed(rev=1); retry with same key=Replayed; revision does not advance; no duplicate rows"
+    }
+  ],
+  "nonNegotiablesVerified": [
+    "Tampered packages MUST be rejected before any write: idempotent_import_tamper_rejected_before_write",
+    "Replay MUST be idempotent (second import produces same result, no duplicate rows): idempotent_import_replay_same_key_is_noop",
+    "Cancellation MUST leave no partial writes: idempotent_import_cancellation_leaves_no_partial_writes",
+    "Crash/interrupt retry is idempotent: idempotent_import_crash_retry_is_idempotent",
+    "Quota exceeded rejected before write: idempotent_import_quota_record_count_rejected_before_write + idempotent_import_quota_bytes_rejected_before_write",
+    "Unknown required skipped, import not aborted: idempotent_import_unknown_required_skipped_not_aborted",
+    "Unknown optional fields preserved: idempotent_import_unknown_optional_preserved"
+  ],
+  "importPipeline": {
+    "description": "InterchangeImportValidator::validate → ImportIdempotencyKey::compute → IdempotencyKey::new → CommandCandidate → AuthorityCommandBus::submit_deferred",
+    "idempotencyMechanism": "ImportIdempotencyKey = SHA-256(package_checksum:policy_namespace); mapped to IdempotencyKey on CommandEnvelope; bus returns Replayed on duplicate key",
+    "atomicityGuarantee": "AuthorityTransaction is one SQLite transaction; pre-submit cancellation or validation failure leaves zero authority rows",
+    "tamperGuarantee": "PackageChecksumVerifier::verify runs before bus invocation; mismatch → error before BEGIN",
+    "quotaGuarantee": "Record count and byte limits checked before PackageChecksumVerifier and before bus invocation"
+  },
+  "reviewer": {
+    "role": "owner",
+    "reviewType": "owner-self-review",
+    "note": "Owner self-review accepted per dev-context.md (single-developer pre-production project)",
+    "verdict": "Pass"
+  }
+}

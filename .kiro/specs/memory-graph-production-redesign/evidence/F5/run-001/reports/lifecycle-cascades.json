@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "evidence-report/v1",
+  "suiteId": "V-LIFE-01",
+  "taskId": "5.3.2",
+  "gate": "F5",
+  "status": "Pass",
+  "utcTimestamp": "2026-07-29T00:00:00+00:00",
+  "command": "cargo test -p kria-core --test memory_graph_v2 lifecycle",
+  "workingDirectory": "/media/obaid/SSD/KRIA",
+  "requirementIds": ["MGR-040", "MGR-041"],
+  "suiteIds": ["V-LIFE-01", "V-FAULT-01"],
+  "testFile": "crates/kria-core/tests/memory_graph_v2.rs",
+  "totalTests": 13,
+  "passed": 13,
+  "failed": 0,
+  "ignored": 0,
+  "reviewer": "owner-self-review",
+  "reviewNote": "Owner self-review accepted per dev-context.md (single-developer pre-production project)",
+  "tests": [
+    {
+      "name": "lifecycle_forget_excludes_from_default_reads",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — forget tombstones memory to Forgotten state and excludes it from active reads"
+    },
+    {
+      "name": "lifecycle_restore_within_window_same_id",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — restore within 30-day window succeeds, returns same UUID with state=active, clears restore_until"
+    },
+    {
+      "name": "lifecycle_restore_after_window_rejected",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — restore after window expires is rejected without mutation"
+    },
+    {
+      "name": "lifecycle_expired_valid_until_excluded_from_current_reads",
+      "status": "Pass",
+      "validates": "V-LIFE-01, V-TRUTH-01 — records past valid_until excluded from current-time queries"
+    },
+    {
+      "name": "lifecycle_immediate_delete_cascades_to_dependents",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — hard_delete marks primary Deleted and cascades dependent link-table rows; dependent memory record itself is preserved"
+    },
+    {
+      "name": "lifecycle_source_cascade_deletes_only_source_records",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — source prefix cascade affects only records from that source; other sources untouched"
+    },
+    {
+      "name": "lifecycle_session_cascade_removes_session_records",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — session cascade removes only records from that session; other sessions untouched"
+    },
+    {
+      "name": "lifecycle_namespace_cascade_isolates_records",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — namespace isolation: deleting records in one namespace does not affect records in other namespaces"
+    },
+    {
+      "name": "lifecycle_tool_mcp_openclaw_source_cascades",
+      "status": "Pass",
+      "validates": "V-LIFE-01, V-TOOL-01 — tool:, mcp:, openclaw: source prefix cascades each affect only their respective records; user-sourced records unaffected"
+    },
+    {
+      "name": "lifecycle_subject_cascade_deletes_subject_records_and_marks_key",
+      "status": "Pass",
+      "validates": "V-LIFE-01, V-CRYPTO-01 — subject cascade deletes all subject-bound memories and marks shred-key status 'destroyed'; other subjects untouched"
+    },
+    {
+      "name": "lifecycle_source_cascade_does_not_remove_independent_evidence",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — source cascade must NOT remove evidence rows from independent sources; independent corroboration is preserved after the primary is deleted"
+    },
+    {
+      "name": "lifecycle_preview_blast_radius_shows_dependents_and_evidence",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — preview_hard_delete computes correct blast radius with dependents, marks IRREVERSIBLE, encodes base_revision in token"
+    },
+    {
+      "name": "lifecycle_forget_is_idempotent",
+      "status": "Pass",
+      "validates": "V-LIFE-01 — forget is idempotent: repeated forget does not create duplicate audit/revision rows"
+    }
+  ],
+  "invariantsVerified": [
+    "Forget → truth_state = Forgotten, excluded from default reads",
+    "Restore within window → same UUID, truth_state = Active, restore_until cleared",
+    "Restore after window → rejected, state unchanged",
+    "Expiry (valid_until passed) → excluded from current-time reads",
+    "Immediate hard-delete → content Deleted, dependent link-table rows cascaded, independent record preserved",
+    "Source cascade (tool:, mcp:, openclaw:, user:) → only matching-source records affected",
+    "Session cascade → only matching-session records affected",
+    "Namespace isolation → cascade within one namespace does not affect other namespaces",
+    "Subject cascade → all subject-bound records deleted, shred-key marked destroyed, other subjects untouched",
+    "Independent evidence (evidence rows from different source_event_id) NOT removed by source cascade",
+    "Preview blast radius shows dependents + hard_delete marked IRREVERSIBLE with revision-bound token",
+    "Forget idempotency: duplicate forget does not advance revision or write duplicate rows"
+  ],
+  "nonNegotiablesVerified": [
+    "Real SQLite in-memory tests (no mocks)",
+    "Forget/restore window correctness enforced",
+    "Source cascade does not affect independent evidence",
+    "Owner self-review acceptable per dev-context.md"
+  ]
+}

@@ -6,7 +6,7 @@ import { shellStore, type WindowMode } from "../stores/shellStore";
 import { isWindowGeometry, normalizeGeometry, type GeometryMonitor, type WindowGeometry } from "./windowGeometry";
 import { requestWindowMode, syncViewModeFromShell } from "./modeTransitionCoordinator";
 
-const STORAGE_KEY = "kria_window_geometry_v1";
+const STORAGE_KEY = "kria_window_geometry_v2";
 /**
  * Geometry-bearing in-window modes. Immersive is fullscreen (no windowed
  * geometry) and Companion is the detached ember (its window behaviour is owned
@@ -54,17 +54,16 @@ async function captureGeometry(appWindow: TauriWindow, mode: WindowedMode): Prom
 }
 
 /**
- * Mini fallback geometry (design §10) used only when no Mini geometry has
- * been persisted yet: about 30% work-area width and 70% height, at least
- * 400×500 CSS-scaled px, right-side margin capped at 24 CSS-scaled px, anchored
- * to the given monitor's work area. Exported for deterministic unit coverage of
- * the fallback math.
+ * Mini fallback geometry used only when no Mini geometry has been persisted:
+ * one quarter of the monitor work area (50% width × 50% height), with practical
+ * 400×320 CSS-pixel minimums, a 24px right margin, and vertical centering.
+ * Exported for deterministic unit coverage of the fallback math.
  */
 export function miniDefault(monitor: GeometryMonitor): WindowGeometry {
   const work = monitor.workArea;
   const scale = monitor.scaleFactor;
-  const width = Math.min(work.size.width, Math.max(400 * scale, Math.round(work.size.width * 0.3)));
-  const height = Math.min(work.size.height, Math.max(500 * scale, Math.round(work.size.height * 0.7)));
+  const width = Math.min(work.size.width, Math.max(400 * scale, Math.round(work.size.width * 0.5)));
+  const height = Math.min(work.size.height, Math.max(320 * scale, Math.round(work.size.height * 0.5)));
   const margin = Math.min(24 * scale, Math.max(0, work.size.width - width));
   return {
     x: work.position.x + work.size.width - width - margin,

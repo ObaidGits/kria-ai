@@ -4,6 +4,18 @@
 //! (credit-divided, difficulty-adjusted) and confidence calibration. Memory
 //! Worth is a soft signal (min-sample gated) and never triggers a hard delete
 //! (D-8).
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::feedback_signal`](
+//! crate::memory::authority::CommandCandidate::feedback_signal) is the typed
+//! command-candidate scaffolding (task F1.5.1) this service's signal writes
+//! will route through once a concrete `TxSemanticStore` builder persists the
+//! `feedback` v2 row and the Memory-Worth counter update (F2). Until then,
+//! [`FeedbackService::record`]/[`FeedbackService::record_in_tx`] remain the live
+//! persistence path — routing through the
+//! [`AuthorityCommandBus`](crate::memory::authority::AuthorityCommandBus) today
+//! would silently drop the signal and the Memory-Worth update, since the bus's
+//! only available semantic store (`DeferredSemanticStore`) writes no concrete
+//! row. See the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 
@@ -44,6 +56,32 @@ impl FeedbackSignal {
             FeedbackSignal::RepeatedTask => "repeated_task",
             FeedbackSignal::AutomationSuccess => "automation_success",
             FeedbackSignal::AutomationFailure => "automation_failure",
+        }
+    }
+
+    /// Parse the wire-format signal tag write-surface adapters (desktop
+    /// `memory_record_feedback`, and any future server route) accept from the
+    /// caller into a [`FeedbackSignal`]. `detail` fills [`FeedbackSignal::Edit`]
+    /// when `tag == "edit"`; it is otherwise ignored. Returns `None` for an
+    /// unrecognized tag or for `"correction"` — correction is a content
+    /// mutation routed through [`crate::memory::api::MemorySystem::correct`],
+    /// never through this non-mutating feedback taxonomy (mirrors the
+    /// historical inline adapter match exactly; task F1.5.2: adapters
+    /// construct caller/command only and carry no standalone feedback-taxonomy
+    /// decision).
+    pub fn from_str(tag: &str, detail: String) -> Option<FeedbackSignal> {
+        match tag {
+            "thumbs_up" => Some(FeedbackSignal::ThumbsUp),
+            "thumbs_down" => Some(FeedbackSignal::ThumbsDown),
+            "undo" => Some(FeedbackSignal::Undo),
+            "cancel" => Some(FeedbackSignal::Cancel),
+            "edit" => Some(FeedbackSignal::Edit(detail)),
+            "overwrite" => Some(FeedbackSignal::Overwrite),
+            "ignored_suggestion" => Some(FeedbackSignal::IgnoredSuggestion),
+            "repeated_task" => Some(FeedbackSignal::RepeatedTask),
+            "automation_success" => Some(FeedbackSignal::AutomationSuccess),
+            "automation_failure" => Some(FeedbackSignal::AutomationFailure),
+            _ => None,
         }
     }
 
@@ -208,6 +246,38 @@ mod tests {
         rel.upsert_memory(&mut tx, &m).unwrap();
         tx.commit().unwrap();
         m.id
+    }
+
+    #[test]
+    fn from_str_round_trips_every_non_correction_tag() {
+        for sig in [
+            FeedbackSignal::ThumbsUp,
+            FeedbackSignal::ThumbsDown,
+            FeedbackSignal::Undo,
+            FeedbackSignal::Cancel,
+            FeedbackSignal::Overwrite,
+            FeedbackSignal::IgnoredSuggestion,
+            FeedbackSignal::RepeatedTask,
+            FeedbackSignal::AutomationSuccess,
+            FeedbackSignal::AutomationFailure,
+        ] {
+            assert_eq!(
+                FeedbackSignal::from_str(sig.as_str(), String::new()),
+                Some(sig)
+            );
+        }
+        assert_eq!(
+            FeedbackSignal::from_str("edit", "new content".into()),
+            Some(FeedbackSignal::Edit("new content".into()))
+        );
+    }
+
+    #[test]
+    fn from_str_rejects_correction_and_unknown_tags() {
+        // Correction is a content mutation routed through
+        // `MemorySystem::correct`, never through this non-mutating taxonomy.
+        assert_eq!(FeedbackSignal::from_str("correction", "x".into()), None);
+        assert_eq!(FeedbackSignal::from_str("bogus", String::new()), None);
     }
 
     #[test]

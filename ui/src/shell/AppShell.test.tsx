@@ -7,10 +7,12 @@ import { shellStore, converseStore, coreStore, provisioningStore } from "../stor
 import { navigate, currentRoute } from "./router";
 import { closeModal } from "./modalHost";
 import { ALL_SPACES } from "./router";
+import { currentSurface, setSurface } from "../app/surface";
 
 describe("AppShell (task 1.4)", () => {
   beforeEach(() => {
     navigate("converse");
+    setSurface("home");
     shellStore.setWindowMode("standard");
     shellStore.setInspectorTarget(null);
     converseStore.setActiveThread(null);
@@ -32,7 +34,9 @@ describe("AppShell (task 1.4)", () => {
 
   it("renders all shell regions: PresenceBar, Dock, SpaceRouter, StatusLine (Req 1.1)", async () => {
     render(() => <AppShell />);
-    expect(await screen.findByRole("banner")).toBeInTheDocument(); // PresenceBar
+    expect(
+      await screen.findByRole("banner", { name: "Global controls" }),
+    ).toBeInTheDocument(); // PresenceBar
     expect(screen.getByRole("navigation", { name: "Spaces" })).toBeInTheDocument(); // Dock
     expect(screen.getByRole("main")).toBeInTheDocument(); // SpaceRouter
     expect(screen.getByRole("contentinfo")).toBeInTheDocument(); // StatusLine
@@ -48,9 +52,21 @@ describe("AppShell (task 1.4)", () => {
     expect(within(nav).getAllByRole("button")).toHaveLength(7);
   });
 
-  it("mounts Converse in the initial bundle (Req 16 lazy loading / §2.3)", async () => {
+  it("moves Home → Space → Home without reloading or unmounting the shell", async () => {
     render(() => <AppShell />);
+    expect(await screen.findByRole("main", { name: "Home" })).toBeInTheDocument();
+    expect(currentSurface()).toBe("home");
+
+    const nav = screen.getByRole("navigation", { name: "Spaces" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Converse" }));
     expect(await screen.findByRole("region", { name: "Converse" })).toBeInTheDocument();
+    expect(currentSurface()).toBe("workspace");
+
+    const rail = screen.getByRole("complementary", { name: "Primary navigation rail" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Home — Command Center" }));
+    expect(await screen.findByRole("main", { name: "Home" })).toBeInTheDocument();
+    expect(currentSurface()).toBe("home");
+    expect(screen.getByRole("banner", { name: "Global controls" })).toBeInTheDocument();
   });
 
   it("switches Space in a single interaction via the Dock (Req 1.3)", async () => {

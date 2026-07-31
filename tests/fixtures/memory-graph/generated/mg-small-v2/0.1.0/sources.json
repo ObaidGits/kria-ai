@@ -1,0 +1,46 @@
+[
+  {
+    "id": "7c8ad676-fce6-7609-215a-2203a5434c06",
+    "source_kind": "filesystem",
+    "source_id": "290e6eb7-bbac-4f62-4b07-90338437f1db",
+    "consent_state": "pending",
+    "ingest_status": "running",
+    "cursor": "cursor:100",
+    "committed_items": 0,
+    "partial_semantic_record": false,
+    "cancelled_at": null
+  },
+  {
+    "id": "1ac09240-4474-1902-ea7f-3661c3ecf2e3",
+    "source_kind": "repository",
+    "source_id": "b3830ae5-8758-9d0a-23cf-c5cca88cb89d",
+    "consent_state": "granted",
+    "ingest_status": "cancelled",
+    "cursor": "cursor:200",
+    "committed_items": 7,
+    "partial_semantic_record": false,
+    "cancelled_at": "2024-06-01T00:00:00Z"
+  },
+  {
+    "id": "423d9ba7-ca78-b02f-43ac-4ac5804b694c",
+    "source_kind": "shell_history",
+    "source_id": "848f28ef-ca09-5e28-68bb-7b856266d0a3",
+    "consent_state": "granted",
+    "ingest_status": "completed",
+    "cursor": null,
+    "committed_items": 14,
+    "partial_semantic_record": false,
+    "cancelled_at": null
+  },
+  {
+    "id": "34bfa27a-ee33-de69-6981-dc7558db755b",
+    "source_kind": "library",
+    "source_id": "d933083c-b584-a7c5-17b1-c1036e3642e4",
+    "consent_state": "granted",
+    "ingest_status": "running",
+    "cursor": "cursor:400",
+    "committed_items": 21,
+    "partial_semantic_record": false,
+    "cancelled_at": null
+  }
+]

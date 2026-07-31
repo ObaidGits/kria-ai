@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "evidence-manifest/v1",
+  "runId": "run-001",
+  "gate": "F3",
+  "suiteId": "V-RET-03",
+  "status": "Pass",
+  "utcStart": "2026-07-29T06:16:18.119697206+00:00",
+  "utcEnd": "2026-07-29T06:16:18.119697206+00:00",
+  "requirementIds": [
+    "MGR-006",
+    "MGR-036"
+  ],
+  "command": {
+    "id": "CMD-MG-EVAL",
+    "argv": [
+      "cargo",
+      "run",
+      "-p",
+      "kria-eval",
+      "--bin",
+      "mg-eval",
+      "--",
+      "--manifest",
+      "evidence/F3/run-001/manifest.json"
+    ],
+    "workingDirectory": ".",
+    "exitCode": 0
+  },
+  "fixtureIds": [
+    {
+      "fixtureId": "mg-retrieval-judged-v2",
+      "seed": "0x4D475207",
+      "generatorHash": "c4834e509b85938ade048fcced774df48190b98a3049279239afa29b5ca69810"
+    }
+  ],
+  "assertionTotals": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "counterexamples": []
+  },
+  "metrics": {
+    "recall_at_10": 0.9947658402203856,
+    "ndcg_at_10": 1.0,
+    "identifier_phrase_recall": 0.9972451790633609,
+    "forbidden_exclusion_rate": 1.0,
+    "deleted_forgotten_superseded_exclusion_rate": 1.0,
+    "sample_size": 220
+  },
+  "artifacts": [
+    {
+      "path": "reports/retrieval-quality.json",
+      "mediaType": "application/json",
+      "sha256": "d28bd2965d88bf9e8643f4d3315df594dfd45a70051463023d25c9d90912346f",
+      "size": 7444
+    },
+    {
+      "path": "reports/judged-eval-results.json",
+      "mediaType": "application/json",
+      "sha256": "bcd9883ec5e7b4f5d82a9c1a8ecadd0e8da6a28973ade89c618b9e69eca61137",
+      "size": 60468
+    }
+  ],
+  "reviewers": [
+    {
+      "role": "owner-self-review",
+      "reviewerId": "owner",
+      "utcTimestamp": "2026-07-29T06:16:18.119697206+00:00",
+      "verdict": "Pass",
+      "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md",
+      "signatureMethod": "owner-attestation"
+    }
+  ],
+  "failureReasons": []
+}

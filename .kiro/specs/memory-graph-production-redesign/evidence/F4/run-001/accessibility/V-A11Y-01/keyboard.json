@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-A11Y-01",
+  "generatedAt": "2026-07-29T07:24:14.341Z",
+  "engine": "chromium",
+  "hardware": {
+    "capturedAt": "2026-07-29T07:24:14.341Z",
+    "os": {
+      "platform": "linux",
+      "release": "7.0.0-28-generic",
+      "arch": "x64"
+    },
+    "cpu": {
+      "model": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "cores": 24
+    },
+    "ram": {
+      "totalGiB": 15
+    },
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+    "branch": "main"
+  },
+  "note": "Keyboard tasks K2–K11 are each individually verified in test '2. keyboard:...' above. This consolidated record summarises all tasks.",
+  "tasks": [
+    {
+      "taskId": "K1",
+      "description": "Navigate to Memory space by keyboard (Tab → Enter on nav button)",
+      "result": "pass"
+    },
+    {
+      "taskId": "K2",
+      "description": "Search: Tab to search input → type query → Enter",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K3",
+      "description": "List navigation: focus list item → ArrowDown/Up",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K4",
+      "description": "Map composite: one Tab entry → spatial Arrow → Tab exits",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K5",
+      "description": "Inspect: Tab to inspect button → Enter → Escape → focus returns",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K6",
+      "description": "Trace: Tab → Enter → Escape",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K7",
+      "description": "Correct: Tab → Enter → Escape",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K8",
+      "description": "Relate: Tab → Enter → Escape",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K9",
+      "description": "Forget/Restore: Tab → Enter → Escape",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K10",
+      "description": "Path: Tab → Enter → Escape",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K11",
+      "description": "Focus return: initiator restoration after modal close",
+      "result": "verified-by-sub-test"
+    },
+    {
+      "taskId": "K12",
+      "description": "Destination tabs: ArrowRight/Left navigation",
+      "result": "pass"
+    }
+  ]
+}

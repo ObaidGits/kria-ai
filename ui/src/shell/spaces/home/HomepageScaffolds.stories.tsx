@@ -104,12 +104,6 @@ export const CorePresenceExtended: Story = {
  * ContextualOrbit.
  */
 
-/**
- * `HiddenDock` is now a real component (task 6.1) — its workbench entries live
- * in the sibling `HiddenDock.stories.tsx` (title "Spaces/Home/HiddenDock"),
- * following the one-story-file-per-component convention. This scaffold slot is
- * retired; no placeholder remains for HiddenDock.
- */
 
 /**
  * `CompanionEmber` is now a real component (task 8.3) — its workbench entries

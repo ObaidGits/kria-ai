@@ -3,6 +3,13 @@
 //! Records "what KRIA doesn't know" — queries that returned nothing useful — so
 //! gaps surface in the health report and can feed Research-mode proactive
 //! extraction.
+//!
+//! **Pending F1.5/F2 governed-writer cutover.** [`CommandCandidate::knowledge_gap`](
+//! crate::memory::authority::CommandCandidate::knowledge_gap) is the typed
+//! command-candidate scaffolding (task F1.5.1) this engine's gap writes will
+//! route through once a concrete `TxSemanticStore` builder persists the
+//! knowledge-gap semantic row (F2). This engine remains the live persistence
+//! path until then — see the ledger in [`crate::memory::model::legacy_mapping`].
 
 use std::sync::Arc;
 

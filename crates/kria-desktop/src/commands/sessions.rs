@@ -353,13 +353,10 @@ pub async fn delete_session(
         .map_err(|e| e.to_string())?;
     let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
 
-    // Best-effort cleanup of session-scoped preferences so deleting a chat
-    // leaves no orphaned title/flag/pin/archive metadata behind. Never block the
-    // delete on a preference failure.
-    if chat_flag_enabled("KRIA_CHAT_PREF_CLEANUP") {
-        if let Err(e) = memory_writer.delete_session_preferences(&session_id) {
-            tracing::warn!(session_id = %session_id, error = %e, "failed to clean session preferences on delete");
-        }
+    // Session metadata is part of the deleted chat. Always remove it so title,
+    // pin/archive/temporary state cannot survive as orphaned preferences.
+    if let Err(e) = memory_writer.delete_session_preferences(&session_id) {
+        tracing::warn!(session_id = %session_id, error = %e, "failed to clean session preferences on delete");
     }
 
     let mut replacement_session_id: Option<String> = None;

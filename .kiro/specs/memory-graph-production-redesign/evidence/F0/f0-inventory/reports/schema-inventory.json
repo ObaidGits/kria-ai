@@ -1,0 +1,321 @@
+{
+  "schema": "memory-graph.schema-inventory/v1",
+  "task": "0.3.3 Inventory schema tables/triggers/indexes/pragmas/migration checksums and identify competing authority, direct SQL, free-text links, mutable events, and obsolete ANN paths.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T18:15:20Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": ["MGR-033", "MGR-034", "MGR-035", "MGR-017", "MGR-032", "MGR-041", "MGR-042", "MGR-005", "MGR-011", "MGR-047"],
+  "design_refs": [
+    "design.md §4 Planned SQLite Authority Schema v2 (§4.1 meta/events/identity/policy/revisions; §4.2 cognitive records + semantic links; §4.3 goals/episodes/consolidation/sources/tools/traces/feedback; §4.4 derived indexes/outbox/integrity/export)",
+    "design.md §5 Authority Transaction, Patch, Recovery, Rebuild, Deletion, Crypto Truth",
+    "design.md §1 Current Repository Observation (authority/retrieval/vectors rows)"
+  ],
+  "predecessor_artifacts": [
+    "evidence/F0/f0-inventory/reports/write-paths.json (0.3.1 — store/handle map STORE-kria_memory_db/kria_db/skills_db/cpp_grants_db/devices_db, governed vs direct AuthorityTx writers, legacy memory_facts + world_facts competing authorities)",
+    "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2 — AnnVectorStore LIVE vs SqliteVectorStore dormant at api.rs:274; FTS/graph/analytics read paths)"
+  ],
+  "method": "Static inventory of the ACTUAL embedded DDL across all durable SQLite stores. The cognitive-memory authority (STORE-kria_memory_db) schema is defined by 10 include_str! migration files under crates/kria-core/src/memory/db/schema/0001..0010, applied by crates/kria-core/src/memory/db/migrations.rs and versioned in the schema_version table with a runtime BLAKE3 checksum per applied migration. Pragmas are read from crates/kria-core/src/memory/db/mod.rs configure(). For each migration this artifact enumerates tables (key columns/constraints), indexes, triggers, and virtual (FTS5) tables. A SHA-256 file-byte checksum is computed per migration to establish an F0 migration-checksum baseline independent of the runtime BLAKE3 lineage. Other durable stores (kria.db, skills.db, cpp_grants.db, devices.db and the cpp-knowledge/config/briefing/world-model/quarantine/tasks/safety-audit families) use ad-hoc CREATE TABLE IF NOT EXISTS DDL embedded in Rust; they are inventoried at store/table granularity as competing authorities. The five required categories (competing authority, direct SQL, free-text links, mutable events, obsolete ANN) are flagged with exact file/table locations and a target cutover gate. No secrets or row data copied.",
+  "invariants_applied": [
+    "Dormant code/comments/tests are not capability proof — SqliteVectorStore, IndexTarget::LanceDb/Tantivy labels, vectors.usearch path, and 'LanceDB/Qdrant' comments are classified by LIVE composition (api.rs:274 wires AnnVectorStore), not by name.",
+    "MGR-033.1 single SQLite authority: authoritative writes must land in one transactional authority; multiple durable SQLite files are competing authorities.",
+    "MGR-033.2 append-only events: event tables must abort UPDATE/DELETE; audit/revision tables must be append-only.",
+    "MGR-034 typed records/provenance: relations must be governed by a relation_registry, not free-text rel_type or parallel untyped link tables.",
+    "MGR-035.1 single governed write boundary: durable writes must pass WritePolicyEngine; direct AuthorityTx SQL outside submit() is a bypass.",
+    "MGR-041 crypto-shred truth: shred_keys must carry key_version/algorithm/destruction_method/proof_hash and status transitions, not a bare status flag.",
+    "MGR-042 derived-index convergence: FTS5/vector rows are rebuildable projections and must converge with authority via triggers/outbox/manifest."
+  ],
+
+  "pragmas": {
+    "source": "crates/kria-core/src/memory/db/mod.rs configure() (applied to every write and read-pool connection)",
+    "observed": {
+      "journal_mode": "WAL",
+      "foreign_keys": "ON",
+      "busy_timeout": "5000 ms",
+      "synchronous": "NORMAL"
+    },
+    "authority_tx": "Database::begin() issues BEGIN IMMEDIATE and holds a single write Mutex (serialized single writer, L10); AuthorityTx rolls back on drop unless commit() is called.",
+    "integrity": "quick_check() available (PRAGMA quick_check); no scheduled integrity_check / event-checksum / outbox-cursor / schema-checksum / derived-manifest release check yet (design §4.4/§5.3 target).",
+    "network_fs_guard": "Linux statfs guard rejects NFS/SMB/CIFS/SMB2 authority paths (L14).",
+    "gaps_vs_design_v2": [
+      "synchronous=NORMAL, but design §4 requires synchronous=FULL for authority commits — MGR-033 durability gap (target F1.1).",
+      "No authority_meta singleton, no schema_epoch, no graph_revision counter row (design §4.1) — pragmas/meta table absent.",
+      "No deferred foreign-key/invariant pre-commit check and no release/recovery integrity battery (design §4.4/§5.3) — target F1."
+    ]
+  },
+
+  "migration_checksum_baseline": {
+    "runtime_machinery": "crates/kria-core/src/memory/db/migrations.rs — ordered const MIGRATIONS[] applied once inside a txn; each recorded in schema_version(version PK, applied_at, checksum) with checksum = BLAKE3 hex of the script bytes (ids::blake3_hex). verify_checksum() aborts if an applied migration's script bytes change; applied>latest refuses a silent downgrade (SchemaTooOld). latest_version()=10.",
+    "baseline_algorithm": "SHA-256 of raw file bytes (F0 evidence baseline; independent of the runtime BLAKE3 lineage recorded in schema_version).",
+    "store": "STORE-kria_memory_db",
+    "migrations": [
+      {"version": 1, "file": "crates/kria-core/src/memory/db/schema/0001_init.sql", "bytes": 10882, "sha256": "e5d49287eb9f393773db9d2bcaa18662e3ac5dab3a1e3f3a38a286894455b468"},
+      {"version": 2, "file": "crates/kria-core/src/memory/db/schema/0002_vectors.sql", "bytes": 885, "sha256": "00f09d521f87c58c2770275431f58db745061151ae057319df30428ea8fc5915"},
+      {"version": 3, "file": "crates/kria-core/src/memory/db/schema/0003_library.sql", "bytes": 1203, "sha256": "745e8d0d9f057cabade08fafe9f5f47068f35e8492e407e4a9165c5d792f7c86"},
+      {"version": 4, "file": "crates/kria-core/src/memory/db/schema/0004_conversation.sql", "bytes": 1286, "sha256": "455dd9e053d6bde530c43d6251bae944beabcdc9d57b33bc6db58fe8edb3859e"},
+      {"version": 5, "file": "crates/kria-core/src/memory/db/schema/0005_runtime_compat.sql", "bytes": 1868, "sha256": "9f16e97cc80f3a128af2fcfed7bea46c8a1d12b2abedfd42b8783e903e009686"},
+      {"version": 6, "file": "crates/kria-core/src/memory/db/schema/0006_goals.sql", "bytes": 586, "sha256": "9271341c27c9008fbf8f27bafe44644f5e930872081628ade90715b194f5b03b"},
+      {"version": 7, "file": "crates/kria-core/src/memory/db/schema/0007_plans.sql", "bytes": 905, "sha256": "17457743376a61952d76350a5e8f9eea2f6f14a65d7d6bc6cbe2370d8b01f781"},
+      {"version": 8, "file": "crates/kria-core/src/memory/db/schema/0008_reasoning.sql", "bytes": 943, "sha256": "8d9c2a852ff4e12359560420679439372b91c2463511d268d88b5be217e87193"},
+      {"version": 9, "file": "crates/kria-core/src/memory/db/schema/0009_retrieval_weights.sql", "bytes": 730, "sha256": "c9e2ab7bc960f81717b37e667926004961aaa5723be1a89217e669baa5765068"},
+      {"version": 10, "file": "crates/kria-core/src/memory/db/schema/0010_causal.sql", "bytes": 784, "sha256": "fa22e5c646d83015a4218001649378fabac8290e899ce69989c153c33fc27ea5"}
+    ],
+    "other_migration_lineages": [
+      {"store": "STORE-skills_db", "machinery": "crates/kria-core/src/openclaw/registry.rs — a SEPARATE SCHEMA_VERSION + run_migrations() lineage (capability_profiles/market_catalog/capability_grants_scoped/capability_edges) layered over base CREATE TABLE IF NOT EXISTS DDL. Independent checksum/version machinery from the memory authority.", "note": "Second migration system in the repo; not covered by the memory schema_version baseline."},
+      {"store": "STORE-kria_db / others", "machinery": "TaskStore, WorldModelStore, QuarantineRegistry, safety AuditLogger, SqliteConfigStore, BriefingStore use bare CREATE TABLE IF NOT EXISTS with no version/checksum ledger.", "note": "No migration checksum baseline exists for these stores — schema drift is unversioned."}
+    ]
+  },
+
+  "stores": [
+    {
+      "id": "STORE-kria_memory_db",
+      "path": "<data_dir>/kria_memory.db",
+      "role": "Cognitive memory authority (single Arc<Database>).",
+      "schema_version_table": "schema_version(version PK, applied_at, checksum=BLAKE3)",
+      "migration_records": [
+        {
+          "version": 1,
+          "file": "0001_init.sql",
+          "tables": [
+            {"name": "schema_version", "columns": "version INTEGER PK, applied_at TEXT NOT NULL, checksum TEXT NOT NULL", "role": "migration ledger"},
+            {"name": "shred_keys", "columns": "subject_id TEXT PK, subject_type TEXT NOT NULL, key_ref TEXT NOT NULL, status TEXT DEFAULT 'active', created_at TEXT NOT NULL, destroyed_at TEXT", "role": "crypto-shred keyring (MVP)", "flags": ["free-text status (no CHECK)", "missing key_version/algorithm/destruction_method/proof_hash vs design §4.1 — MGR-041 gap"]},
+            {"name": "events", "columns": "id TEXT PK, hlc TEXT NOT NULL, ts_utc TEXT NOT NULL, tz_offset_min INTEGER NOT NULL, event_type TEXT NOT NULL, source TEXT NOT NULL, session_id TEXT, parent_event_id TEXT FK events, shred_key_id TEXT FK shred_keys, payload TEXT NOT NULL, encrypted INTEGER DEFAULT 0, checksum TEXT NOT NULL", "role": "immutable append-only event log (L1)", "indexes": ["ix_events_session_hlc(session_id,hlc)", "ix_events_type_hlc(event_type,hlc)", "ix_events_hlc(hlc)", "ix_events_shred(shred_key_id)"], "triggers": ["trg_events_no_update BEFORE UPDATE -> RAISE(ABORT)", "trg_events_no_delete BEFORE DELETE -> RAISE(ABORT)"], "append_only": true, "flags": ["hlc not UNIQUE (design §4.1 requires hlc TEXT UNIQUE)", "no policy columns/owner_id/scope/sensitivity/policy_version", "no idempotency_key/invocation_id/phase/source_kind/source_id/actor_id/payload_checksum split (design §4.1)"]},
+            {"name": "event_consumer_cursor", "columns": "consumer TEXT PK, last_hlc TEXT DEFAULT ''", "role": "resumable per-consumer pull cursor"},
+            {"name": "sessions", "columns": "id TEXT PK, started_at, ended_at, mode DEFAULT 'permanent', state DEFAULT 'open', device_id NOT NULL", "role": "session registry"},
+            {"name": "episodes", "columns": "id TEXT PK, session_id FK sessions, opened_at, closed_at, summary_memory_id, boundary_reason", "indexes": ["ix_episodes_session(session_id)"]},
+            {"name": "goals", "columns": "id TEXT PK, kind, title, status DEFAULT 'candidate', confidence REAL, priority INTEGER, resumption_context, created_at, last_progress_at (parent_id added in 0006)", "role": "first-class goal authority", "flags": ["free-text status (no CHECK enum vs design §4.3 candidate/active/paused/completed/conflicted/stale/superseded/deleted)", "no policy columns/revision/score_semantics", "written by direct SQL (goals.rs)"]},
+            {"name": "memories", "columns": "id TEXT PK; content; memory_type; compression_level CHECK 0..3; source_event_id FK events; namespace DEFAULT 'core'; owner_id; device_id; scope DEFAULT 'global'; confidence CHECK 0..1; importance CHECK 0..10; access_count; decay_score; staleness_class; sensitivity DEFAULT 'private'; state DEFAULT 'active'; created_at; last_accessed; valid_from; valid_until; embedding_id; embedding_model_version; estimated_tokens; content_hash; shred_key_id FK; verify_against; superseded_by FK memories; episode_id FK; goal_context_id FK; memory_worth_success/failure/samples; modality; preference_pair_id; training_eligible", "role": "derived durable mutable cognitive record (L4)", "indexes": ["ix_mem_type_state", "ix_mem_ns_scope", "ix_mem_staleness", "ix_mem_decay", "ix_mem_source_evt", "ix_mem_shred", "uq_mem_content UNIQUE(namespace,memory_type,content_hash) WHERE state='active'"], "flags": ["sensitivity is TEXT (design §4.1 requires INTEGER 0..3 for max() ordering)", "no policy_version/truth_state column (state≈truth); no revision", "mutated by direct SQL (truth.rs supersede/verify, merge.rs)"]},
+            {"name": "memory_derived_from", "columns": "parent_id FK memories, child_id FK memories, PK(parent_id,child_id)", "role": "provenance link", "flags": ["parallel untyped link table (design §4.2 forbids parallel untyped link tables; must be relation_registry row 'derived_from' + memory_links)"]},
+            {"name": "memory_contradicts", "columns": "a_id TEXT, b_id TEXT, PK(a_id,b_id)", "flags": ["untyped link table, NO FK, NO relation_registry — free-text-links category; must become registry 'contradicts' + memory_links"]},
+            {"name": "memory_supports", "columns": "a_id TEXT, b_id TEXT, PK(a_id,b_id)", "flags": ["untyped link table, NO FK, NO relation_registry — free-text-links category; must become registry 'supports' + memory_links"]},
+            {"name": "memory_mentions_entity", "columns": "memory_id TEXT, entity_id TEXT, PK(memory_id,entity_id)", "flags": ["untyped link table, NO FK — must become registry 'mentions_entity' + mentions (design §4.2)"]},
+            {"name": "evidence", "columns": "id TEXT PK, memory_id FK memories, kind TEXT, source_event_id FK events, weight REAL, observed_at", "indexes": ["ix_evidence_mem(memory_id,kind)"], "flags": ["free-text 'kind' (design §4.2 evidence.polarity CHECK supports/contradicts + method/method_version/score_semantics/policy)"]},
+            {"name": "entities", "columns": "id TEXT PK, canonical_id TEXT NOT NULL, entity_type, display_name, created_at", "flags": ["no policy columns/truth_state/revision/created_event_id (design §4.2); canonical_id not FK"]},
+            {"name": "entity_aliases", "columns": "entity_id FK entities, alias, alias_type, PK(entity_id,alias)", "indexes": ["ix_alias_lookup(alias,alias_type)"], "flags": ["free-text alias_type; no normalized_alias/truth_state/policy/validity (design §4.2 aliases)"]},
+            {"name": "entity_merge_provenance", "columns": "merged_entity_id, into_entity_id, merged_at, reversible_until, PK(merged_entity_id,into_entity_id)"},
+            {"name": "relationships", "columns": "id TEXT PK, source_id FK entities, target_id FK entities, rel_type TEXT NOT NULL, strength REAL, valid_from, valid_until, evidence_event_id FK events", "indexes": ["ix_rel_source(source_id,rel_type)", "ix_rel_target(target_id,rel_type)"], "flags": ["rel_type is FREE-TEXT with NO relation_registry FK (free-text-links category)", "no relation_name/version, direction_class, identity_hash unique, authority_class(stored/derived/inferred), truth_state, or policy columns (design §4.2)", "written by direct SQL (api.rs create_relationship, entity_resolution/extraction, graph_intel predict_links) outside WritePolicy — MGR-005/MGR-035 bypass"]},
+            {"name": "graph_2hop_cache", "columns": "root_entity_id PK, neighbors_json, refreshed_at", "role": "derived neighbor cache stored inside authority DB", "flags": ["derived projection persisted in authority (should be rebuildable; not manifest/revision-tracked)"]},
+            {"name": "preferences", "columns": "key PK, value, vector_clock, updated_at, device_id"},
+            {"name": "embedding_outbox", "columns": "id INTEGER PK AUTOINCREMENT, memory_id, index_target, op, content_hash, attempts, status DEFAULT 'pending', created_at", "indexes": ["ix_outbox_pending(index_target,status,id)"], "role": "transactional outbox for derived-index convergence (MGR-042)", "flags": ["index_target stores literal 'lancedb' (IndexTarget::LanceDb) though live backend is AnnVectorStore over mem_vectors — misleading target label; no next_attempt/error_code/authority_revision (design §4.4 derived_outbox)"]},
+            {"name": "outbox_cursor", "columns": "index_target PK, last_done_id INTEGER DEFAULT 0"},
+            {"name": "feedback_events", "columns": "id TEXT PK, target_id, target_kind, signal, payload, context, ts", "flags": ["append-only in intent but NO immutability trigger — mutable-events category; no policy/revision (design §4.3 feedback)", "written by direct SQL (feedback.rs)"]},
+            {"name": "knowledge_gaps", "columns": "id TEXT PK, query, domain, times_missed, last_missed_at, resolved"},
+            {"name": "memory_audit", "columns": "id TEXT PK, ts, decision, reason, candidate_hash, namespace, mode", "indexes": ["ix_audit_ts(ts)"], "role": "write-policy admission audit", "flags": ["NO append-only trigger — mutable audit (mutable-events category); design §4.1 audit_records require append-only triggers + disposition CHECK/event_id FK/authority_revision/reversal_of"]},
+            {"name": "enrichment_deadletter", "columns": "event_id PK, stage, error, attempts, ts"},
+            {"name": "memories_fts", "kind": "FTS5 virtual", "columns": "content, memory_id UNINDEXED, namespace UNINDEXED, tokenize='unicode61'", "role": "derived keyword index (MGR-042)", "flags": ["carries namespace only — no scope/sensitivity/truth_state UNINDEXED cols; policy filtering structurally impossible at FTS layer (see read-paths R-fts-query)", "maintained by code (index_fts_in_tx/delete_fts_in_tx), NOT content triggers (design §4.4 requires content-table triggers) — convergence risk"]}
+          ],
+          "trigger_count": 2,
+          "index_count": 18
+        },
+        {
+          "version": 2,
+          "file": "0002_vectors.sql",
+          "tables": [
+            {"name": "mem_vectors", "columns": "model_version TEXT, id TEXT, vector BLOB NOT NULL (little-endian f32), namespace, scope, sensitivity, memory_type, content_hash, created_at, PK(model_version,id)", "role": "derived durable vector index (L4), model-version partitioned; LIVE backend read by AnnVectorStore (in-RAM HNSW over these rows)", "indexes": ["ix_vec_model_ns(model_version,namespace)"], "flags": ["no CHECK(length(vector)=1536) and no embedding_partitions manifest table (design §4.4 mem_vectors/embedding_partitions require dim/dtype/normalized/license-disposition/manifest checksum); no revision/policy provenance beyond ns/scope/sensitivity"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 1
+        },
+        {
+          "version": 3,
+          "file": "0003_library.sql",
+          "tables": [
+            {"name": "library_items", "columns": "id TEXT PK, sha256, title, author, version DEFAULT 1, prev_version_id FK library_items, path, ingested_at, shred_key_id FK", "indexes": ["ix_lib_sha(sha256,version)"], "flags": ["source-of-record rows written by direct SQL (library.rs) outside WritePolicy"]},
+            {"name": "library_collections", "columns": "item_id FK library_items, collection, PK(item_id,collection)"},
+            {"name": "library_chunks", "columns": "id TEXT PK, item_id FK library_items, chunk_index, text, embedding_id, modality, embedding_model_version, page", "indexes": ["ix_lib_chunks_item(item_id)"], "flags": ["competing document-chunk model vs 0005 document_chunks (see competing-authority)"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        },
+        {
+          "version": 4,
+          "file": "0004_conversation.sql",
+          "tables": [
+            {"name": "conversations", "columns": "id INTEGER PK AUTOINCREMENT, session_id, role, content, tool_name, tool_result, tokens_used, timestamp", "indexes": ["ix_conv_session(session_id,id)"], "flags": ["written by direct SQL (conversation.rs); mobile_gateway.rs opens a SECOND Database handle to the same file (0.3.1 competing_handles)"]},
+            {"name": "conversations_fts", "kind": "FTS5 virtual", "columns": "content", "role": "derived conversation keyword index", "flags": ["code-maintained, no triggers"]},
+            {"name": "chat_media", "columns": "id INTEGER PK AUTOINCREMENT, session_id, media_type, file_path, sha256, prompt, width, height, style, provenance, created_at DEFAULT datetime('now')", "indexes": ["ix_chat_media_session(session_id,created_at)"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        },
+        {
+          "version": 5,
+          "file": "0005_runtime_compat.sql",
+          "role": "LEGACY runtime-compat facts model — prime cutover target",
+          "tables": [
+            {"name": "memory_facts", "columns": "id INTEGER PK AUTOINCREMENT, text, category DEFAULT 'general', source DEFAULT 'inferred', created_at, last_accessed, access_count, decay_score", "indexes": ["ix_memory_facts_decay(decay_score)"], "flags": ["COMPETING AUTHORITY: a separate fact model distinct from events/memories; written by direct SQL (runtime_backend.rs store_fact) via knowledge tool fallback — see competing-authority + direct-sql"]},
+            {"name": "facts_fts", "kind": "FTS5 virtual", "columns": "text", "flags": ["third FTS surface (with memories_fts, conversations_fts, chunks_fts)"]},
+            {"name": "snippets", "columns": "name PK, content, language DEFAULT 'text', tags DEFAULT '[]', created"},
+            {"name": "document_chunks", "columns": "id INTEGER PK AUTOINCREMENT, doc_id, doc_name, doc_type DEFAULT 'text', chunk_index, content, char_offset, created_at", "indexes": ["ix_document_chunks_doc(doc_id)"], "flags": ["COMPETING document-chunk model vs 0003 library_chunks"]},
+            {"name": "chunks_fts", "kind": "FTS5 virtual", "columns": "content", "flags": ["fourth FTS surface"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        },
+        {
+          "version": 6,
+          "file": "0006_goals.sql",
+          "tables": [
+            {"name": "goals", "alter": "ADD COLUMN parent_id TEXT (goal hierarchy)", "indexes": ["ix_goals_parent(parent_id)", "ix_goals_status_priority(status,priority)"], "flags": ["parent_id has no FK to goals(id)"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        },
+        {
+          "version": 7,
+          "file": "0007_plans.sql",
+          "tables": [
+            {"name": "plans", "columns": "signature TEXT PK, task_label, steps, success, failure, samples, confidence DEFAULT 0.5, created_at, last_used", "indexes": ["ix_plans_task(task_label,samples)"], "flags": ["written by direct SQL (planning.rs); no policy/provenance/event/revision"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 1
+        },
+        {
+          "version": 8,
+          "file": "0008_reasoning.sql",
+          "tables": [
+            {"name": "reasoning_traces", "columns": "id TEXT PK, session_id, task_label, kind ('chain'|'hypothesis'|'counterexample' free-text), content, confidence, success INTEGER NULL, created_at", "indexes": ["ix_reasoning_task(task_label,kind)", "ix_reasoning_session(session_id,created_at)"], "flags": ["free-text kind (no CHECK); written by direct SQL (reasoning.rs); distinct from design §4.3 retrieval_traces/tool_observations"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        },
+        {
+          "version": 9,
+          "file": "0009_retrieval_weights.sql",
+          "tables": [
+            {"name": "retrieval_weights", "columns": "query_class TEXT PK, wins_vector, wins_fts, samples, updated_at", "flags": ["global per query-class (not policy/identity/revision keyed — read-paths R-retriever-search finding); written by direct SQL (retrieval_opt.rs)"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 0
+        },
+        {
+          "version": 10,
+          "file": "0010_causal.sql",
+          "tables": [
+            {"name": "causal_links", "columns": "cause TEXT, effect TEXT, observations, successes, updated_at, PK(cause,effect)", "indexes": ["ix_causal_cause(cause)", "ix_causal_effect(effect)"], "flags": ["cause/effect are FREE-TEXT normalized labels with NO entity/registry linkage (free-text-links category); written by direct SQL (causal.rs)"]}
+          ],
+          "trigger_count": 0,
+          "index_count": 2
+        }
+      ],
+      "totals": {"migrations": 10, "tables": 42, "fts5_virtual_tables": 4, "triggers": 2, "indexes": 32},
+      "note": "42 tables includes the schema_version ledger and 4 FTS5 virtual tables (memories_fts, conversations_fts, facts_fts, chunks_fts); goals is created in 0001 and altered in 0006 (counted once). Breakdown: 0001=26, 0002=1, 0003=3, 0004=3, 0005=5, 0007=1, 0008=1, 0009=1, 0010=1. Indexes: uq_mem_content is a partial UNIQUE index."
+    },
+
+    {
+      "id": "STORE-kria_db",
+      "path": "<KriaPaths.db_path> (kria.db)",
+      "role": "General-app durable store reached by MULTIPLE independent rusqlite::Connection handles — a competing authority family (no shared txn with the memory authority, no WritePolicy, no schema_version ledger).",
+      "table_families": [
+        {"owner": "TaskStore", "file": "crates/kria-core/src/tasks/store.rs", "tables": ["tasks", "reminders"], "indexes": ["idx_tasks_score"]},
+        {"owner": "WorldModelStore (PSDG)", "file": "crates/kria-core/src/agent/world_model/store.rs", "tables": ["world_facts", "world_facts_archive"], "indexes": ["idx_wf_pred"], "flags": ["COMPETING semantic-fact authority (subject/predicate/object) distinct from memories AND memory_facts — MGR-033"]},
+        {"owner": "QuarantineRegistry", "file": "crates/kria-core/src/tools/quarantine.rs", "tables": ["quarantine", "quarantine_log"], "indexes": ["idx_q_name"]},
+        {"owner": "safety AuditLogger", "file": "crates/kria-core/src/safety/audit.rs", "tables": ["audit_log (hash-chained)"], "flags": ["separate from memory_audit; no append-only trigger inventoried — mutable audit"]},
+        {"owner": "SqliteConfigStore", "file": "crates/kria-core/src/config/store.rs", "tables": ["config", "config_meta"], "pragmas": ["journal_mode=WAL set inline"]},
+        {"owner": "BriefingStore", "file": "crates/kria-core/src/briefing/store.rs", "tables": ["briefing_config"]},
+        {"owner": "failure analyzer / workflow / contacts (same or sibling db)", "files": ["crates/kria-core/src/agent/failure_analyzer/store.rs (failure_patterns, failure_log)", "crates/kria-core/src/agent/workflow_persistence.rs (workflow_events, workflow_summaries)", "crates/kria-core/src/platform/contacts.rs (contacts)"], "flags": ["additional durable table families in the app-DB orbit; enumerate exact file bindings at F1 cutover"]}
+      ],
+      "flags": ["multiple independent Connection handles = competing authorities (MGR-033); no versioned migration/checksum ledger = unversioned schema drift"]
+    },
+    {
+      "id": "STORE-skills_db",
+      "path": "<data_dir>/skills.db",
+      "role": "OpenClaw skill substrate durable state — has its OWN SCHEMA_VERSION + run_migrations lineage.",
+      "table_families": [
+        {"owner": "SkillRegistry", "file": "crates/kria-core/src/openclaw/registry.rs", "tables": ["skills", "skill_health", "skill_statistics", "skill_dependencies", "registry_events", "provenance", "capability_profiles", "market_catalog", "capability_grants_scoped", "capability_edges"], "flags": ["registry_events is an event/audit log with no immutability trigger inventoried — mutable-events"]},
+        {"owner": "AuditLedger", "file": "crates/kria-core/src/openclaw/audit.rs", "tables": ["audit_log"], "flags": ["second Connection handle to skills.db"]}
+      ],
+      "flags": ["independent migration/checksum machinery separate from memory authority"]
+    },
+    {
+      "id": "STORE-cpp_grants_db",
+      "path": "<data_dir>/cpp_grants.db",
+      "role": "Capability grant + CPP intelligence store.",
+      "table_families": [
+        {"owner": "GrantStore", "file": "crates/kria-core/src/capability/grants.rs", "tables": ["cpp_grants"]},
+        {"owner": "CPP knowledge/intelligence", "file": "crates/kria-core/src/capability/intelligence/knowledge.rs", "tables": ["cpp_knowledge", "cpp_decisions", "cpp_benchmarks", "cpp_proposals", "cpp_jobs"], "indexes": ["idx_cpp_decisions_created", "idx_cpp_benchmarks_cap", "idx_cpp_proposals_status"]}
+      ]
+    },
+    {
+      "id": "STORE-devices_db",
+      "path": "<data_dir>/devices.db",
+      "role": "Mobile pairing device registry.",
+      "table_families": [
+        {"owner": "pairing", "file": "crates/kria-core/src/mobile/pairing.rs", "tables": ["devices"]}
+      ]
+    }
+  ],
+
+  "flagged_categories": {
+    "competing_authority": {
+      "requirement": "MGR-033 single SQLite authority",
+      "findings": [
+        {"id": "CA-1", "concern": "Legacy memory_facts fact model vs events/memories authority model", "locations": ["0005_runtime_compat.sql: memory_facts + facts_fts", "vs 0001_init.sql: events + memories + memories_fts"], "writer": "runtime_backend.rs store_fact (knowledge tool fallback)", "target_gate": "F1 (schema cutover: reconcile/delete legacy facts into typed records)"},
+        {"id": "CA-2", "concern": "world_facts subject/predicate/object semantic-fact authority in a DIFFERENT db file (kria.db)", "locations": ["crates/kria-core/src/agent/world_model/store.rs: world_facts, world_facts_archive"], "target_gate": "F1 (fold PSDG facts into the single authority or demote to derived)"},
+        {"id": "CA-3", "concern": "Two document-chunk models", "locations": ["0003_library.sql: library_chunks", "0005_runtime_compat.sql: document_chunks (+ chunks_fts)"], "target_gate": "F1 (single document/chunk representation)"},
+        {"id": "CA-4", "concern": "Four independent FTS5 surfaces (memories_fts, conversations_fts, facts_fts, chunks_fts)", "locations": ["0001", "0004", "0005"], "target_gate": "F1/F3 (converge on one design §4.4 search_documents_fts external-content index)"},
+        {"id": "CA-5", "concern": "Five durable SQLite files (kria_memory.db, kria.db, skills.db, cpp_grants.db, devices.db) each with independent Connection handles", "locations": ["see stores[]"], "target_gate": "F1 (declare single authority; classify others as separate bounded stores or fold in)"},
+        {"id": "CA-6", "concern": "Second Database handle to kria_memory.db (mobile_gateway) and second handle to skills.db (AuditLedger)", "locations": ["0.3.1 write-paths.json competing_handles"], "target_gate": "F1"}
+      ]
+    },
+    "direct_sql": {
+      "requirement": "MGR-035.1 single governed write boundary (WritePolicyEngine)",
+      "summary": "Only events + memory_audit are written through WritePolicy::submit (0.3.1 W-govern-writepolicy-submit). Every other authority table is written by services that open Database::begin() -> AuthorityTx directly, bypassing the governed boundary.",
+      "tables_written_by_direct_sql_outside_writepolicy": ["memories (truth.rs, merge.rs, slow.rs enrichment)", "goals", "plans", "reasoning_traces", "causal_links", "retrieval_weights", "relationships", "entities", "entity_aliases", "memory_mentions_entity", "memory_derived_from/contradicts/supports", "evidence", "feedback_events", "library_items/library_chunks/library_collections", "conversations/conversations_fts/chat_media", "memory_facts/facts_fts/snippets/document_chunks/chunks_fts", "knowledge_gaps", "preferences", "graph_2hop_cache"],
+      "boundary_note": "AuthorityTx is obtainable by any holder of Arc<Database>; the de-facto write boundary is AuthorityTx, not WritePolicy (satisfies MGR-033 one-file but violates MGR-035.1/A3).",
+      "target_gate": "F1 (route all durable writes through the governed WritePolicyEngine; atomic event+audit+outbox+revision)"
+    },
+    "free_text_links": {
+      "requirement": "MGR-034 typed records + design §4.2 relation_registry (no parallel untyped link table permitted)",
+      "findings": [
+        {"id": "FT-1", "concern": "relationships.rel_type is free-text with no relation_registry FK, no relation_name/version, direction_class, or identity_hash", "location": "0001_init.sql: relationships", "target_gate": "F2 (relation_registry + typed relationships + evidence)"},
+        {"id": "FT-2", "concern": "Parallel untyped link tables memory_contradicts / memory_supports / memory_derived_from / memory_mentions_entity (a_id/b_id, no FK, no type/version/policy)", "location": "0001_init.sql", "target_gate": "F2 (canonical registry rows derived_from/supports/contradicts/mentions_entity + memory_links + mentions)"},
+        {"id": "FT-3", "concern": "causal_links cause/effect are free-text labels with no entity/registry linkage", "location": "0010_causal.sql", "target_gate": "F2/F3 (typed causal edges or demote to derived analytic)"},
+        {"id": "FT-4", "concern": "Free-text enum-like columns without CHECK: goals.status, shred_keys.status, evidence.kind, entity_aliases.alias_type, reasoning_traces.kind", "location": "0001/0005/0008", "target_gate": "F1/F2 (CHECK constraints per design §4)"}
+      ]
+    },
+    "mutable_events": {
+      "requirement": "MGR-033.2 append-only events; design §4.1/§4.4 revision & audit tables append-only",
+      "findings": [
+        {"id": "ME-0", "note": "events (0001) IS append-only — trg_events_no_update + trg_events_no_delete abort UPDATE/DELETE (the only immutability triggers in the memory authority).", "status": "compliant"},
+        {"id": "ME-1", "concern": "memory_audit has NO append-only trigger — admission audit rows are mutable/deletable", "location": "0001_init.sql: memory_audit", "target_gate": "F1 (append-only audit_records with disposition/event_id/revision/reversal_of)"},
+        {"id": "ME-2", "concern": "feedback_events has no immutability trigger despite append-only intent", "location": "0001_init.sql: feedback_events", "target_gate": "F1/F3"},
+        {"id": "ME-3", "concern": "No graph_revisions/graph_changes/authority_meta tables exist — there is no append-only revision ledger or singleton revision counter (design §4.1)", "location": "absent", "target_gate": "F1"},
+        {"id": "ME-4", "concern": "Cross-store event/audit logs lack immutability triggers: skills.db registry_events + audit_log, kria.db safety audit_log", "location": "openclaw/registry.rs, openclaw/audit.rs, safety/audit.rs", "target_gate": "F1 (hash-chain integrity is code-side, not DB-enforced)"}
+      ]
+    },
+    "obsolete_ann": {
+      "requirement": "MGR-042 derived-index convergence; invariant: dormant code is not capability proof",
+      "findings": [
+        {"id": "ANN-1", "concern": "SqliteVectorStore (brute-force cosine) is DORMANT — superseded by AnnVectorStore (in-RAM HNSW over mem_vectors) which is the LIVE composition at api.rs:274. SqliteVectorStore appears only in #[cfg(test)]/reference modules (salience.rs, retriever.rs, lifecycle.rs, maintenance.rs, slow.rs tests).", "location": "crates/kria-core/src/memory/stores/sqlite_vectors.rs; live path crates/kria-core/src/memory/stores/ann_vectors.rs", "target_gate": "F3 (delete SqliteVectorStore or keep only as an explicit reference double)"},
+        {"id": "ANN-2", "concern": "IndexTarget::LanceDb is used as the outbox target LABEL ('lancedb') for the vector index, but NO LanceDB backend is integrated — the actual backend is AnnVectorStore over the SQLite mem_vectors table. Misleading naming persisted into embedding_outbox rows.", "location": "crates/kria-core/src/memory/types.rs IndexTarget; used in sqlite_memory.rs enqueue + maintenance.rs relay", "target_gate": "F1/F3 (rename outbox target to design §4.4 mem_vectors/derived_outbox semantics)"},
+        {"id": "ANN-3", "concern": "IndexTarget::Tantivy is a planned FTS backend variant never wired (FTS5 is the live keyword floor)", "location": "crates/kria-core/src/memory/types.rs", "target_gate": "F3 (remove dormant variant)"},
+        {"id": "ANN-4", "concern": "paths.rs vectors_path = '<data_dir>/vectors.usearch' — a usearch vector file path with no live consumer in the memory system (vectors live in SQLite mem_vectors); dormant/obsolete artifact path (Unknown consumer)", "location": "crates/kria-core/src/platform/paths.rs:50", "target_gate": "F3 (verify no live reader; delete or reconcile)"},
+        {"id": "ANN-5", "concern": "ports.rs / mod.rs comments reference 'LanceDB v1; Qdrant escape hatch' and 'Tantivy' as planned backends — comments only, not integrated (not capability proof)", "location": "crates/kria-core/src/memory/stores/ports.rs:92, stores/mod.rs:5", "target_gate": "F3 (documentation reconciliation)"}
+      ]
+    }
+  },
+
+  "summary": {
+    "durable_stores": 5,
+    "memory_authority_migrations": 10,
+    "memory_authority_tables": 42,
+    "memory_authority_fts5_virtual_tables": 4,
+    "memory_authority_triggers": 2,
+    "memory_authority_indexes": 32,
+    "migration_checksum_baseline_algorithm": "SHA-256 of file bytes (runtime records BLAKE3 in schema_version)",
+    "separate_migration_lineages": 2,
+    "flagged_counts": {"competing_authority": 6, "direct_sql_tables_bypassing_policy": 21, "free_text_links": 4, "mutable_events": 5, "obsolete_ann": 5},
+    "notable_findings_for_F1_schema_cutover": [
+      "synchronous=NORMAL vs design-required FULL for authority commits (MGR-033 durability).",
+      "Only events + memory_audit are governed; ~21 authority tables are written by direct AuthorityTx SQL outside WritePolicy (MGR-035 bypass).",
+      "events is the ONLY append-only table (2 triggers); memory_audit + feedback_events are mutable and no graph_revisions/authority_meta ledger exists.",
+      "Legacy memory_facts (0005) + world_facts (kria.db) are competing fact authorities alongside memories; prime F1 cutover/reset targets.",
+      "relationships.rel_type free-text + parallel untyped link tables (contradicts/supports/derived_from/mentions_entity) violate the relation_registry model (MGR-034).",
+      "shred_keys is a bare status flag missing key_version/algorithm/destruction_method/proof_hash (MGR-041).",
+      "mem_vectors lacks dim CHECK + embedding_partitions manifest; FTS/vector indexes are code-maintained (no content triggers/manifest) — MGR-042 convergence risk.",
+      "AnnVectorStore (HNSW) is the live vector path; SqliteVectorStore + IndexTarget::LanceDb/Tantivy + vectors.usearch are dormant/obsolete ANN artifacts."
+    ]
+  }
+}

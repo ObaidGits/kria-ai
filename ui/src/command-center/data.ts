@@ -13,14 +13,6 @@
 
 export type StatusTone = "online" | "active" | "standby" | "idle" | "warn" | "offline";
 
-export interface NavItem {
-  id: string;
-  label: string;
-  icon: string;
-  badge?: number;
-  active?: boolean;
-}
-
 export interface OverviewRow {
   id: string;
   icon: string;
@@ -74,23 +66,6 @@ export const BRAND = {
   coreSub: "A I   C O R E",
   coreVersion: "v3.0.0",
 };
-
-/**
- * The real KRIA navigation: the canonical 7 Spaces (shell/router `Space` +
- * shell/spaces `SPACE_META`). `id` is the actual Space id so the dock can route
- * through the real router; icons map SPACE_META's lucide ids onto the local
- * CcIcon glyph set (message-circle→chat, workflow→flow, sparkles→spark,
- * monitor→monitor, activity→activity).
- */
-export const NAV_ITEMS: NavItem[] = [
-  { id: "converse", label: "Converse", icon: "chat", active: true },
-  { id: "memory", label: "Memory", icon: "brain" },
-  { id: "automations", label: "Automations", icon: "flow" },
-  { id: "capabilities", label: "Capabilities", icon: "spark" },
-  { id: "machines", label: "Machines", icon: "monitor" },
-  { id: "observatory", label: "Observatory", icon: "activity" },
-  { id: "settings", label: "Settings", icon: "gear" },
-];
 
 export const OVERVIEW: OverviewRow[] = [
   { id: "core", icon: "core", label: "AI Core", detail: "Active", tone: "active" },

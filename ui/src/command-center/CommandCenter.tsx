@@ -1,10 +1,9 @@
 /**
- * CommandCenter — the full HUD homepage (frontend-only demo).
+ * CommandCenter — the embedded HUD homepage.
  *
- * Three-column command layout matching the reference: a pinned SideDock (left),
- * the Core presence flow (centre: Globe + Orbit → Presence → Composer → Chips →
- * Context card), and a StatusRail (right: clock, context overview, active status,
- * focus suggestion, recent activity), framed by a top bar and a bottom bar.
+ * Two-column command layout: the Core presence flow (centre: Globe + Orbit →
+ * Composer → Cards) and StatusRail (right), framed by a contextual strip. The
+ * shared shell owns global navigation, modes, approvals, and notifications.
  *
  * Pure presentation with STATIC demo data (`./data`). No backend, no stores, no
  * execution. Mounted by the surface router (`app/SurfaceHost`) as the "home"
@@ -14,126 +13,185 @@
  * Composer, Context Overview); ⌥⇧C cycles context (demo signal), ESC dismisses
  * the one contextual surface.
  */
-import { onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { CcIcon } from "./CcIcon";
 import { Globe } from "./Globe";
-import { reducedMotion } from "./parts";
-import { PresenceLine } from "./PresenceLine";
+import { reducedMotion, useClock } from "./parts";
 import { HomeComposer } from "./HomeComposer";
 import { ActionChips } from "./ActionChips";
-import { ContextSurface } from "./ContextSurface";
-import { SideDock } from "./SideDock";
+import { ActiveContextCard, NowCard, SystemReadinessCard, WorkstreamCard } from "./CenterCards";
 import { StatusRail } from "./StatusRail";
 import { Orbit } from "./Orbit";
 import { ContextPanel } from "./ContextPanel";
-import { BOTTOM, BRAND } from "./data";
+import { BRAND } from "./data";
 import { activeCapability, closeCapability } from "./homeNav";
-import { currentContext, cycleContext } from "./context";
+import { shellStore } from "../stores";
+import {
+  coreState,
+  currentCognition,
+  currentContext,
+  cycleContext,
+  setActiveIntent,
+  setCoreState,
+} from "./context";
 import "./command-center.css";
 
 export function CommandCenter() {
   const isStatic = reducedMotion();
+  const clock = useClock();
+  const [coreFocused, setCoreFocused] = createSignal(false);
+  const cognitionTimers: number[] = [];
 
-  // ⌥⇧C cycles the demo context; ESC dismisses the contextual surface.
+  const clearCognitionTimers = () => {
+    while (cognitionTimers.length) window.clearTimeout(cognitionTimers.pop());
+  };
+  const focusCommand = () => document.getElementById("cc-command-input")?.focus();
+  const focusCoreToggle = () => document.querySelector<HTMLButtonElement>(".cc-core-focus-trigger")?.focus();
+  const greeting = () => {
+    clock.time();
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  };
+  const toggleCoreFocus = () => {
+    const next = !coreFocused();
+    setCoreFocused(next);
+    queueMicrotask(next ? focusCommand : focusCoreToggle);
+  };
+  const restoreCoreCards = () => {
+    setCoreFocused(false);
+    queueMicrotask(focusCoreToggle);
+  };
+
+  const handleIntent = (value: string) => {
+    clearCognitionTimers();
+    setActiveIntent(value);
+    setCoreState("thinking");
+    cognitionTimers.push(window.setTimeout(() => setCoreState("retrieving"), 650));
+    cognitionTimers.push(window.setTimeout(() => setCoreState("executing"), 1350));
+    cognitionTimers.push(window.setTimeout(() => setCoreState("idle"), 2600));
+  };
+
+  const handleListening = (active: boolean) => {
+    clearCognitionTimers();
+    setCoreState(active ? "listening" : "idle");
+  };
+
   onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.altKey && e.shiftKey && e.key.toLowerCase() === "c") {
-        e.preventDefault();
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        focusCommand();
+        return;
+      }
+      if (event.altKey && event.shiftKey && event.key.toLowerCase() === "c") {
+        event.preventDefault();
         cycleContext();
         return;
       }
-      if (e.key === "Escape" && activeCapability()) {
-        e.preventDefault();
-        closeCapability();
+      if (event.key === "Escape") {
+        if (activeCapability()) {
+          event.preventDefault();
+          closeCapability();
+          return;
+        }
+        if (coreState() === "listening") {
+          event.preventDefault();
+          setCoreState("idle");
+          return;
+        }
+        if (coreFocused()) {
+          event.preventDefault();
+          restoreCoreCards();
+        }
       }
     };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    // Capture ensures this overlay layer consumes Escape before the shell-level
+    // Immersive exit listener, independent of component mount order.
+    window.addEventListener("keydown", onKey, { capture: true });
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey, { capture: true });
+      clearCognitionTimers();
+    });
   });
 
   return (
-    <div class="cc cc--full" data-reduced-motion={isStatic ? "on" : "off"} data-region="command-center">
-      {/* Cinematic environment — the compressed landscape photo behind the Orb,
-          darkened + core-bloomed so it supports the interface (offline asset). */}
+    <div
+      class="cc cc--full"
+      data-core-state={coreState()}
+      data-core-focus={coreFocused() ? "on" : "off"}
+      data-view-mode={shellStore.windowMode()}
+      data-reduced-motion={isStatic ? "on" : "off"}
+      data-region="command-center"
+    >
       <div class="cc-env" aria-hidden="true" />
 
-      {/* ── Top status bar ─────────────────────────────────────────── */}
-      <header class="cc-topbar">
-        <div class="cc-topbar__brand">
-          <span class="cc-emblem"><CcIcon name="hexlogo" size={22} /></span>
-          <div class="cc-brand-text">
-            <strong>{BRAND.name}</strong>
-            <span>{BRAND.tagline}</span>
-          </div>
+      <header class="cc-topbar" aria-label="KRIA command strip">
+        <div class="cc-os-status">
+          <span class="cc-emblem"><CcIcon name="hexlogo" size={19} /></span>
+          <span class="cc-os-status__copy"><b>{BRAND.name}</b><small><i />{currentCognition().stateLabel}</small></span>
         </div>
-        <label class="cc-search">
-          <CcIcon name="search" size={16} />
-          <input type="text" placeholder="Search or ask KRIA…" aria-label="Search or ask KRIA" />
-          <kbd class="cc-search__kbd">⌘K</kbd>
-        </label>
-        <button
-          type="button"
-          class="cc-ctx"
-          onClick={cycleContext}
-          aria-label={`Current context: ${currentContext().label}. Activate to change context.`}
-        >
-          <span class="cc-dot cc-dot--active" /> CONTEXT · <b>{currentContext().label.toUpperCase()}</b>
+
+        <button type="button" class="cc-os-context" onClick={cycleContext} aria-label={`Current context: ${currentContext().label}. Activate to change context.`}>
+          <span class="cc-os-greeting">{greeting()}</span>
+          <span class="cc-os-path"><b>KRIA Homepage</b><CcIcon name="chevron" size={10} /><span>{currentContext().label}</span></span>
         </button>
+
         <div class="cc-topbar__right">
-          <button type="button" class="cc-icon-btn cc-icon-btn--notify" aria-label="Notifications"><CcIcon name="bell" /></button>
-          <button type="button" class="cc-icon-btn" aria-label="Activity"><CcIcon name="waveform" /></button>
-          <button type="button" class="cc-icon-btn" aria-label="Appearance"><CcIcon name="sun" /></button>
-          <button type="button" class="cc-profile">
-            <span class="cc-profile__avatar"><CcIcon name="hexlogo" size={16} /></span>
-            <span class="cc-profile__text"><b>Operator</b><span>Commander</span></span>
-            <CcIcon name="chevron" size={13} class="cc-profile__chev" />
-          </button>
+          <time class="cc-os-date" datetime={new Date().toISOString()}>{clock.date()}</time>
         </div>
       </header>
 
-      {/* ── Left pinned dock ───────────────────────────────────────── */}
-      <SideDock />
-
-      {/* ── Centre: the Core presence flow ─────────────────────────── */}
-      <main class="cc-content" aria-label="Home">
-        <div class="cc-corezone">
-          <section class="cc-hero">
+      <main id="space-root" class="cc-content cc-home-main" tabindex={-1} aria-label="Home">
+        <div class="cc-corezone" data-state={coreState()}>
+          <div class="cc-corefield" aria-hidden="true">
+            <i class="cc-corefield__ring cc-corefield__ring--one" />
+            <i class="cc-corefield__ring cc-corefield__ring--two" />
+            <i class="cc-corefield__wave" />
+            <span /><span /><span /><span /><span /><span /><span /><span />
+          </div>
+          <section class="cc-hero" aria-label={`KRIA Core: ${currentCognition().stateLabel}`}>
             <Globe />
             <div class="cc-hero__label" aria-hidden="true">
               <span class="cc-hero__title">{BRAND.coreTitle}</span>
-              <span class="cc-hero__sub">{BRAND.coreSub}</span>
-              <span class="cc-hero__rule" />
+              <span class="cc-hero__state"><i />{currentCognition().stateLabel}</span>
+              <span class="cc-hero__insight">{coreState() === "idle" ? currentContext().objective : currentCognition().activity}</span>
             </div>
           </section>
+          <Show when={shellStore.windowMode() !== "mini"}>
+            <button
+              type="button"
+              class="cc-core-focus-trigger"
+              aria-label={coreFocused() ? "Show Core cards" : "Hide Core cards and focus the Orb"}
+              aria-pressed={coreFocused()}
+              title={coreFocused() ? "Show cards · Esc" : "Focus Core"}
+              onClick={toggleCoreFocus}
+            >
+              <span><CcIcon name="focus" size={13} />{coreFocused() ? "Show cards" : "Focus Core"}</span>
+            </button>
+          </Show>
           <Orbit />
         </div>
-        <div class="cc-presence">
-          <PresenceLine />
-          <div class="cc-presence__sub">
-            <span>{currentContext().sub}</span>
-            <span class="cc-focus-badge"><span class="cc-dot cc-dot--online" /> Optimal Focus</span>
-          </div>
-          <HomeComposer />
-          <ActionChips />
-          <ContextSurface />
+
+        <div class="cc-cognition-thread" data-state={coreState()} aria-hidden="true"><span /><i /><span /></div>
+        <NowCard onIntent={handleIntent} />
+
+        <section class="cc-command-zone" aria-label="Command KRIA">
+          <HomeComposer state={coreState()} onIntent={handleIntent} onListeningChange={handleListening} />
+          <ActionChips onSelect={handleIntent} />
+        </section>
+
+        <ActiveContextCard onIntent={handleIntent} />
+
+        <div class="cc-home-lower">
+          <WorkstreamCard onIntent={handleIntent} />
+          <SystemReadinessCard />
         </div>
       </main>
 
-      {/* ── Right status rail ──────────────────────────────────────── */}
-      <StatusRail />
-
-      {/* One contextual surface emerges from the Core (One-Surface Rule). */}
+      <StatusRail onIntent={handleIntent} />
       <ContextPanel />
-
-      {/* ── Bottom bar ─────────────────────────────────────────────── */}
-      <footer class="cc-bottombar">
-        <div class="cc-bottombar__stats">
-          <span class="cc-stat"><span class="cc-stat__k"><CcIcon name="pin" size={13} /> {BOTTOM.location}</span></span>
-          <span class="cc-stat"><span class="cc-stat__k"><CcIcon name="cloud" size={13} /> {BOTTOM.weather}</span></span>
-          <span class="cc-stat"><span class="cc-stat__k">SYSTEM STATUS · All Systems Operational</span></span>
-        </div>
-        <button type="button" class="cc-brief"><CcIcon name="brief" size={15} /> Executive Briefing</button>
-      </footer>
     </div>
   );
 }

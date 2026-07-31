@@ -1,0 +1,444 @@
+{
+  "schema": "memory-graph.read-paths.inventory/v1",
+  "task": "0.3.2 Trace all memory/graph/search/analytics/trace/export reads, cache keys, serialization boundaries, and client-side filtering assumptions.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T18:41:07Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": ["MGR-004", "MGR-006", "MGR-007", "MGR-011", "MGR-025", "MGR-008", "MGR-009"],
+  "design_refs": ["design.md §5 (scope/sensitivity isolation)", "design.md §16 (search)", "design.md §19 (retriever)", "design.md §28 (observability)", "requirements.md MGR-004/006/007/011/025"],
+  "predecessor_artifact": "evidence/F0/f0-inventory/reports/write-paths.json (0.3.1 writer inventory + store/handle map STORE-kria_memory_db etc.)",
+  "method": "Static source trace of read primitives (Database::with_read, store query methods, retriever fusion, analytics engines, observability, change-stream broadcast, backup/VACUUM INTO) from LIVE composition roots (MemorySystem::assemble api.rs:273-328, desktop Tauri invoke_handler commands/memory.rs, server Axum memory_routes.rs, UI graphData.ts/graphModel.ts bridgeInvoke). For each read path: WHERE Effective_Policy/authorization is applied relative to planning/count/rank/serialize/cache/render, cache keys, serialization (DTO) boundaries, and client-side filtering assumptions. Classification requires a live registration/composition root; unresolved facts recorded Unknown. No secrets copied.",
+  "invariants_applied": [
+    "Dormant code/comments/tests are not capability proof — classification traced to LIVE composition roots (api.rs assemble, invoke_handler, .route, bridgeInvoke).",
+    "MGR-004.4: Effective_Policy MUST be enforced BEFORE query planning, result counts, ranking, serialization, caching, and rendering.",
+    "MGR-004.2: derived/aggregate reads use the MOST RESTRICTIVE contributing policy (Effective_Policy).",
+    "MGR-006: one honest full-corpus ranked search with result kind/matched field/rank rationale/policy summary/Truth_State/Graph_Revision and honest N-of-M count semantics.",
+    "MGR-007: versioned bounded graph API with schema version, Graph_Revision, query hash, window metadata, truncation, cursor; policy-filtered before every expansion; ≤3 hops.",
+    "MGR-011: analytics named by what they compute (connected components = `component`, not `community`); algorithm/version/params/revision/quality metadata attached.",
+    "MGR-025: policy-safe Retrieval_Trace persisted/returned with strategy candidates, fusion contributions, gating decisions, token allocation, model versions, context-injected identifiers."
+  ],
+
+  "live_composition_roots": {
+    "retriever_assembly": "crates/kria-core/src/memory/api.rs:273-328 — vectors=AnnVectorStore (LIVE VectorStore), search=SqliteSearchStore (LIVE SearchStore, FTS5), Retriever::new(relational, vectors, search, embedder).with_weight_store(RetrievalWeightStore).",
+    "dormant_vector_store": "crates/kria-core/src/memory/stores/sqlite_vectors.rs SqliteVectorStore is NOT wired at the composition root (AnnVectorStore replaced it); it survives as a brute-force reference/test double. Not a live read path.",
+    "desktop_read_commands": "crates/kria-desktop/src/commands/memory.rs registered in the Tauri invoke_handler (main.rs): memory_search/recall/reason/health/metrics/graph_centrality/graph_communities/graph_neighbors/graph_relationships/graph_search/graph_predict_links/explain/health_report.",
+    "server_read_routes": "crates/kria-server/src/memory_routes.rs memory_routes(): GET /memory/{events,search,reason,health,metrics,timeline,goals,plans,reasoning,research,graph,library,explain,report}; mounted under CorsLayer::permissive() with auth.rs pass-through for missing Authorization header (see 0.3.1 security_note).",
+    "shared_contract": "crates/kria-core/src/memory/contract.rs — single JSON shaping for both hosts (search/reason/graph/timeline/goals/plans/reasoning/research/library/explain/health/metrics).",
+    "ui_read_layer": "ui/src/shell/spaces/memory/graph/graphData.ts (bridgeInvoke memory_graph_*), graphModel.ts (cap/community-index/color mapping), MemoryUniverse.tsx / MemoryGraphFallback / KnowledgeGraphLens; ui/src/shell/spaces/memory/MemoryInspector.tsx (memory_explain)."
+  },
+
+  "policy_read_model_observation": {
+    "scope_filter": "crates/kria-core/src/memory/types.rs:829 ScopeFilter { namespaces, scopes, include_secret }; allows() at :851. Empty namespaces = NO namespace restriction; empty scopes = NO scope restriction (Global always allowed); include_secret default false.",
+    "retrieval_ctx": "crates/kria-core/src/memory/retriever.rs:98 RetrievalCtx { namespaces, scopes, include_secret=false, token_budget=800 } — CALLER-SUPPLIED, not derived from an authenticated caller identity/owner. api.rs:487 search(query, ctx: Option<RetrievalCtx>) defaults ctx=None → include_secret=false + empty namespaces/scopes (no per-caller authorization).",
+    "critical_gap": "There is NO Effective_Policy engine mediating reads. The only read-side gate is ScopeFilter, and it is (a) built from caller-supplied RetrievalCtx (never from identity/owner/scope of the requester), (b) applied ONLY on the retriever search path (vector + FTS), and (c) NOT applied at all on graph traversal, graph analytics, explain-by-id, aggregate health/metrics, change-stream, or export/backup. All live desktop/server search commands pass ctx=None (static default), so 'policy' is a constant, not MGR-004.2 most-restrictive Effective_Policy."
+  },
+
+  "read_paths": [
+    {
+      "id": "R-retriever-search",
+      "category": "search (hybrid retriever — MGR-006)",
+      "source": "crates/kria-core/src/memory/retriever.rs:178 Retriever::search",
+      "call_chain": "MemorySystem::search/recall/reason (api.rs:487) -> Retriever::search -> classify_query + learned/default RRF weights -> vectors.search(model,qvec,CANDIDATE_K,&filter) + search.query(query,CANDIDATE_K,&filter) -> RRF fuse -> relational.get_memory(id) per candidate -> state gate (Active|Promoted) + filter.allows() defense-in-depth + Memory-Worth re-rank -> token-budget fill.",
+      "store_query": "STORE-kria_memory_db: mem_vectors (via AnnVectorStore), memories_fts (via SqliteSearchStore), memories (via RelationalStore::get_memory).",
+      "policy_enforcement": {
+        "where": "PARTIAL / MIXED. Vector store filters scope+namespace+sensitivity BEFORE top-k truncation (source-side, pre-rank-cut). FTS store filters namespace ONLY when exactly one namespace is supplied and applies NO scope/sensitivity filter (ranks pre-policy). Retriever re-applies filter.allows() AND state gate AFTER fusion (post-rank defense-in-depth).",
+        "relative_to_pipeline": "policy is applied pre-serialization but the FTS candidate ranking (bm25) and the fused candidate COUNT are computed over rows not yet scope/sensitivity-filtered; secret/out-of-scope FTS rows enter the candidate pool and are dropped only post-fusion. So counts/rank ordering see pre-policy rows (violates MGR-004.4 'before ranking, result counts').",
+        "identity_derived": false
+      },
+      "cache_keys": "none — no result cache; recomputed each call. Adaptive RRF weights read from retrieval_weights (RetrievalWeightStore) are NOT keyed by policy/identity/revision (global per query-class).",
+      "serialization_boundary": "RetrievalResult{hits:RetrievalHit, trace:RetrievalTrace} (in-crate). Crosses host boundary via contract::hit_json (see R-desktop-search / R-server-search).",
+      "client_side_filtering_assumptions": "none at this layer.",
+      "classification": "Current",
+      "evidence": "retriever.rs:178-292; api.rs:273-328 live assembly; sqlite_search.rs query() single-namespace-only; ann_vectors.rs search filter.allows.",
+      "findings": ["FTS candidate set + fused candidate count computed pre-scope/sensitivity (policy-after-rank at the FTS store).", "ScopeFilter is caller-supplied, not Effective_Policy from identity.", "RetrievalTrace is ephemeral (see R-retrieval-trace / MGR-025)."],
+      "target_gate": "F3 (MGR-006 honest search) / F1 (MGR-004 policy-before-rank)"
+    },
+    {
+      "id": "R-fts-query",
+      "category": "search (FTS5 keyword floor)",
+      "source": "crates/kria-core/src/memory/stores/sqlite_search.rs SqliteSearchStore::query",
+      "call_chain": "Retriever::search -> SearchStore::query(query,k,&filter) -> Database::with_read -> bm25(memories_fts) MATCH ... [AND namespace = ? only if ns_filter.len()==1] ORDER BY bm25 LIMIT k.",
+      "store_query": "STORE-kria_memory_db: memories_fts.",
+      "policy_enforcement": {
+        "where": "PARTIAL — namespace equality only when EXACTLY one namespace supplied. NO scope filter, NO sensitivity filter, NO include_secret gate at this layer. bm25 ranking + LIMIT happen BEFORE any scope/sensitivity policy.",
+        "relative_to_pipeline": "policy-after-ranking (and after LIMIT truncation) — the k-truncated bm25 set can be dominated by out-of-scope/secret rows, starving authorized results; retriever drops them post-hoc but cannot recover the truncated authorized rows.",
+        "identity_derived": false
+      },
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<SearchHit{id,score}> (in-crate).",
+      "client_side_filtering_assumptions": "n/a",
+      "classification": "Current",
+      "evidence": "sqlite_search.rs query(): single_ns branch; no scope/sensitivity columns in memories_fts (namespace is the only policy column indexed).",
+      "findings": ["MGR-004.4 leak vector: bm25 rank + top-k computed over unauthorized rows; multi-namespace or zero-namespace requests apply NO namespace filter at the FTS layer.", "memories_fts carries only namespace, not scope/sensitivity — full policy filtering is structurally impossible at the FTS layer without a schema/join change."],
+      "target_gate": "F1/F3 (MGR-004 policy-before-rank; MGR-006 partial-strategy honesty)"
+    },
+    {
+      "id": "R-vector-search",
+      "category": "search (ANN vector — LIVE)",
+      "source": "crates/kria-core/src/memory/stores/ann_vectors.rs AnnVectorStore::search (brute_force + ann_search)",
+      "call_chain": "Retriever::search -> VectorStore::search(model,qvec,k,&filter) -> partition (HNSW or brute-force) -> filter.allows(ns,scope,sensitivity) applied per candidate BEFORE top-k truncation; ANN over-fetches (ef=max(64,k*4)) so scope filtering + tombstones don't starve top-k.",
+      "store_query": "STORE-kria_memory_db: mem_vectors (model_version-partitioned; scope/sensitivity/namespace columns carried in-RAM VecMeta).",
+      "policy_enforcement": {
+        "where": "FULL scope+namespace+sensitivity filter applied at the source BEFORE ranking truncation (correct order for this strategy).",
+        "relative_to_pipeline": "policy-before-rank-cut — the strongest read path.",
+        "identity_derived": false
+      },
+      "cache_keys": "in-RAM HNSW partition per model_version — an index cache, NOT a result cache; not policy/identity/revision keyed (filtering happens at query time over the full partition, so no leak).",
+      "serialization_boundary": "Vec<VectorHit{id,score}> (in-crate).",
+      "client_side_filtering_assumptions": "n/a",
+      "classification": "Current",
+      "evidence": "api.rs:274 AnnVectorStore::new live; ann_vectors.rs brute_force:172 / ann_search:186 filter.allows before push/truncate.",
+      "findings": ["Filter still caller-supplied (not Effective_Policy); include_secret governed only by RetrievalCtx default false."],
+      "target_gate": "F1 (identity-derived Effective_Policy)"
+    },
+    {
+      "id": "R-vector-search-dormant",
+      "category": "search (brute-force vector — NOT wired)",
+      "source": "crates/kria-core/src/memory/stores/sqlite_vectors.rs SqliteVectorStore::search",
+      "call_chain": "not registered at api.rs assemble (AnnVectorStore is live); referenced only in tests/reference.",
+      "store_query": "STORE-kria_memory_db: mem_vectors.",
+      "policy_enforcement": {"where": "filter.allows before truncate (same as ANN)", "relative_to_pipeline": "n/a (dormant)", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<VectorHit>.",
+      "client_side_filtering_assumptions": "n/a",
+      "classification": "Unavailable",
+      "evidence": "api.rs:274 wires AnnVectorStore, not SqliteVectorStore; sqlite_vectors.rs only in #[cfg(test)] / reference use.",
+      "findings": ["Dormant; not capability proof (invariant)."],
+      "target_gate": "F3 (delete or reconcile as reference)"
+    },
+    {
+      "id": "R-graph-neighbors",
+      "category": "graph read/traversal (MGR-007)",
+      "source": "crates/kria-core/src/memory/stores/sqlite_graph.rs SqliteGraphStore::neighbors",
+      "call_chain": "desktop memory_graph_neighbors (memory.rs:788) -> MemorySystem::graph_neighbors (api.rs:769) -> SqliteGraphStore::neighbors(root,max_hops) -> BFS over relationships_for(node), visited-set cycle guard, depth cap max_hops.min(MAX_HOPS_CAP).",
+      "store_query": "STORE-kria_memory_db: relationships, entities (get_entity per hop).",
+      "policy_enforcement": {
+        "where": "NONE. No ScopeFilter parameter exists on graph_neighbors; no scope/sensitivity/namespace check before or during expansion.",
+        "relative_to_pipeline": "policy is never applied — traversal, endpoint resolution, and serialization all run over unfiltered graph.",
+        "identity_derived": false
+      },
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<GraphHit{entity,distance,path}> -> serde_json::to_value (memory.rs:799) — ad-hoc, NOT a versioned DTO; no schema version, Graph_Revision, query hash, window metadata, or truncation-reason (MGR-007.2 gap).",
+      "client_side_filtering_assumptions": "UI assumes server returned only authorized nodes; it does not (see R-ui-graphData).",
+      "classification": "Current",
+      "evidence": "sqlite_graph.rs:144 neighbors; api.rs:769 no filter arg; memory.rs:788.",
+      "findings": ["MGR-004.4/MGR-007.5 leak: relationship traversal is NOT policy-filtered before every expansion; MAX_HOPS_CAP bounds hops (MGR-007.5 ≤3 partially held) but frontier/truncation metadata and hidden-identifier suppression are absent.", "entities/relationships tables have no scope/sensitivity policy applied on read at all."],
+      "target_gate": "F2/F3 (MGR-007 bounded policy-filtered graph API)"
+    },
+    {
+      "id": "R-graph-relationships",
+      "category": "graph read",
+      "source": "crates/kria-core/src/memory/stores/sqlite_graph.rs relationships_for",
+      "call_chain": "desktop memory_graph_relationships (memory.rs:802) + neighbors BFS -> relationships_for(entity) -> SELECT * FROM relationships WHERE source_id=?1 OR target_id=?1.",
+      "store_query": "STORE-kria_memory_db: relationships.",
+      "policy_enforcement": {"where": "NONE — returns all incident edges regardless of policy.", "relative_to_pipeline": "never applied.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<Relationship> -> serde_json::to_value (memory.rs:813) — raw domain struct serialized ad-hoc; no policy summary, no revision.",
+      "client_side_filtering_assumptions": "UI expand() (graphData.ts) adds ANY relationship endpoint as a node with no policy check.",
+      "classification": "Current",
+      "evidence": "sqlite_graph.rs:181; memory.rs:802.",
+      "findings": ["MGR-004 leak: edge endpoints (ids) and rel_type exposed unfiltered; feeds UI node injection."],
+      "target_gate": "F2/F3"
+    },
+    {
+      "id": "R-graph-search-entities",
+      "category": "graph read (entity browser)",
+      "source": "crates/kria-core/src/memory/stores/sqlite_graph.rs search_entities",
+      "call_chain": "desktop memory_graph_search (memory.rs:815) -> MemorySystem::graph_search_entities (api.rs:790) -> SELECT ... FROM entities WHERE display_name LIKE %q% OR alias LIKE %q% LIMIT 50.",
+      "store_query": "STORE-kria_memory_db: entities, entity_aliases.",
+      "policy_enforcement": {"where": "NONE. LIKE match + hard LIMIT 50, no scope/sensitivity filter.", "relative_to_pipeline": "never applied; LIMIT truncates pre-policy.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<Entity> -> serde_json::to_value (memory.rs:826) ad-hoc.",
+      "client_side_filtering_assumptions": "n/a",
+      "classification": "Current",
+      "evidence": "sqlite_graph.rs:199; api.rs:790; memory.rs:815.",
+      "findings": ["MGR-004 leak: entity display_name/alias search returns any entity; separate uncoordinated substring search from the full-corpus retriever (MGR-006.1 wants entities/aliases inside one ranked search)."],
+      "target_gate": "F2/F3"
+    },
+    {
+      "id": "R-graph-centrality",
+      "category": "analytics (centrality — MGR-011.3)",
+      "source": "crates/kria-core/src/memory/graph_intel.rs:120 degree_centrality",
+      "call_chain": "desktop memory_graph_centrality (memory.rs:747) + server /memory/graph (contract::graph) + UI graphData.load -> GraphIntelligence::degree_centrality(limit) -> SELECT e.id,e.display_name,COUNT(edges) ... FROM entities LEFT JOIN relationships (valid_until IS NULL) GROUP BY e.id ORDER BY degree DESC LIMIT ?1.",
+      "store_query": "STORE-kria_memory_db: entities, relationships (active edges).",
+      "policy_enforcement": {"where": "NONE. Aggregates over ALL entities/edges; no scope/sensitivity filter; LIMIT truncates pre-policy.", "relative_to_pipeline": "policy never applied to counts/ranking/serialization.", "identity_derived": false},
+      "cache_keys": "none — recomputed each call (no revision-keyed analytics cache; MGR-009.4 unimplemented).",
+      "serialization_boundary": "Vec<CentralityHit{entity,display_name,degree}> -> json {nodes,count} (memory.rs:757 / contract.rs graph). Algorithm name ('degree') is in code but NOT in the payload; no evaluated-scope, no Graph_Revision, no params (MGR-011.3 partial).",
+      "client_side_filtering_assumptions": "UI treats returned nodes as full authorized set and computes 'showing N of M' from this already-limited payload (see R-ui-graphData).",
+      "classification": "Current",
+      "evidence": "graph_intel.rs:120; memory.rs:747; contract.rs graph().",
+      "findings": ["MGR-004 leak: centrality computed over unauthorized nodes/edges.", "MGR-011.3: algorithm name/scope not emitted in payload."],
+      "target_gate": "F2/F3 (MGR-011 vocabulary+metadata, MGR-004 policy)"
+    },
+    {
+      "id": "R-graph-communities",
+      "category": "analytics (connected components mislabeled — MGR-011.1)",
+      "source": "crates/kria-core/src/memory/graph_intel.rs:166 communities",
+      "call_chain": "desktop memory_graph_communities (memory.rs:770) + UI graphData.load -> GraphIntelligence::communities() -> adjacency() over relationships (valid_until IS NULL) -> union-find connected components (singletons excluded).",
+      "store_query": "STORE-kria_memory_db: relationships (all active edges).",
+      "policy_enforcement": {"where": "NONE. adjacency() reads all edges; no scope/sensitivity filter.", "relative_to_pipeline": "never applied.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<Vec<Uuid>> -> json {communities:[[id...]], count} (memory.rs:770). NO algorithm name/version, params, graph predicate, Graph_Revision, or quality metadata (MGR-011.2 gap).",
+      "client_side_filtering_assumptions": "graphModel.ts buildCommunityIndex maps 'community' -> color-token index; memoryUniverseModel categoryForNode uses community; the mislabel propagates to the rendered UI.",
+      "classification": "Current",
+      "evidence": "graph_intel.rs:166 union-find; memory.rs:770 json key 'communities'; ui graphModel.ts/memoryUniverseModel.ts consume 'communities'.",
+      "findings": ["MGR-011.1 VOCABULARY VIOLATION: the algorithm is connected-components (union-find) but is named 'community'/'communities' in code, contract JSON, and UI — must be `component`.", "MGR-011.2: if it were true community detection it would still lack named algorithm/version/params/predicate/revision/quality — none are attached.", "MGR-004 leak: components computed over unauthorized edges."],
+      "target_gate": "F0/F2/F3 (MGR-011 rename to component end-to-end)"
+    },
+    {
+      "id": "R-graph-predict-links",
+      "category": "analytics (Adamic-Adar link prediction)",
+      "source": "crates/kria-core/src/memory/graph_intel.rs:215 predict_links",
+      "call_chain": "desktop memory_graph_predict_links (memory.rs:965) + UI expand -> MemorySystem::graph_predict_links (api.rs:801) -> GraphIntelligence::predict_links(entity,limit) -> adjacency() -> Adamic-Adar score of non-neighbors.",
+      "store_query": "STORE-kria_memory_db: relationships, entities (display_name).",
+      "policy_enforcement": {"where": "NONE. adjacency over all edges; no scope/sensitivity filter.", "relative_to_pipeline": "never applied.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "Vec<LinkPrediction{target,display_name,score,shared_neighbors}> -> json {predictions,count} (memory.rs:965). No revision, no algorithm/version metadata.",
+      "client_side_filtering_assumptions": "UI renders predicted edges distinctly and can materialize them via memory_graph_create_relationship; assumes prediction targets are authorized.",
+      "classification": "Current",
+      "evidence": "graph_intel.rs:215; api.rs:801; memory.rs:965.",
+      "findings": ["MGR-004 leak: predicts links to/among unauthorized entities and exposes their display_names.", "MGR-011.4: 'score' presented without grounded interpretation label."],
+      "target_gate": "F2/F3"
+    },
+    {
+      "id": "R-explain-memory",
+      "category": "observability / per-record read (MGR-025.7 'Why stored')",
+      "source": "crates/kria-core/src/memory/observability.rs:62 explain_memory",
+      "call_chain": "desktop memory_explain (memory.rs:1011) + server /memory/explain (contract::explain) -> MemorySystem::explain (api.rs:850) -> Observability::explain_memory(id) -> SELECT memory JOIN events by id + derived_from/contradicts/access history.",
+      "store_query": "STORE-kria_memory_db: memories, events, memory_derived_from, contradictions, access history.",
+      "policy_enforcement": {"where": "NONE. Reads any memory by id and returns full content, provenance source tag, worth, access history — no scope/sensitivity/namespace check.", "relative_to_pipeline": "never applied; serialized directly.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "MemoryExplanation -> json (contract.rs explain) -> Tauri/Axum; full content + source_event_tag exposed. No policy summary/Truth_State framing.",
+      "client_side_filtering_assumptions": "MemoryInspector.tsx fetches full detail via memory_explain and DISCLOSES every field, assuming the backend already authorized the record. Backend does not authorize — direct-by-id read of any memory (including secret) succeeds.",
+      "classification": "Current",
+      "evidence": "observability.rs:62; api.rs:850; contract.rs:207 explain; ui MemoryInspector.tsx.",
+      "findings": ["MGR-004 leak: explain-by-id bypasses policy entirely; a known/guessed id returns secret content and provenance.", "MGR-025.7: 'Why stored' data present but not separated from 'Why recalled'/'How used'."],
+      "target_gate": "F1 (MGR-004 policy on by-id reads)"
+    },
+    {
+      "id": "R-aggregate-health-metrics",
+      "category": "analytics / aggregate counts (MGR-004.5, MGR-011)",
+      "source": "crates/kria-core/src/memory/api.rs metrics()/CognitiveReport + observability.rs memory_health_report",
+      "call_chain": "desktop memory_health/memory_metrics/memory_health_report + server /memory/{health,metrics,report,goals,plans,reasoning,research,timeline} -> contract.rs -> aggregate SELECT COUNT/AVG over memories/goals/plans/reasoning/gaps.",
+      "store_query": "STORE-kria_memory_db: memories, goals, plans, reasoning_chains, knowledge_gaps, derived_outbox, etc.",
+      "policy_enforcement": {"where": "NONE. Global aggregates (COUNT/AVG) computed over the whole bank with no scope/sensitivity filter and no caller-authorized count/label projection.", "relative_to_pipeline": "policy never applied to counts.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "CognitiveReport/MemoryHealthReport/analytics structs -> json (contract.rs health/metrics/plans/reasoning/research/goals/timeline). Counts are unqualified totals.",
+      "client_side_filtering_assumptions": "UI health/metrics surfaces render these totals as-is.",
+      "classification": "Current",
+      "evidence": "api.rs metrics()/CognitiveReport:1265-1290; observability.rs MemoryHealthReport; contract.rs health/metrics/goals/plans/reasoning/research/timeline.",
+      "findings": ["MGR-004.5 gap: hidden records contribute to aggregate counts with no caller-authorized count/label projection.", "MGR-011: reasoning 'hallucination_rate' and plan 'success_rate' are derived metrics presented without algorithm/interpretation metadata (MGR-011.4 review)."],
+      "target_gate": "F1/F3"
+    },
+    {
+      "id": "R-retrieval-trace",
+      "category": "retrieval-use trace (MGR-025)",
+      "source": "crates/kria-core/src/memory/retriever.rs:126 RetrievalTrace (feeds contract trace_json)",
+      "call_chain": "Retriever::search builds RetrievalTrace{query_class,vector_used,fts_used,candidates,returned} -> returned inline in search/reason responses (contract.rs / memory.rs trace_json). NOT persisted.",
+      "store_query": "none — ephemeral, in-memory only.",
+      "policy_enforcement": {"where": "n/a — trace exposes only aggregate counts (candidates/returned) and boolean strategy flags; no per-item content.", "relative_to_pipeline": "n/a", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "RetrievalTrace -> json trace {query_class,vector_used,fts_used,candidates,returned}.",
+      "client_side_filtering_assumptions": "none.",
+      "classification": "Planned",
+      "evidence": "retriever.rs:124-140,281-289; contract.rs search trace; NO persistence table, NO per-item fusion contributions, NO gating decisions, NO token allocation, NO model versions, NO context-injected identifiers.",
+      "findings": ["MGR-025.1 gap: no policy-safe Retrieval_Trace with strategy candidates, per-item fusion contributions, gating decisions, token allocation, model versions, or context-injected identifiers is persisted or returned.", "MGR-025.2/.3/.6 gap: no Used_Item vs Retrieved_Filtered_Item vs available distinction; 'How used' context-injection proof absent.", "MGR-025.4 gap: filtered-item policy-safe reason codes absent (retriever silently 'continue's over filtered rows)."],
+      "target_gate": "F3/F4 (MGR-025 retrieval-use trace)"
+    },
+    {
+      "id": "R-desktop-search-commands",
+      "category": "desktop query commands (serialization boundary)",
+      "source": "crates/kria-desktop/src/commands/memory.rs:58 memory_search / :77 memory_recall / memory_reason",
+      "call_chain": "Tauri invoke -> memory_search(query,limit) -> MemorySystem::search(&query, None) [ctx=None!] -> hits.iter().take(limit) -> json {query,results,count=hits.len(),trace}.",
+      "store_query": "delegates to R-retriever-search.",
+      "policy_enforcement": {"where": "ctx=None → static default ScopeFilter (include_secret=false, no ns/scope restriction); NO caller identity.", "relative_to_pipeline": "as R-retriever-search (policy after FTS rank).", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "hit_json (contract.rs:24): {id,content,memory_type,confidence,importance,score,strategies}. MISSING MGR-006.2 fields: result kind, matched field, rank rationale, policy summary, Truth_State, Graph_Revision, navigation target. `count` = post-truncation hits.len(), NOT total M.",
+      "client_side_filtering_assumptions": "`limit` (default 20) applied CLIENT-SIDE in the command via .take() after the retriever already token-budget-truncated; the response count reflects the displayed slice, not corpus M — cannot honestly render 'showing N of M' / 'at least M' (MGR-006.3).",
+      "classification": "Current",
+      "evidence": "memory.rs:58-84; contract.rs hit_json/search; api.rs:487 search(_,None).",
+      "findings": ["MGR-006.2 DTO gap; MGR-006.3 count-semantics gap (no true total, no truncation semantics)."],
+      "target_gate": "F3/F4 (MGR-006 honest count + rich hit DTO)"
+    },
+    {
+      "id": "R-server-read-routes",
+      "category": "server query routes (threat boundary + serialization)",
+      "source": "crates/kria-server/src/memory_routes.rs memory_routes()",
+      "call_chain": "GET /memory/{search,reason,graph,explain,health,metrics,timeline,goals,plans,reasoning,research,library,report,events} -> contract.rs functions (same façade as desktop).",
+      "store_query": "delegates to the corresponding read paths above.",
+      "policy_enforcement": {"where": "NONE beyond the façade defaults. Routes mounted under CorsLayer::permissive() (lib.rs:90) and auth.rs passes through requests with NO Authorization header (0.3.1 security_note). No per-request identity → no Effective_Policy.", "relative_to_pipeline": "as delegated; server adds no policy.", "identity_derived": false},
+      "cache_keys": "none.",
+      "serialization_boundary": "identical JSON to desktop via contract.rs — one shape, but same missing MGR-006.2/MGR-007.2 fields.",
+      "client_side_filtering_assumptions": "any HTTP client; no server-side scope. If the server binds non-loopback, all read routes expose full-corpus memory/graph/analytics/explain unauthenticated.",
+      "classification": "Current",
+      "evidence": "memory_routes.rs:28-52,132-340; contract.rs; auth.rs pass-through (per 0.3.1).",
+      "findings": ["MGR-003/MGR-004: unauthenticated full-corpus read exposure over HTTP (search/graph/explain/report) if bound remotely — carried from 0.3.1 security_note, now confirmed on the READ surface."],
+      "target_gate": "F1 (MGR-003 server threat boundary, MGR-004 policy)"
+    },
+    {
+      "id": "R-change-stream-sse",
+      "category": "real-time read/subscription (MGR-008 revision, MGR-004 leak)",
+      "source": "crates/kria-server/src/memory_routes.rs:29 /memory/events (events_sse) + crates/kria-core/src/memory/api.rs:246 notify_change broadcast",
+      "call_chain": "MemorySystem::notify_change(kind,detail) -> tokio broadcast<MemoryChange> -> events_sse SSE stream (server) + desktop event bridge -> UI eventBus 'memory:updated' (KnowledgeGraphLens re-fetches).",
+      "store_query": "n/a (broadcast of change notifications).",
+      "policy_enforcement": {"where": "NONE. Change details are broadcast to ALL subscribers with no scope/sensitivity filter and no per-subscriber identity.", "relative_to_pipeline": "policy never applied to notification payloads.", "identity_derived": false},
+      "cache_keys": "n/a.",
+      "serialization_boundary": "MemoryChange{kind, detail:json}. detail payloads include entity ids + source/target ids (relationship), display_name (entity), and counts (deleted/goal/reflection) — e.g. api.rs:835 relationship detail {id,source,target}; :1419 entity {display_name}; :1391 deleted {count,hard}.",
+      "client_side_filtering_assumptions": "UI treats change events as triggers to re-fetch; it does not re-authorize but the leak is in the broadcast detail itself (ids/names/counts).",
+      "classification": "Current",
+      "evidence": "api.rs:246 notify_change; :835/:1391/:1419 detail payloads; memory_routes.rs:29 events_sse.",
+      "findings": ["MGR-004 leak: change-stream broadcasts ids, entity display_names, and counts with no policy filter and no auth (server SSE).", "MGR-008 gap: change events carry NO Graph_Revision / base-target revision / invalidation metadata — no revision concept exists anywhere (grep confirms). Clients cannot apply MGR-008 patch consistency; they blindly re-fetch."],
+      "target_gate": "F1 (MGR-004 policy-safe events) / F3-F5 (MGR-008 revisioned patches)"
+    },
+    {
+      "id": "R-export-backup",
+      "category": "export read (MGR-004 full dump)",
+      "source": "crates/kria-core/src/memory/db/mod.rs:124 backup_to (VACUUM INTO) + api.rs:1469 MemorySystem::backup",
+      "call_chain": "desktop/server /memory/backup -> MemorySystem::backup(dest) -> Database::backup_to -> VACUUM INTO a standalone SQLite copy of the ENTIRE authority.",
+      "store_query": "STORE-kria_memory_db: the whole file (events, memories, entities, relationships, goals, feedback, library, conversations, vectors, FTS, audit, shred_keys).",
+      "policy_enforcement": {"where": "NONE. Raw byte-for-byte authority copy — no scope/sensitivity filter, no redaction, includes Secret-sensitivity rows and all namespaces/scopes.", "relative_to_pipeline": "policy never applied; this is a full-corpus export.", "identity_derived": false},
+      "cache_keys": "n/a.",
+      "serialization_boundary": "standalone .db file (not a DTO). No policy-safe interchange contract applied.",
+      "client_side_filtering_assumptions": "n/a (server/desktop writes a file to a caller-supplied dest path).",
+      "classification": "Current",
+      "evidence": "db/mod.rs:124 backup_to; api.rs:1469 backup; memory_routes.rs backup handler.",
+      "findings": ["MGR-004.7 concern: 'export' cross-scope flow is a full raw dump; any caller with backup access exports all protected data.", "Note: pre-production dev-context accepts data-loss/backup simplicity, but the ISOLATION concern (secret content leaving via export) is still an MGR-004 leak surface for F1."],
+      "target_gate": "F1/F5"
+    },
+    {
+      "id": "R-interchange-export",
+      "category": "export/interchange read (policy-safe visual/interchange contract)",
+      "source": "crates/kria-eval/src/memory_graph/fixtures/{interchange_v2,visual_v2}.rs (seeds 0x4D475208/209)",
+      "call_chain": "fixture/eval scaffolding only — NO production desktop/server command or route was found that emits a policy-safe interchange/visual-scene export from live memory.",
+      "store_query": "n/a (test fixtures generate synthetic packages).",
+      "policy_enforcement": {"where": "n/a — not a live read path.", "relative_to_pipeline": "n/a", "identity_derived": false},
+      "cache_keys": "n/a.",
+      "serialization_boundary": "memory-graph-interchange/v2 + visual-scene contracts exist as fixture oracles (0.2.6), not wired to a live exporter.",
+      "client_side_filtering_assumptions": "n/a",
+      "classification": "Planned",
+      "evidence": "grep: 0x4D475208/209 only in crates/kria-eval fixtures; no live invoke_handler/.route interchange exporter.",
+      "findings": ["The policy-safe interchange/visual export contract is defined (F0.2) but has NO live production read path; the only live export is the raw backup (R-export-backup)."],
+      "target_gate": "F2-F5 (implement policy-safe interchange export)"
+    },
+    {
+      "id": "R-ui-graph-read-layer",
+      "category": "UI graph read layer (client-side filtering assumptions)",
+      "source": "ui/src/shell/spaces/memory/graph/graphData.ts + graphModel.ts + memoryUniverseModel.ts",
+      "call_chain": "graphData.load(cap) -> Promise.all[bridgeInvoke('memory_graph_centrality',{limit:cap}), bridgeInvoke('memory_graph_communities')] -> buildCommunityIndex + mapCentralityToNodes -> applyNodeCap(allNodes,cap) -> 'showing N of M'. graphData.expand(id) -> bridgeInvoke('memory_graph_relationships') + ('memory_graph_predict_links') -> injects endpoint nodes + predicted edges.",
+      "store_query": "delegates to R-graph-centrality / R-graph-communities / R-graph-relationships / R-graph-predict-links.",
+      "policy_enforcement": {"where": "NONE client-side (correctly — UI must not enforce policy) BUT the UI ASSUMES the backend already excluded protected data. Backend graph reads apply NO policy (see graph read paths). Net: UI renders unauthorized entities/edges.", "relative_to_pipeline": "n/a (render layer).", "identity_derived": false},
+      "cache_keys": "reactive signals (nodes/edges/capped); loadGeneration guard prevents stale async overwrite; NOT policy/identity/revision keyed.",
+      "serialization_boundary": "consumes snake_case façade payloads (CentralityPayload/CommunitiesPayload/PredictLinksPayload); no schema version or revision to validate against (MGR-007.2 gap on the client too).",
+      "client_side_filtering_assumptions": [
+        "LEAK-ASSUMPTION: UI assumes memory_graph_* payloads are already policy-filtered by the server; they are not — protected entities/edges/display_names render.",
+        "COUNT-DISHONESTY: 'showing N of M' M is derived from centrality payload length, which the backend already truncated to LIMIT=cap (degree_centrality LIMIT ?1). M is therefore the returned count, not the true entity-corpus total — the 'N of M' misrepresents totals (MGR-006.3/MGR-011 honesty).",
+        "expand() adds relationship endpoint ids as nodes (label id.slice(0,8)) with community -1 and materializes predicted links via memory_graph_create_relationship — trusting unfiltered backend edges."
+      ],
+      "classification": "Current",
+      "evidence": "graphData.ts load/expand; graphModel.ts applyNodeCap/buildCommunityIndex/DEFAULT_NODE_CAP; memoryUniverseModel.ts categoryForNode(community).",
+      "findings": ["MGR-004 client-side leak assumption confirmed (server does not exclude protected data).", "MGR-006.3 count dishonesty (M is a pre-limited number).", "MGR-011 vocabulary leak: 'community' propagated from backend into UI color/category model."],
+      "target_gate": "F2-F5 (MGR-004/006/011 corrected end-to-end)"
+    },
+    {
+      "id": "R-ui-memory-inspector",
+      "category": "UI record read (client-side disclosure)",
+      "source": "ui/src/shell/spaces/memory/MemoryInspector.tsx",
+      "call_chain": "select MemoryCard -> registerInspectorRenderer('memory') -> bridgeInvoke('memory_explain',{memoryId}) -> discloses every Req-5.2 field (sanitized).",
+      "store_query": "delegates to R-explain-memory.",
+      "policy_enforcement": {"where": "NONE client-side; assumes backend authorized the record. R-explain-memory does NOT authorize.", "relative_to_pipeline": "n/a", "identity_derived": false},
+      "cache_keys": "component-local fetch state.",
+      "serialization_boundary": "explain JSON; UI sanitizes text (XSS) but does not (and should not) re-authorize.",
+      "client_side_filtering_assumptions": "assumes memory_explain returns only authorized records; backend returns any record by id (leak).",
+      "classification": "Current",
+      "evidence": "MemoryInspector.tsx; MemoryInspector.test.tsx (memory_explain contract).",
+      "findings": ["MGR-004 leak assumption: inspector discloses full content/provenance trusting an unauthorized backend read."],
+      "target_gate": "F1"
+    }
+  ],
+
+  "summary": {
+    "total_read_path_entries": 16,
+    "by_classification": {"Current": 12, "Planned": 2, "Unavailable": 1, "Unknown": 0, "additional_dormant_noted": 1},
+    "policy_application_position": {
+      "policy_before_planning_count_rank_serialize": 1,
+      "policy_before_rank_cut_partial_only": 1,
+      "policy_after_ranking_or_after_truncation": 1,
+      "policy_never_applied_on_read": 10,
+      "not_applicable_ephemeral_or_dormant_or_test": 3,
+      "notes": "Only R-vector-search enforces full scope+sensitivity before rank truncation. R-retriever-search is mixed (vector pre-rank, FTS post-rank). R-fts-query ranks pre-policy. Graph reads (neighbors/relationships/search-entities/centrality/communities/predict), explain-by-id, aggregate health/metrics, change-stream, and export/backup apply NO policy on read."
+    },
+    "policy_after_serialization_or_never_risks": [
+      "R-graph-neighbors / R-graph-relationships / R-graph-search-entities — traversal + serialization with no policy filter.",
+      "R-graph-centrality / R-graph-communities / R-graph-predict-links — analytics computed + serialized over unauthorized graph.",
+      "R-explain-memory / R-ui-memory-inspector — by-id read returns any record incl. Secret.",
+      "R-aggregate-health-metrics — global counts include hidden records (MGR-004.5).",
+      "R-change-stream-sse — broadcasts ids/names/counts unfiltered.",
+      "R-export-backup — full raw authority dump incl. Secret."
+    ],
+    "policy_after_rank_before_serialize": [
+      "R-fts-query — bm25 rank + top-k LIMIT precede scope/sensitivity; retriever drops rows only post-fusion (candidate count/rank see pre-policy rows)."
+    ],
+    "cache_keys_missing_policy_identity_revision": [
+      "No application-level RESULT cache exists on any read path (analytics recomputed each call → MGR-009.4 revision-keyed cache UNIMPLEMENTED).",
+      "AnnVectorStore in-RAM HNSW partition = index cache, not result cache; filters at query time (no leak).",
+      "RetrievalWeightStore adaptive RRF weights are global per query-class, NOT keyed by policy/identity/revision (weights influence ranking across all callers).",
+      "SQLite read-pool page cache is rebuilt on restore (H3); not a policy-keyed result cache.",
+      "UI graphData reactive signals + loadGeneration guard are not policy/identity/revision keyed (no server revision exists to key on)."
+    ],
+    "client_side_filtering_leaks": [
+      "R-ui-graph-read-layer assumes memory_graph_* payloads are server-policy-filtered — they are not; protected entities/edges/display_names render.",
+      "R-ui-graph-read-layer 'showing N of M' uses a backend-pre-limited count as M → misrepresents corpus total.",
+      "R-ui-memory-inspector discloses full record via memory_explain trusting an unauthorized backend by-id read.",
+      "R-desktop-search-commands apply `limit` client-side via .take() and report count=displayed slice (no true total)."
+    ],
+    "analytics_vocabulary_issues": [
+      "MGR-011.1 VIOLATION: connected-components (union-find) is named 'community'/'communities' in graph_intel.rs:166, desktop command memory_graph_communities, contract JSON key 'communities', and UI (buildCommunityIndex/categoryForNode/community color). Must be `component` end-to-end.",
+      "MGR-011.2/.3: centrality and community outputs carry NO algorithm name/version/params/graph-predicate/Graph_Revision/quality metadata in their payloads.",
+      "MGR-011.4: reasoning 'hallucination_rate', plan 'success_rate', prediction 'score' presented without grounded interpretation labels."
+    ],
+    "serialization_boundary_gaps": [
+      "All Tauri/Axum read DTOs are ad-hoc serde_json::json! shapes (contract.rs / memory.rs), NOT versioned contracts.",
+      "MGR-006.2 missing on hit_json: result kind, matched field, rank rationale, policy summary, Truth_State, Graph_Revision, navigation target.",
+      "MGR-007.1/.2 missing on graph DTOs: schema version, Graph_Revision, query hash, policy-safe scope, filters, window metadata, total semantics, truncation, recovery cursor.",
+      "No Graph_Revision concept exists anywhere (confirmed by grep) — blocks MGR-007.2/.3 cursor snapshots and MGR-008 patch consistency."
+    ],
+    "unknowns_needing_resolution": [
+      {
+        "id": "UNK-effective-policy-source",
+        "item": "policy_read_model_observation",
+        "question": "There is no identity/owner-derived Effective_Policy on reads (ScopeFilter is caller-supplied and all live commands pass ctx=None). Confirm the intended source of caller identity/owner/scope for read authorization (MGR-004.1/.2) and where Effective_Policy is computed before planning.",
+        "target_gate": "F1 (MGR-004) / F0.5.3"
+      },
+      {
+        "id": "UNK-timeline-goals-state-scope",
+        "item": "R-aggregate-health-metrics / contract timeline+goals",
+        "question": "Confirm whether research().timeline and goals().active_goals apply any state/scope filtering (they appear to return active rows without policy). Verify exact SELECT predicates in F0.3.3 schema inventory.",
+        "target_gate": "F0.3.3 / F1"
+      },
+      {
+        "id": "UNK-retrieval-trace-persistence",
+        "item": "R-retrieval-trace",
+        "question": "Confirm no Retrieval_Trace is persisted anywhere (no trace table found). MGR-025 requires persisted/returned policy-safe trace with fusion contributions, gating, token allocation, model versions, context-injected ids.",
+        "target_gate": "F3/F4 (MGR-025)"
+      }
+    ]
+  },
+
+  "key_findings": [
+    "NO Effective_Policy on reads (MGR-004.4 core violation): the only read-side gate is a caller-supplied ScopeFilter, applied on just the retriever search path. All live desktop/server search commands call search(query, None) → static default (include_secret=false, no namespace/scope restriction), never an identity/owner-derived Effective_Policy computed before planning/count/rank/serialize/cache/render.",
+    "GRAPH reads have ZERO policy: neighbors, relationships_for, search_entities, degree_centrality, communities, predict_links all read entities/relationships with no scope/sensitivity/namespace filter and truncate (LIMIT / max_hops) before any policy — full graph, analytics, and predicted links leak protected topology, endpoints, and display_names (MGR-004.4/MGR-007.5).",
+    "FTS ranks pre-policy (MGR-004.4): SqliteSearchStore.query filters namespace only when exactly one namespace is supplied and applies NO scope/sensitivity filter; bm25 ranking + top-k LIMIT run over unauthorized rows, which the retriever drops only post-fusion — authorized rows can be truncated out and the candidate COUNT reflects pre-policy rows. Vector path (AnnVectorStore) is the one path that filters scope/sensitivity before rank truncation.",
+    "ANALYTICS VOCABULARY (MGR-011.1): connected-components (union-find) is mislabeled 'community/communities' in core (graph_intel.rs:166), the desktop command, the contract JSON, and the UI color/category model. No analytics output carries algorithm/version/params/predicate/Graph_Revision/quality metadata (MGR-011.2/.3).",
+    "explain-by-id and MemoryInspector leak (MGR-004): MemorySystem::explain returns any memory by id — full content, provenance, worth, access history — with no policy check; the UI inspector discloses every field trusting this.",
+    "AGGREGATES leak hidden records (MGR-004.5): health/metrics/report/timeline/goals counts are global COUNT/AVG over the whole bank with no caller-authorized count/label projection.",
+    "CHANGE-STREAM leaks + no revision (MGR-004 + MGR-008): notify_change broadcasts detail payloads (entity ids, source/target ids, display_names, counts) to all subscribers with no policy filter and no auth (server SSE), and carries NO Graph_Revision — no revision concept exists anywhere, blocking MGR-008 patch consistency (clients blindly re-fetch).",
+    "EXPORT is a raw full dump (MGR-004.7): the only live export read is backup_to (VACUUM INTO) — a byte-for-byte authority copy including Secret rows and all scopes, with no redaction. The policy-safe interchange/visual export contract (0x4D475208/209) exists only in kria-eval fixtures, not wired to any live exporter.",
+    "NO revision-keyed analytics cache (MGR-009.4 unimplemented): there is no application-level result cache on any read path; analytics recompute each call. Consequently there are no result-cache keys to leak, but also no MGR-009.4 revision-keyed caching, and the adaptive RRF weights that influence ranking are global (not policy/identity keyed).",
+    "SERIALIZATION DTOs are unversioned (MGR-006.2/MGR-007.1-.2): all Tauri/Axum read responses are ad-hoc serde_json shapes lacking result kind, matched field, rank rationale, policy summary, Truth_State, Graph_Revision, query hash, window/total/truncation metadata, and cursor.",
+    "CLIENT-SIDE honesty gaps (MGR-006.3): desktop search applies `limit` via .take() and reports count=displayed slice; the UI graph 'showing N of M' derives M from a backend-pre-limited centrality count — neither reflects the true corpus total."
+  ],
+
+  "coverage_note": "Traced every required read category from live composition roots: memory reads (retriever search/recall/reason, explain-by-id, aggregate health/metrics), graph reads/traversal (neighbors, relationships, entity search), search (FTS SqliteSearchStore + ANN AnnVectorStore + hybrid Retriever, with the dormant SqliteVectorStore recorded Unavailable), analytics (degree centrality, connected-components-as-community, Adamic-Adar prediction), retrieval traces (ephemeral RetrievalTrace — MGR-025 Planned), export reads (raw backup live; interchange Planned), desktop query commands (commands/memory.rs), server query routes (memory_routes.rs GET + permissive CORS/no-auth), and the UI graph/memory read layer (graphData.ts/graphModel.ts/MemoryUniverse/MemoryInspector). Each record carries classification, evidence locator, policy-position, cache-key, serialization-boundary, and client-side-assumption facts. Unresolved facts (Effective_Policy source, timeline/goals predicates, trace persistence) recorded Unknown for F1/F0.3.3/F0.5.3."
+}

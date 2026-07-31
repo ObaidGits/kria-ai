@@ -1,0 +1,400 @@
+{
+  "schema_title": "F6 Study Analysis Schema",
+  "schema_version": "1.0.0",
+  "gate": "F6",
+  "run_id": "run-001",
+  "status": "PENDING_EXECUTION",
+  "created_at_task": "6.3.2",
+  "created_timestamp_utc": "2025-07-29T00:00:00Z",
+  "preregistration_reference": "evidence/F6/run-001/study/preregistration.json",
+  "analysis_script": "scripts/memory_graph/study_analysis.py",
+
+  "_note": "This schema documents exactly what statistical tests will be run, what inputs they consume, what outputs they produce, and what constitutes a GO vs NO-GO determination. ALL fields are frozen per the preregistration protocol (task_6_1_3.analysis and task_6_1_4). No post-hoc threshold changes are permitted. Any deviation from this schema is a study protocol violation.",
+
+  "input": {
+    "file": "evidence/F6/run-001/study/trial_data/aggregated.json",
+    "status": "PENDING_EXECUTION",
+    "description": "Aggregated trial-level data across all valid sessions, produced after study sessions complete (task 6.3.1). Contains per-condition paired trial observations.",
+    "required_schema": {
+      "type": "object",
+      "required_fields": ["condition_2D_list", "condition_3D", "pairing_key", "metadata"],
+      "field_definitions": {
+        "condition_2D_list": {
+          "type": "array",
+          "description": "List of valid (non-excluded) trial records for the 2D/list condition.",
+          "item_schema": {
+            "required_fields": ["path_pair_id", "task_completion_time_ms", "error_count"],
+            "optional_fields": ["path_identification_accuracy", "time_to_first_correct_node", "session_id", "trial_id"]
+          }
+        },
+        "condition_3D": {
+          "type": "array",
+          "description": "List of valid (non-excluded) trial records for the 3D condition.",
+          "item_schema": {
+            "required_fields": ["path_pair_id", "task_completion_time_ms", "error_count"],
+            "optional_fields": ["path_identification_accuracy", "time_to_first_correct_node", "session_id", "trial_id"]
+          }
+        },
+        "pairing_key": {
+          "type": "string",
+          "const": "path_pair_id",
+          "description": "The field used to match trials across conditions. Each pair_i_2D is matched to pair_i_3D by path_pair_id. If one condition's trial for a given path_pair_id is excluded, that pair is dropped from the paired analysis (listwise deletion per pair)."
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Aggregation metadata: total sessions run, excluded sessions/trials count and reasons.",
+          "required_fields": ["total_sessions", "excluded_sessions", "total_trials_2D", "total_trials_3D", "excluded_trials_2D", "excluded_trials_3D"]
+        }
+      }
+    }
+  },
+
+  "valid_vs_excluded_trial_definition": {
+    "_comment": "Exact definition of valid vs excluded trials. These criteria are FROZEN from preregistration.json task_6_1_3.exclusions and cannot be changed post-hoc.",
+
+    "valid_trial": {
+      "criteria": [
+        "included = true in the session log trial record.",
+        "task_completion_time_ms is a non-null non-negative integer.",
+        "error_count is a non-null non-negative integer.",
+        "The trial's session is not excluded at the session level.",
+        "The path_pair_id has a corresponding valid trial in the opposing condition (required for pairing; listwise deletion applies if match is absent)."
+      ]
+    },
+
+    "excluded_trial": {
+      "criteria": "A trial is excluded if ANY of the following registered criteria apply (from preregistration.json task_6_1_3.exclusions.trial_level_exclusions):",
+      "registered_trial_exclusions": [
+        {
+          "id": "TLE-1",
+          "criterion": "WebGL context loss during the trial",
+          "description": "3D renderer loses WebGL context after path query is submitted but before entity confirmed in Inspector."
+        },
+        {
+          "id": "TLE-2",
+          "criterion": "System crash or application hang",
+          "description": "Tauri application crashes, freezes, or becomes unresponsive for >10 seconds during a trial."
+        },
+        {
+          "id": "TLE-3",
+          "criterion": "Participant abandons the trial",
+          "description": "Participant explicitly skips or aborts the trial before selecting an entity."
+        },
+        {
+          "id": "TLE-4",
+          "criterion": "Path becomes unreachable",
+          "description": "A preregistered path pair is unreachable in the current graph state."
+        },
+        {
+          "id": "TLE-5",
+          "criterion": "Measurement boundary violation",
+          "description": "Task clock was not started at correct moment or correct termination event was not captured."
+        }
+      ],
+      "registered_session_exclusions": [
+        {
+          "id": "SLE-1",
+          "criterion": "Washout period violation",
+          "description": "Session began before required washout period elapsed (24h between conditions, 2h between same-condition sessions)."
+        },
+        {
+          "id": "SLE-2",
+          "criterion": "Training pass criterion not met before study trials",
+          "description": "Study trials recorded without participant first passing the 2-path training criterion."
+        },
+        {
+          "id": "SLE-3",
+          "criterion": "Fixture mismatch",
+          "description": "Session run against a fixture other than the preregistered mg-medium-v2/0.1.0."
+        },
+        {
+          "id": "SLE-4",
+          "criterion": ">50% of trials excluded",
+          "description": "More than half of trials in a session individually excluded by trial-level criteria."
+        }
+      ],
+      "no_post_hoc_exclusion_prohibition": "No exclusion criterion may be created after data collection begins. Any trial excluded by an unregistered criterion invalidates the study."
+    }
+  },
+
+  "statistical_tests": {
+    "_comment": "Exact tests to be run, per preregistration task_6_1_3.analysis. These are the ONLY tests permitted. Adding post-hoc tests or modifying parameters is a protocol violation.",
+
+    "primary_test": {
+      "name": "Wilcoxon signed-rank test",
+      "implementation": "scipy.stats.wilcoxon",
+      "parameters": {
+        "alternative": "two-sided",
+        "method": "auto",
+        "zero_method": "wilcox"
+      },
+      "alpha": 0.05,
+      "pairing": "By path_pair_id — trial_i_2D paired with trial_i_3D for the same path_pair_id. Listwise deletion for unpaired trials.",
+      "applied_to": ["task_completion_time_ms", "error_count"],
+      "outputs_per_measure": {
+        "W_statistic": "Wilcoxon W test statistic",
+        "p_value": "Two-tailed p-value",
+        "significant": "boolean — p_value < 0.05"
+      }
+    },
+
+    "effect_size": {
+      "metric": "Median percentage difference",
+      "formula": "((median_3D - median_2D) / median_2D) * 100",
+      "unit": "percent",
+      "sign_convention": "Negative = 3D faster/fewer errors (improvement). Positive = 3D slower/more errors (degradation).",
+      "applied_to": ["task_completion_time_ms", "error_count"],
+      "threshold_reference": "GO requires ≤ -10% (i.e., ≥10% improvement) for the significant measure. Threshold frozen in task_6_1_4."
+    },
+
+    "confidence_interval": {
+      "method": "Bootstrap percentile CI",
+      "implementation": "numpy random Generator with splitmix64 / PCG64 seeded deterministically; manually resample medians",
+      "type": "95% bootstrap confidence interval over paired median differences",
+      "bootstrap_samples": 10000,
+      "bootstrap_seed_hex": "0x4D475230",
+      "bootstrap_seed_int": 1296519728,
+      "unit": "milliseconds for task_completion_time_ms; count for error_count",
+      "what_is_bootstrapped": "The paired differences (d_i = time_3D_i - time_2D_i) are resampled with replacement. The median of each bootstrap sample is recorded. The 2.5th and 97.5th percentiles of the 10,000 bootstrap medians form the 95% CI.",
+      "applied_to": ["task_completion_time_ms", "error_count"]
+    }
+  },
+
+  "learning_order_effect_reporting": {
+    "_comment": "Trial-level time series must be reported to make learning/order effects visible. This is MANDATORY per preregistration task_6_1_3.counterbalancing.learning_effect_reporting. It is exploratory and supplementary; it does NOT alter the primary analysis.",
+    "what_is_reported": {
+      "per_condition_time_series": "For each condition (2D_list, 3D), a list of (trial_global_index, session_id, path_pair_id, task_completion_time_ms, error_count) ordered by the session timestamp. Global index is the chronological order within that condition across all sessions.",
+      "session_boundary_markers": "The index of the first trial of each new session is marked in the time series output so the reviewer can identify within-session vs between-session learning trends.",
+      "abba_session_labels": "Each trial record in the time series is annotated with its ABBA session label (A or B) and session number.",
+      "purpose": "Allows visual inspection of whether performance improves over trials (learning effect) or degrades (fatigue). Any visible monotonic trend across sessions should be discussed in the analysis report but does NOT change the primary Wilcoxon result or the GO/NO-GO verdict."
+    }
+  },
+
+  "output_schema": {
+    "file": "evidence/F6/run-001/study/analysis/results.json",
+    "status": "PENDING_EXECUTION",
+    "description": "Statistical analysis output written by scripts/memory_graph/study_analysis.py after study data is collected.",
+    "schema": {
+      "type": "object",
+      "required_fields": [
+        "schema_version",
+        "analysis_timestamp_utc",
+        "preregistration_reference",
+        "analysis_script_version",
+        "bootstrap_seed_hex",
+        "bootstrap_samples",
+        "valid_pairs_count",
+        "exclusion_summary",
+        "primary_measures",
+        "learning_order_effect",
+        "secondary_measures",
+        "go_no_go_determination"
+      ],
+      "field_definitions": {
+        "schema_version": { "type": "string", "const": "1.0.0" },
+        "analysis_timestamp_utc": { "type": "string", "format": "date-time", "description": "RFC3339 UTC timestamp when the analysis script ran." },
+        "preregistration_reference": { "type": "string", "const": "evidence/F6/run-001/study/preregistration.json" },
+        "analysis_script_version": { "type": "string", "description": "Version or git hash of the analysis script." },
+        "bootstrap_seed_hex": { "type": "string", "const": "0x4D475230" },
+        "bootstrap_samples": { "type": "integer", "const": 10000 },
+
+        "valid_pairs_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of valid paired trials (path_pair_id present in both conditions after exclusions). The primary analysis uses exactly this count."
+        },
+
+        "exclusion_summary": {
+          "type": "object",
+          "required_fields": [
+            "total_trials_2D", "excluded_trials_2D", "total_trials_3D", "excluded_trials_3D",
+            "excluded_sessions", "pairs_dropped_listwise", "exclusion_rate_2D_pct", "exclusion_rate_3D_pct",
+            "exclusion_details"
+          ],
+          "field_definitions": {
+            "total_trials_2D": { "type": "integer" },
+            "excluded_trials_2D": { "type": "integer" },
+            "total_trials_3D": { "type": "integer" },
+            "excluded_trials_3D": { "type": "integer" },
+            "excluded_sessions": { "type": "integer" },
+            "pairs_dropped_listwise": { "type": "integer", "description": "Pairs where one condition trial was valid but the matching trial was absent or excluded — dropped per listwise deletion rule." },
+            "exclusion_rate_2D_pct": { "type": "number", "description": "Percentage of 2D trials excluded. A rate >20% is a warning flag per preregistration." },
+            "exclusion_rate_3D_pct": { "type": "number", "description": "Percentage of 3D trials excluded. A rate >20% is a warning flag per preregistration." },
+            "exclusion_details": {
+              "type": "array",
+              "description": "One entry per unique exclusion reason with count.",
+              "item_schema": {
+                "required_fields": ["criterion_id", "criterion_label", "condition", "count"]
+              }
+            },
+            "high_exclusion_rate_warning": {
+              "type": ["boolean", "null"],
+              "description": "true if exclusion rate exceeds 20% in either condition. Must be discussed in report."
+            }
+          }
+        },
+
+        "primary_measures": {
+          "type": "object",
+          "required_fields": ["task_completion_time_ms", "error_count"],
+          "measure_schema": {
+            "description": "Schema applied to both task_completion_time_ms and error_count.",
+            "required_fields": [
+              "median_2D", "median_3D",
+              "median_percentage_difference",
+              "wilcoxon_W", "wilcoxon_p_value", "wilcoxon_significant",
+              "ci_95_lower", "ci_95_upper",
+              "ci_includes_zero",
+              "direction"
+            ],
+            "field_definitions": {
+              "median_2D": { "type": "number", "description": "Median value for the 2D/list condition across all valid trials (not just paired)." },
+              "median_3D": { "type": "number", "description": "Median value for the 3D condition across all valid trials (not just paired)." },
+              "median_percentage_difference": {
+                "type": "number",
+                "description": "((median_3D - median_2D) / median_2D) * 100. Negative = improvement. Positive = degradation."
+              },
+              "wilcoxon_W": { "type": "number", "description": "Wilcoxon W test statistic from paired analysis." },
+              "wilcoxon_p_value": { "type": "number", "description": "Two-tailed p-value from Wilcoxon signed-rank test." },
+              "wilcoxon_significant": { "type": "boolean", "description": "true if p_value < 0.05." },
+              "ci_95_lower": { "type": "number", "description": "2.5th percentile of bootstrap median differences (median_3D_bootstrap - median_2D_bootstrap)." },
+              "ci_95_upper": { "type": "number", "description": "97.5th percentile of bootstrap median differences." },
+              "ci_includes_zero": { "type": "boolean", "description": "true if the CI range [ci_95_lower, ci_95_upper] includes zero." },
+              "direction": {
+                "type": "string",
+                "enum": ["improvement", "degradation", "no_change"],
+                "description": "improvement = 3D is faster/fewer errors. degradation = 3D is slower/more errors. no_change = difference not meaningfully directional."
+              }
+            }
+          }
+        },
+
+        "learning_order_effect": {
+          "type": "object",
+          "required_fields": ["condition_2D_list_time_series", "condition_3D_time_series"],
+          "description": "Trial-level time series for visual learning/order effect inspection. Exploratory only; does not alter primary analysis.",
+          "time_series_item_schema": {
+            "required_fields": ["global_trial_index", "session_id", "session_label_abba", "path_pair_id", "task_completion_time_ms", "error_count"]
+          }
+        },
+
+        "secondary_measures": {
+          "type": "object",
+          "required_fields": ["path_identification_accuracy", "time_to_first_correct_node"],
+          "description": "Exploratory secondary measures. NOT used in GO/NO-GO determination.",
+          "measure_schema": {
+            "required_fields": ["median_2D", "median_3D", "n_valid_2D", "n_valid_3D", "note"],
+            "note_value": "Secondary exploratory measure. Not used in primary Wilcoxon analysis or GO/NO-GO determination per preregistration task_6_1_3.measures.secondary."
+          }
+        },
+
+        "go_no_go_determination": {
+          "type": "object",
+          "description": "Final GO/NO-GO verdict based on task_benefit_threshold from preregistration.json task_6_1_4. Applies ONLY the study-outcome component of the conjunctive threshold (TB-1 through TB-4). Full GO also requires fps_threshold, idle_quiet_threshold, resource_parity_threshold, a11y_parity_threshold, core_task_parity_threshold, and foss_closure_threshold from separate evidence artifacts.",
+          "required_fields": [
+            "verdict",
+            "tb1_minimum_pairs_pass",
+            "tb2_significance_pass",
+            "tb3_effect_size_pass",
+            "tb4_direction_pass",
+            "explanation",
+            "post_hoc_change_prohibition_acknowledged"
+          ],
+          "field_definitions": {
+            "verdict": {
+              "type": "string",
+              "enum": ["STUDY_GO", "STUDY_NO_GO", "INCONCLUSIVE"],
+              "description": "STUDY_GO = all TB-1 through TB-4 conditions pass. STUDY_NO_GO = one or more TB conditions fail. INCONCLUSIVE = data insufficient (fewer than 20 valid pairs)."
+            },
+            "tb1_minimum_pairs_pass": {
+              "type": "boolean",
+              "description": "true if valid_pairs_count >= 20. false if < 20 (INCONCLUSIVE / NO-GO)."
+            },
+            "tb2_significance_pass": {
+              "type": "boolean",
+              "description": "true if Wilcoxon p < 0.05 for at least one primary measure."
+            },
+            "tb3_effect_size_pass": {
+              "type": "boolean",
+              "description": "true if median_percentage_difference <= -10.0 for the measure that passes TB-2."
+            },
+            "tb4_direction_pass": {
+              "type": "boolean",
+              "description": "true if no primary measure shows statistically significant degradation (positive direction with p < 0.05)."
+            },
+            "explanation": {
+              "type": "string",
+              "description": "Plain-language summary of the determination, including which TB conditions passed/failed and why."
+            },
+            "post_hoc_change_prohibition_acknowledged": {
+              "type": "boolean",
+              "const": true,
+              "description": "Must be true. Certifies that no threshold was changed after data collection began. This field must be explicitly set by the analysis script and cannot be auto-derived."
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "no_go_determination_rules": {
+    "_comment": "Exact NO-GO rules per preregistration task_6_1_3.analysis.primary_test and task_6_1_4.task_benefit_threshold. These are frozen and cannot be changed.",
+
+    "automatic_no_go_conditions": [
+      {
+        "id": "NOGO-1",
+        "condition": "fewer_than_20_valid_pairs",
+        "rule": "If valid_pairs_count < 20 after all exclusions, the study is underpowered. Result is INCONCLUSIVE, treated as NO-GO. Script exits with code 2.",
+        "threshold": 20
+      },
+      {
+        "id": "NOGO-2",
+        "condition": "no_significant_measure",
+        "rule": "If Wilcoxon p >= 0.05 for BOTH task_completion_time_ms AND error_count, the study finds no statistically significant effect. Result is STUDY_NO_GO."
+      },
+      {
+        "id": "NOGO-3",
+        "condition": "effect_too_small",
+        "rule": "If the significant measure's median_percentage_difference > -10.0 (i.e., less than 10% improvement), the effect does not meet the preregistered benefit threshold. Result is STUDY_NO_GO."
+      },
+      {
+        "id": "NOGO-4",
+        "condition": "significant_degradation",
+        "rule": "If 3D produces statistically significantly WORSE median task_completion_time_ms OR higher median error_count (positive direction with p < 0.05), that is a NO-GO regardless of the other measure. Result is STUDY_NO_GO."
+      }
+    ],
+
+    "study_go_conditions": {
+      "all_must_hold_simultaneously": [
+        "valid_pairs_count >= 20",
+        "Wilcoxon p < 0.05 for at least one primary measure",
+        "median_percentage_difference <= -10.0 for the significant measure",
+        "No primary measure shows statistically significant degradation"
+      ]
+    },
+
+    "post_hoc_threshold_prohibition": {
+      "statement": "No threshold value in this schema (alpha=0.05, effect_size_threshold=-10.0, minimum_valid_pairs=20, bootstrap_samples=10000, bootstrap_seed_hex=0x4D475230) may be modified after any study data has been collected. Modifying these values after data collection is a study protocol violation that invalidates the F6 gate outcome.",
+      "amendment_process": "Any change requires: (1) confirmation that NO data has been collected, (2) a new preregistration revision with explicit rationale, (3) a new run-id before data collection resumes.",
+      "consequence": "Post-hoc threshold change = automatic NO-GO + invalidation of run-001 evidence."
+    }
+  },
+
+  "measures_analyzed": {
+    "_comment": "Exhaustive list of exactly which metrics are analyzed. ONLY these metrics are used. Analyzing any unlisted metric for GO/NO-GO purposes is a protocol violation.",
+    "primary_analyzed": [
+      "task_completion_time_ms — Wilcoxon W, p-value, median, median % difference, 95% bootstrap CI of paired differences",
+      "error_count — Wilcoxon W, p-value, median, median % difference, 95% bootstrap CI of paired differences"
+    ],
+    "secondary_exploratory_only": [
+      "path_identification_accuracy — median per condition, no significance test",
+      "time_to_first_correct_node — median per condition, no significance test"
+    ],
+    "not_analyzed": [
+      "Any measure not listed above",
+      "Per-hop-distance subgroup analysis",
+      "Session-level aggregates beyond time series reporting",
+      "Post-hoc subgroup selection or outlier removal beyond the preregistered exclusion criteria"
+    ]
+  }
+}

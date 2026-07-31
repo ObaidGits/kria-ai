@@ -1,0 +1,11 @@
+{
+  "suite": "V-RET-03",
+  "status": "Planned",
+  "note": "Full 200+ judged query evaluation requires kria-eval CMD-MG-EVAL binary (planned target, NBW-F3-01). Metric functions implemented and unit-tested in kria-eval::memory_graph::retrieval_eval. Execution against live fixtures deferred to F5 CMD-MG-EVAL run.",
+  "metrics_defined": true,
+  "unit_tests_pass": true,
+  "threshold_recall_at_10": 0.85,
+  "threshold_ndcg_at_10": 0.80,
+  "threshold_identifier_phrase": 0.95,
+  "threshold_exclusion": 1.0
+}

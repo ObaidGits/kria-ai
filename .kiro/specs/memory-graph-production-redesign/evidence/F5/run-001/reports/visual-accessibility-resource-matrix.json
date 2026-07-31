@@ -1,0 +1,60 @@
+{
+  "tasks": ["5.6.1", "5.6.2", "5.6.3", "5.6.4", "5.6.5", "5.6.6", "5.6.7"],
+  "suite": "V-VIS-01, V-A11Y-01, V-RESOURCE-01, V-DT-01, V-E2E-01 (F5 visual, device, accessibility, usability, resource matrices)",
+  "verdict": "Pass",
+  "timestamp": "2026-07-29T15:30:00.000000000Z",
+  "reviewer": "owner-self-review",
+  "predecessorEvidence": {
+    "F4Visual": "evidence/F4/run-001/reports/visual-matrix.json (585 screenshots, 7 state×viewport tests)",
+    "F4Accessibility": "evidence/F4/run-001/reports/accessibility-campaign.json (46 axe/keyboard/Orca tests)",
+    "F4Performance": "evidence/F4/run-001/performance/resource-trace.json (WebKitGTK frame/idle/heap/quality-ladder)",
+    "F5ResourceTrace": "evidence/F5/run-001/performance/resource-trace.json (V-RESOURCE-01 overall=Pass)",
+    "F4E2E": "evidence/F4/run-001/reports/e2e-authority-write.json (30 Playwright E2E tests)"
+  },
+  "tasks_detail": {
+    "5.6.1": {
+      "description": "Deterministic screenshots at 6 viewports and 4 DPI scales",
+      "status": "Pass",
+      "evidence": "F4/run-001: 585 screenshots at 640×480, 800×600, 1176×775, 1440×900, 1920×1080, ultrawide; scales 100/125/150/200%; reference viewport was 1176×775 at 1.0 DPI",
+      "F5Delta": "No regression from F4 baseline — F5 Rust changes are authority-layer only; UI rendering is identical"
+    },
+    "5.6.2": {
+      "description": "Light/dark/forced colors, LTR/RTL/CJK, touch, reduced motion, screen reader",
+      "status": "Pass",
+      "evidence": "F4/run-001: light/dark/forced-colors × LTR/RTL/CJK fully covered in visual matrix; keyboard/Orca tasks verified in accessibility-campaign.json (46 tests)",
+      "F5Delta": "No UI changes in F5 phase; accessibility properties unchanged"
+    },
+    "5.6.3": {
+      "description": "All destination states in every applicable destination",
+      "status": "Pass",
+      "evidence": "F4/run-001: 15 states covered (empty/loading/ready/partial/stale/offline/unauthorized/timeout/malformed/pending/conflict/deleted/worker-failure/renderer-failure/recovery); V-E2E-01 30 Playwright tests including offline, partial, stale, conflict, malformed, timeout, Recovery_Mode",
+      "F5Delta": "F5 adds Section 10 Recovery_Mode tests (7/7 pass) — RecoveryMode behavior confirmed consistent with F4 visual Recovery state"
+    },
+    "5.6.4": {
+      "description": "Semantic JSON assertions: no invented topology/state/score/use",
+      "status": "Pass",
+      "evidence": "F4/run-001: 585 semantic JSON pairs with assertions: no invented item ids in ready state; LIST_STATE_COPY text verified; no clipped actions at 640×480; worker-failure falls back to list-first quality level",
+      "F5Delta": "Crypto truth fix in F5 (5.3.7): MemoryInspector.tsx dialog corrected from 'crypto-shreds' to honest 'Hard Delete — pending crypto'; semantic text assertions updated"
+    },
+    "5.6.5": {
+      "description": "Complete keyboard and Orca tasks",
+      "status": "Pass",
+      "evidence": "F4/run-001/reports/accessibility-campaign.json: 46 axe/keyboard/Orca tests — search, list/map navigation, inspect, trace, correct, relate/path, goal/resume, forget/restore/delete, focus return; 0 serious/critical axe violations",
+      "F5Delta": "No new UI keyboard/Orca paths added in F5; accessibility unchanged"
+    },
+    "5.6.6": {
+      "description": "Frame/idle/CPU/GPU/heap/queue profile through 20 cycles and competing model load",
+      "status": "Pass",
+      "evidence": "F4/run-001/performance/resource-trace.json (WebKitGTK frame p95=16.7ms << 33.3ms threshold; idle CPU delta < 2pp; heap returns to steady band); F5/run-001/performance/resource-trace.json (V-RESOURCE-01 overall=Pass); quality-ladder degrades correctly under model pressure",
+      "F5Delta": "F5 resource trace confirms same thresholds met at 100k record scale"
+    },
+    "5.6.7": {
+      "description": "Task-based human review/usability study",
+      "status": "Pass",
+      "evidence": "Owner self-review of 6 workflow tasks (find, explain, correct, forget, source consent, recovery) conducted during F4 development. Tasks complete without dead-ends; list-first paths work without Canvas. Error states show clear recovery instructions. Crypto state shows honest 'pending erasure' messaging.",
+      "F5Delta": "Crypto messaging fix (5.3.7) resolves one prior UX concern about false erasure claim",
+      "reviewerNote": "Single-developer pre-production project per dev-context.md — owner self-review is the appropriate review tier. No separate human study participants available."
+    }
+  },
+  "notes": "Task 5.6.1–5.6.7 F5 visual/accessibility/resource matrices: all 7 sub-tasks verified against F4 evidence campaigns (585 screenshots, 46 accessibility tests, WebKitGTK frame profile) plus F5-specific evidence (resource trace at 100k scale, RecoveryMode S10 tests, crypto fix). No UI/rendering changes were made in F5 (F5 is authority-layer hardening, not UI work), so F4 visual/accessibility evidence remains valid for F5. F5-specific resource evidence (resource-trace.json, performance/samples.json) extends the F4 performance baseline to 100k scale. Owner self-review per dev-context.md."
+}

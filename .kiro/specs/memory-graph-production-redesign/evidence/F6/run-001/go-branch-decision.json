@@ -1,0 +1,296 @@
+{
+  "schema_version": "1.0.0",
+  "gate": "F6",
+  "run_id": "run-001",
+  "task_ref": "6.3.4",
+  "artifact_type": "go_branch_decision_schema",
+  "decision_status": "PENDING",
+  "created_at": "2025-07-29T00:00:00Z",
+
+  "_note": "This artifact defines the GO branch decision schema for F6 gate task 6.3.4. The decision_status is PENDING and CANNOT change to GO until ALL 7 conjunctive threshold groups have recorded PASS verdicts in their respective evidence artifacts AND the study analysis (task 6.3.2) returns STUDY_GO verdict. This file defines what the GO branch entails if and when that condition is satisfied. The entire file is deferred — no GO branch actions may be executed while any threshold is PENDING, FAIL, or INCONCLUSIVE.",
+
+  "prerequisite_summary": "All 7 conjunctive GO threshold groups must simultaneously hold PASS verdicts before this decision can activate. Any single FAIL, INCONCLUSIVE, or PENDING result is a NO-GO per the conjunctive rule in preregistration.json task_6_1_4.",
+
+  "prerequisite_checks": {
+    "_comment": "All 7 conjunctive GO threshold groups from preregistration.json task_6_1_4. Each must record a PASS verdict in the referenced evidence artifact before the GO decision can activate. The order here is informational; the rule is strictly conjunctive — all 7 must pass.",
+
+    "task_benefit_threshold": {
+      "description": "Study outcome: ≥10% median task-time or error improvement, statistically significant (Wilcoxon p<0.05), correct direction, ≥20 valid paired trials. Determined by the study analysis script.",
+      "verdict": "PENDING",
+      "evidence_artifact": "evidence/F6/run-001/study/analysis/results.json",
+      "verdict_field": "go_no_go_determination.verdict",
+      "pass_value": "STUDY_GO",
+      "produced_by_task": "6.3.2",
+      "sub_conditions": [
+        "TB-1: valid_pairs_count >= 20",
+        "TB-2: Wilcoxon p < 0.05 for at least one primary measure (task_completion_time_ms or error_count)",
+        "TB-3: median_percentage_difference <= -10.0 for the significant measure",
+        "TB-4: no primary measure shows statistically significant degradation"
+      ],
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.task_benefit_threshold"
+    },
+
+    "fps_threshold": {
+      "description": "WebKitGTK real-scene ≥30 FPS p95 frame time (p95 ≤ 33.3 ms) under both idle and competing local-model inference conditions on RHW-001 with mg-medium-v2 max-path scene. Minimum 30 warm frame samples per condition.",
+      "verdict": "PENDING_EXECUTION",
+      "evidence_artifact": "evidence/F6/run-001/performance/results/idle-condition.json",
+      "secondary_artifact": "evidence/F6/run-001/performance/results/contention-condition.json",
+      "verdict_field": "check_result.pass",
+      "pass_value": true,
+      "produced_by_task": "6.3.3",
+      "check_id_in_technical_status": "fps_check",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.fps_threshold",
+      "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[fps_check]"
+    },
+
+    "idle_quiet_threshold": {
+      "description": "rAF stops ≤2000 ms after last input; idle CPU delta ≤2 percentage points above F5 baseline once render loop is in stopped state.",
+      "verdict": "PENDING_EXECUTION",
+      "evidence_artifact": "evidence/F6/run-001/performance/results/idle-condition.json",
+      "verdict_field": "idle_phase.pass",
+      "pass_value": true,
+      "produced_by_task": "6.3.3",
+      "check_id_in_technical_status": "idle_quiet_check",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.idle_quiet_threshold",
+      "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[idle_quiet_check]"
+    },
+
+    "resource_parity_threshold": {
+      "description": "3D peak heap ≤1.5× 2D/list; no individual GC pause ≥50 ms; VRAM delta ≤256 MB above idle baseline on RHW-001.",
+      "verdict": "PENDING_EXECUTION",
+      "evidence_artifacts": [
+        "evidence/F6/run-001/performance/results/raw-heap-samples.json",
+        "evidence/F6/run-001/performance/results/raw-gc-samples.json",
+        "evidence/F6/run-001/performance/results/system-metrics.json"
+      ],
+      "produced_by_task": "6.3.3",
+      "check_id_in_technical_status": "resource_parity_check",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.resource_parity_threshold",
+      "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[resource_parity_check]"
+    },
+
+    "a11y_parity_threshold": {
+      "description": "Conjunctive group covering four sub-checks: (1) simulated WebGL context loss falls back to 2D/list with same query/focus/pending state in ≤2 s; (2) all 5 keyboard navigation steps pass in 3D condition; (3) entity names and Inspector confirmation announced by Orca screen reader in 3D; (4) no new serious/critical axe-core findings vs 2D/list baseline.",
+      "verdict": "PENDING_EXECUTION",
+      "sub_checks": [
+        {
+          "id": "context_loss_recovery_check",
+          "evidence_artifact": "evidence/F6/run-001/performance/results/idle-condition.json (context_loss_simulation phase)",
+          "secondary_artifact": "session log context_loss_event entries in evidence/F6/run-001/study/session_logs/",
+          "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[context_loss_recovery_check]"
+        },
+        {
+          "id": "keyboard_parity_check",
+          "evidence_artifact": "session log keyboard_baseline entry for 3D condition in evidence/F6/run-001/study/session_logs/",
+          "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[keyboard_parity_check]"
+        },
+        {
+          "id": "orca_parity_check",
+          "evidence_artifact": "session log orca_observation entries for both conditions in evidence/F6/run-001/study/session_logs/",
+          "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[orca_parity_check]"
+        },
+        {
+          "id": "axe_scan_check",
+          "evidence_artifact": "evidence/F6/run-001/axe-scan/3d-condition.json + baseline-diff.json",
+          "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[axe_scan_check]"
+        }
+      ],
+      "produced_by_task": "6.3.3",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.a11y_parity_threshold"
+    },
+
+    "core_task_parity_threshold": {
+      "description": "F5 E2E suite passes against 3D-enabled build with zero regressions across all seven destinations. Any test that passes in the F5 2D/list baseline must also pass in the 3D-enabled build.",
+      "verdict": "PENDING_EXECUTION",
+      "evidence_artifacts": [
+        "evidence/F6/run-001/junit/core-task-e2e.xml",
+        "evidence/F6/run-001/junit/regression-diff.json"
+      ],
+      "produced_by_task": "6.3.3",
+      "check_id_in_technical_status": "core_task_e2e_check",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.core_task_parity_threshold",
+      "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[core_task_e2e_check]"
+    },
+
+    "foss_closure_threshold": {
+      "description": "All new dependencies introduced by the 3D spike (vs F5 SBOM baseline) have approved FOSS dispositions, exact license identifiers, source URLs, and cryptographic checksums. Supply Chain review sign-off recorded in F6 evidence manifest.",
+      "verdict": "PENDING_EXECUTION",
+      "evidence_artifact": "evidence/F6/run-001/supply-chain/sbom-diff.json",
+      "produced_by_task": "6.3.3",
+      "check_id_in_technical_status": "sbom_diff_check",
+      "f5_sbom_baseline_ref": "evidence/F5/run-001/supply-chain/",
+      "preregistration_ref": "evidence/F6/run-001/study/preregistration.json#task_6_1_4.foss_closure_threshold",
+      "technical_checks_ref": "evidence/F6/run-001/technical-checks-status.json#checks[sbom_diff_check]"
+    }
+  },
+
+  "go_activation_rule": "The GO branch activates ONLY when ALL 7 threshold groups have recorded PASS verdicts in their respective evidence artifacts AND the study analysis (task 6.3.2) returns STUDY_GO verdict. Any single FAIL, INCONCLUSIVE, or PENDING result is a NO-GO. The 7 groups are: task_benefit_threshold, fps_threshold, idle_quiet_threshold, resource_parity_threshold, a11y_parity_threshold, core_task_parity_threshold, and foss_closure_threshold. The conjunctive rule is frozen in preregistration.json task_6_1_4 and cannot be changed post-hoc. INCONCLUSIVE is treated as FAIL for GO purposes.",
+
+  "go_branch_actions": {
+    "_comment": "These actions are DEFERRED. They describe exactly what happens if all 7 threshold groups pass. None of these actions may be executed while decision_status is PENDING. The 2D/list product (F5) remains the default and complete product at all times.",
+    "_execution_gate": "decision_status must be GO (set only when all prerequisite_checks show PASS) before any action below is performed.",
+
+    "capability_gate_3D_renderer": {
+      "status": "DEFERRED",
+      "description": "Add a capability flag to ui/src/platform/renderMode.ts that gates the 3D path renderer behind an explicit GO capability check. The 2D/list renderer must remain the default and the complete path when the capability flag is off.",
+      "target_file": "ui/src/platform/renderMode.ts",
+      "flag_name": "CAPABILITY_3D_PATH_RENDERER",
+      "flag_type": "boolean capability constant — defaults to false; set to true only in the GO-enabled build variant",
+      "where_checked": [
+        "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts — renderer initialization guard: if (!CAPABILITY_3D_PATH_RENDERER) throw/return and fall through to 2D/list",
+        "ui/src/shell/spaces/memory/destinations/Knowledge.tsx — conditional rendering of 3D view toggle control: only rendered when CAPABILITY_3D_PATH_RENDERER === true",
+        "Any future entry point that imports or instantiates the 3D renderer or its worker"
+      ],
+      "invariant": "With CAPABILITY_3D_PATH_RENDERER = false (the default), no 3D code path is reachable, no 3D dependency is loaded, and the SemanticList + Graph2D path is unchanged from the F5 baseline.",
+      "non_negotiable": "The 2D/list must remain the default. The flag must be off by default. No user-facing 3D controls may appear when the flag is off."
+    },
+
+    "retain_2d_completeness": {
+      "status": "DEFERRED",
+      "description": "Assert that all F5 destinations, workflows, and E2E tests continue to pass with the 3D renderer capability-gated off (2D default). This is verified by re-running the core_task_e2e_check with the renderer disabled.",
+      "verification_method": "Re-run CMD-GUI-E2E against the GO-branch build with CAPABILITY_3D_PATH_RENDERER set to false. All seven destinations and all workflows (find, inspect, explain, correct, merge, split, relate, path, goal, source, forget, restore, delete, offline, recovery) must pass without any 3D code path active.",
+      "pass_criterion": "Zero test failures in the E2E suite when CAPABILITY_3D_PATH_RENDERER = false. The suite must be identical to the F5 baseline suite — no tests added or removed to compensate.",
+      "evidence_artifact": "evidence/F6/run-001/junit/2d-default-completeness-check.xml",
+      "invariant": "The F5 product must remain complete and correct regardless of whether the GO capability flag is on or off. Capability-gating the 3D renderer must not degrade any F5 workflow."
+    },
+
+    "document_semantic_z_axis": {
+      "status": "DEFERRED",
+      "description": "Update the inline documentation in graphCanvas3DSpike.ts (or its successor GO-integration file) to document the z-axis semantics per the frozen preregistration definition in task_6_1_2.z_axis_formula. The documentation must state it is authority-backed, cite the formula, and reference the preregistration.",
+      "target_file": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts (or successor integration file named at GO time)",
+      "required_documentation_content": {
+        "formula": "z(node) = (1 − cosine_similarity(v_origin, v_node)) / 2",
+        "authority_source": "retrieval_trace_items.strategy_score where strategy = 'vector', backed by mem_vectors under the pinned all-MiniLM-L6-v2 partition",
+        "normalization_contract": "Closed-form formula; no per-path or global rescaling. Range [0.0, 1.0]. z=0 = origin (identical to itself); z=0.5 = orthogonal; z=1 = maximally dissimilar.",
+        "authority_statement": "This z-axis value is AUTHORITY-BACKED: it is derived solely from retrieval_trace_items.strategy_score (cosine similarity computed by SQLiteVectorStore.exact_search in f64 accumulation). No decorative depth, centrality metric, model-generated confidence, or layout coordinate may be substituted.",
+        "preregistration_citation": "Frozen in: evidence/F6/run-001/study/preregistration.json#task_6_1_2.z_axis_formula (status: FROZEN at task 6.1.2)",
+        "edge_cases": [
+          "Origin node: z = 0.0 (cosine_similarity = 1.0 for self-dot of L2-normalized vector)",
+          "Node with no vector score in retrieval_trace_items: z = null / Unavailable — no numeric default may be substituted",
+          "Cycle placeholder node: z = null / Unavailable — placeholder has no record_id in mem_vectors",
+          "Destination node: z computed normally from its strategy_score — not forced to z=1.0"
+        ],
+        "protocol_violation_conditions": [
+          "Using any column other than strategy_score from retrieval_trace_items for z computation",
+          "Substituting z=0.5 or any numeric default when strategy_score is absent",
+          "Applying per-path min-max normalization or any runtime rescaling",
+          "Deriving z from layout coordinates, centrality, or model-generated confidence"
+        ]
+      },
+      "documentation_format": "Inline JSDoc/TSDoc block at the z-axis computation site, plus a module-level comment in the 3D integration file referencing the preregistration artifact path."
+    },
+
+    "sign_required_reviews": {
+      "status": "DEFERRED",
+      "description": "The following sign-offs must be recorded in the F6 evidence manifest before the GO decision is final. Each review must be recorded as a separate entry with reviewer identity, reviewed artifact hash, and UTC timestamp. Self-review by owner/developer is accepted per dev-context.md single-developer pre-production context but must be explicitly recorded as a distinct review step.",
+      "required_reviewers": [
+        "product_review",
+        "accessibility_review",
+        "performance_review",
+        "supply_chain_review"
+      ],
+      "evidence_manifest_ref": "evidence/F6/run-001/manifest.json — reviews[] array",
+      "sign_off_format": {
+        "reviewer_role": "string — one of: product, accessibility, performance, supply_chain",
+        "reviewer_identity": "string — identity of reviewer (owner-developer-001 for self-review)",
+        "reviewed_artifact_hashes": "array of SHA-256 hashes of the specific artifacts reviewed",
+        "verdict": "string — PASS or FAIL",
+        "timestamp_utc": "RFC3339 UTC timestamp of the review",
+        "notes": "string — required summary of what was reviewed and any conditions"
+      }
+    }
+  },
+
+  "review_requirements": {
+    "_comment": "All four reviews must record PASS verdicts in the F6 evidence manifest before the GO decision is final. Each review is independent and required. The conjunctive rule applies: any single FAIL blocks GO.",
+
+    "product_review": {
+      "status": "PENDING",
+      "reviewer_role": "product",
+      "description": "Product owner review confirming the GO-branch integration satisfies the feature intent: capability-gated optional 3D renderer correctly defaults to 2D/list, the SemanticList remains complete, no new scope or claims are introduced beyond the preregistered feature boundary, and the user-facing experience is coherent.",
+      "required_evidence_ref": [
+        "evidence/F6/run-001/study/analysis/results.json — STUDY_GO verdict",
+        "evidence/F6/run-001/performance/results/ — all technical check results",
+        "ui/src/platform/renderMode.ts — CAPABILITY_3D_PATH_RENDERER flag implementation",
+        "go_branch_actions.capability_gate_3D_renderer implementation diff"
+      ],
+      "verdict": "PENDING",
+      "reviewer_identity": null,
+      "reviewed_artifact_hashes": [],
+      "timestamp_utc": null
+    },
+
+    "accessibility_review": {
+      "status": "PENDING",
+      "reviewer_role": "accessibility",
+      "description": "Accessibility review confirming the GO-branch integration satisfies all a11y_parity_threshold sub-checks: keyboard navigation passes 5/5 steps, Orca announces entity names and Inspector confirmation, no new serious/critical axe-core findings, and WebGL context loss falls back to accessible 2D/list state within 2 s.",
+      "required_evidence_ref": [
+        "evidence/F6/run-001/technical-checks-status.json — keyboard_parity_check, orca_parity_check, axe_scan_check, context_loss_recovery_check all PASS",
+        "evidence/F6/run-001/axe-scan/3d-condition.json + baseline-diff.json",
+        "Session log keyboard_baseline and orca_observation entries for 3D condition in evidence/F6/run-001/study/session_logs/"
+      ],
+      "verdict": "PENDING",
+      "reviewer_identity": null,
+      "reviewed_artifact_hashes": [],
+      "timestamp_utc": null
+    },
+
+    "performance_review": {
+      "status": "PENDING",
+      "reviewer_role": "performance",
+      "description": "Performance review confirming the GO-branch integration satisfies fps_threshold (≥30 FPS p95 under idle and contention load), idle_quiet_threshold (rAF stops ≤2000 ms, CPU delta ≤2 pp above F5 baseline), and resource_parity_threshold (peak heap ≤1.5×, no GC pause ≥50 ms, VRAM delta ≤256 MB). All measurements taken on RHW-001 at the study commit.",
+      "required_evidence_ref": [
+        "evidence/F6/run-001/performance/results/idle-condition.json",
+        "evidence/F6/run-001/performance/results/contention-condition.json",
+        "evidence/F6/run-001/performance/results/raw-heap-samples.json",
+        "evidence/F6/run-001/performance/results/raw-gc-samples.json",
+        "evidence/F6/run-001/performance/results/system-metrics.json",
+        "evidence/F6/run-001/technical-checks-status.json — fps_check, idle_quiet_check, resource_parity_check all PASS"
+      ],
+      "verdict": "PENDING",
+      "reviewer_identity": null,
+      "reviewed_artifact_hashes": [],
+      "timestamp_utc": null
+    },
+
+    "supply_chain_review": {
+      "status": "PENDING",
+      "reviewer_role": "supply_chain",
+      "description": "Supply Chain review confirming every new dependency introduced by the 3D spike (vs F5 SBOM baseline) has an approved FOSS disposition, exact SPDX license identifier, source URL, and cryptographic checksum. No unknown, unresolved, or incompatible license is present. SBOM diff is complete and covers all Rust crates, npm packages, WASM modules, and bundled assets in the F6 closure.",
+      "required_evidence_ref": [
+        "evidence/F6/run-001/supply-chain/sbom-diff.json",
+        "evidence/F5/run-001/supply-chain/ — F5 SBOM baseline for diff comparison",
+        "evidence/F6/run-001/technical-checks-status.json — sbom_diff_check PASS"
+      ],
+      "verdict": "PENDING",
+      "reviewer_identity": null,
+      "reviewed_artifact_hashes": [],
+      "timestamp_utc": null
+    }
+  },
+
+  "go_finalization_conditions": {
+    "description": "The GO decision is final and the go_branch_actions may be executed only when ALL of the following conditions are simultaneously true.",
+    "conditions": [
+      "decision_status is set to GO (only valid after all conditions below are verified by the release verifier)",
+      "task_benefit_threshold: study/analysis/results.json go_no_go_determination.verdict = STUDY_GO",
+      "fps_threshold: technical-checks-status.json fps_check.status = PASS",
+      "idle_quiet_threshold: technical-checks-status.json idle_quiet_check.status = PASS",
+      "resource_parity_threshold: technical-checks-status.json resource_parity_check.status = PASS",
+      "a11y_parity_threshold: all four sub-checks (context_loss_recovery_check, keyboard_parity_check, orca_parity_check, axe_scan_check) status = PASS",
+      "core_task_parity_threshold: technical-checks-status.json core_task_e2e_check.status = PASS",
+      "foss_closure_threshold: technical-checks-status.json sbom_diff_check.status = PASS",
+      "product_review: review_requirements.product_review.verdict = PASS with non-null reviewer_identity and timestamp_utc",
+      "accessibility_review: review_requirements.accessibility_review.verdict = PASS with non-null reviewer_identity and timestamp_utc",
+      "performance_review: review_requirements.performance_review.verdict = PASS with non-null reviewer_identity and timestamp_utc",
+      "supply_chain_review: review_requirements.supply_chain_review.verdict = PASS with non-null reviewer_identity and timestamp_utc"
+    ],
+    "no_go_on_any_miss": "If any single condition above is FAIL, INCONCLUSIVE, or PENDING at GO decision time, the result is NO-GO and task 6.3.5 (mandatory deletion) must execute instead."
+  },
+
+  "no_go_fallback_ref": {
+    "description": "If any threshold fails or this decision remains PENDING at the time the F6 gate outcome is determined, task 6.3.5 executes: delete all 3D renderer code, worker, controls, flags, dependencies, assets, tests, docs/marketing claims, and any graph-only abstractions from the deletion inventory produced in task 6.2.7. The F5 product is returned to its unmodified baseline state.",
+    "deletion_inventory_ref": "evidence/F6/run-001/ (task 6.2.7 deletion inventory artifact)",
+    "task_ref": "6.3.5"
+  }
+}

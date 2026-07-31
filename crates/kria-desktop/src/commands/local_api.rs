@@ -3389,6 +3389,14 @@ pub(super) fn start_local_api_bridge(
                     )
                     .layer(axum::extract::DefaultBodyLimit::max(128 * 1024)) // 128KB max body
                     .layer(axum::middleware::from_fn(super::api_auth::auth_middleware))
+                    // CORS: permissive is safe here because this is the Tauri desktop
+                    // in-process bridge, bound to cfg.server.host which defaults to
+                    // 127.0.0.1 (loopback). The auth_middleware above enforces the
+                    // API token on every request. This is NOT the kria-server remote path;
+                    // that path's CORS is restricted via origin::build_cors_layer (F1.6.3).
+                    // If server.host is ever set to a non-loopback address the operator
+                    // must be using kria-server directly (which has remote_enabled gating);
+                    // the desktop bridge does not support remote exposure.
                     .layer(CorsLayer::permissive())
                     .with_state(bridge_state);
 

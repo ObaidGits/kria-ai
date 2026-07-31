@@ -23,7 +23,7 @@ export function DeveloperObservatory(props: { onExit?: () => void }) {
         <h1 class="dev__title">Developer Observatory</h1>
         <button type="button" class="dev__exit" onClick={() => props.onExit?.()}>Back to Home</button>
       </header>
-      <main class="dev__grid" aria-label="Developer Observatory">
+      <main id="space-root" class="dev__grid" tabindex={-1} aria-label="Developer Observatory">
         <Show
           when={tools().length > 0}
           fallback={<div class="dev__empty">Developer Observatory ready. Diagnostics &amp; inspection tools will appear here.</div>}

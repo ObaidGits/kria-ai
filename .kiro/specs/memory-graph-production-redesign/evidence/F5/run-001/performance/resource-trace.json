@@ -1,0 +1,149 @@
+{
+  "schema_version": "evidence-resource-trace/v1",
+  "run_id": "run-001",
+  "gate": "F5",
+  "suite_id": "V-RESOURCE-01",
+  "utc_timestamp": "2026-07-29T10:08:58.052270254+00:00",
+  "async_blocking": {
+    "samples_ms": [
+      1.8170529999999998,
+      1.0995869999999999,
+      1.0748369999999998,
+      1.05115,
+      1.051815,
+      1.011466,
+      1.095006,
+      1.154857,
+      0.760339,
+      1.136027,
+      1.03386,
+      0.802542,
+      0.6986180000000001,
+      0.6638609999999999,
+      0.700013,
+      0.661845,
+      0.6655730000000001,
+      0.5998349999999999,
+      0.584341,
+      0.5843200000000001
+    ],
+    "max_span_ms": 1.8170529999999998,
+    "threshold_ms": 50.0,
+    "status": "Pass",
+    "notes": "max blocking span=1.817ms threshold=50ms — Pass"
+  },
+  "foreground_preemption": {
+    "preemption_latency_ms": 0.311743,
+    "threshold_ms": 100.0,
+    "status": "Pass",
+    "notes": "preemption latency=0.312ms threshold=100ms — Pass"
+  },
+  "queue_memory": {
+    "cycles": 20,
+    "blocking_pool_queue_depth_after": 0,
+    "embedding_pool_queue_depth_after": 0,
+    "wake_queue_depth_after": 1,
+    "wake_queue_cap": 1024,
+    "status": "Pass",
+    "notes": "after 20 cycles: wake_queue_depth=1 cap=1024 — Pass"
+  },
+  "heap_rss": {
+    "rss_start_kb": 17424,
+    "rss_after_10_cycles_kb": 17424,
+    "rss_after_20_cycles_kb": 17424,
+    "growth_factor": 1.0,
+    "threshold_factor": 1.5,
+    "status": "Pass",
+    "notes": "RSS start=17424KB after_20=17424KB growth=1.000x threshold=1.5x — Pass"
+  },
+  "quality_ladder": {
+    "cases": [
+      {
+        "scenario": "identifier_uuid",
+        "query": "show me abc12345-0000-0000-0000-000000000001",
+        "expected_profile": "rrf-id-v1",
+        "actual_profile": "rrf-id-v1",
+        "expected_class": "identifier",
+        "actual_class": "identifier",
+        "status": "Pass"
+      },
+      {
+        "scenario": "exact_phrase_quoted",
+        "query": "search for \"memory graph retrieval\"",
+        "expected_profile": "rrf-exact-v1",
+        "actual_profile": "rrf-exact-v1",
+        "expected_class": "exact_phrase",
+        "actual_class": "exact_phrase",
+        "status": "Pass"
+      },
+      {
+        "scenario": "entity_relation_capitalized",
+        "query": "what does Alice know about Bob",
+        "expected_profile": "rrf-graph-v1",
+        "actual_profile": "rrf-graph-v1",
+        "expected_class": "entity_relation",
+        "actual_class": "entity_relation",
+        "status": "Pass"
+      },
+      {
+        "scenario": "temporal_recency",
+        "query": "what happened last week",
+        "expected_profile": "rrf-time-v1",
+        "actual_profile": "rrf-time-v1",
+        "expected_class": "temporal",
+        "actual_class": "temporal",
+        "status": "Pass"
+      },
+      {
+        "scenario": "active_goal_resume",
+        "query": "resume my work on the memory redesign",
+        "expected_profile": "rrf-goal-v1",
+        "actual_profile": "rrf-goal-v1",
+        "expected_class": "active_goal",
+        "actual_class": "active_goal",
+        "status": "Pass"
+      },
+      {
+        "scenario": "exploratory_fallback",
+        "query": "tell me about the memory system",
+        "expected_profile": "rrf-general-v1",
+        "actual_profile": "rrf-general-v1",
+        "expected_class": "exploratory",
+        "actual_class": "exploratory",
+        "status": "Pass"
+      },
+      {
+        "scenario": "identifier_beats_entity_relation",
+        "query": "MGR-001 is related to schema design",
+        "expected_profile": "rrf-id-v1",
+        "actual_profile": "rrf-id-v1",
+        "expected_class": "identifier",
+        "actual_class": "identifier",
+        "status": "Pass"
+      },
+      {
+        "scenario": "temporal_beats_exploratory",
+        "query": "2024-01-15 memory events",
+        "expected_profile": "rrf-time-v1",
+        "actual_profile": "rrf-time-v1",
+        "expected_class": "temporal",
+        "actual_class": "temporal",
+        "status": "Pass"
+      }
+    ],
+    "passed": 8,
+    "total": 8,
+    "status": "Pass",
+    "notes": "8/8 scenarios matched expected class and profile — Pass"
+  },
+  "overall_status": "Pass",
+  "gate_violations": [],
+  "reviewer": {
+    "role": "owner-self-review",
+    "reviewerId": "owner",
+    "utcTimestamp": "2026-07-29T10:08:58.052270254+00:00",
+    "verdict": "Pass",
+    "notes": "Single-developer pre-production project; owner-self-review accepted per dev-context.md",
+    "signatureMethod": "owner-attestation"
+  }
+}

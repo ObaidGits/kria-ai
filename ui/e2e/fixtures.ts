@@ -126,16 +126,6 @@ const geometryStates: Record<ConverseGeometryState, { threads: boolean; work: bo
 
 export const test = base.extend<Fixtures>({
   e2eBackend: [async ({ context }, use) => {
-    // The Command Center homepage flag defaults ON in the app; the existing
-    // shell-based e2e suites assert the standard shell, so force it OFF here.
-    // (The dedicated Command Center spec opts back in explicitly.)
-    await context.addInitScript(() => {
-      try {
-        localStorage.setItem("kria.flag.home.command-center", "false");
-      } catch {
-        /* ignore */
-      }
-    });
     await context.addInitScript(installBackend);
     await use();
   }, { auto: true }],

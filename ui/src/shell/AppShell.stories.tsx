@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { AppShell } from "./AppShell";
-import { Dock } from "./Dock";
+import { NavigationRail } from "./NavigationRail";
 import { InspectorHost } from "./InspectorHost";
 import { PresenceBar } from "./PresenceBar";
 import { StatusLine } from "./StatusLine";
@@ -14,16 +14,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** The full shell: PresenceBar · Dock · SpaceRouter · InspectorHost · StatusLine. */
+/** The full shell: PresenceBar · NavigationRail · SurfaceHost · InspectorHost · StatusLine. */
 export const FullShell: Story = {
   render: () => <AppShell />,
 };
 
-/** The Dock alone — the 7-Space navigation rail. */
-export const DockRail: Story = {
+/** The shared NavigationRail alone — Home, seven Spaces, and utilities. */
+export const NavigationRailStory: Story = {
   render: () => (
     <div style={{ width: "220px", height: "480px", display: "flex" }}>
-      <Dock />
+      <NavigationRail />
     </div>
   ),
 };

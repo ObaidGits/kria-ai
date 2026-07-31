@@ -1,0 +1,30 @@
+{
+  "schema_version": "memory-graph-coverage/v1",
+  "summary": {
+    "registry_total": 306,
+    "counts_by_kind": {
+      "artifact_class": 14,
+      "command": 14,
+      "decision": 46,
+      "finding_critical": 7,
+      "finding_high": 17,
+      "finding_low": 13,
+      "finding_medium": 28,
+      "fixture": 9,
+      "gate": 7,
+      "opportunity": 31,
+      "requirement": 48,
+      "risk": 27,
+      "suite": 33,
+      "workstream": 12
+    },
+    "forward_mappings": 94,
+    "mapping_gaps": 0,
+    "audit_issues": 0,
+    "integrity_issues": 0,
+    "total_diagnostics": 0,
+    "diagnostics_by_kind": {},
+    "ok": true
+  },
+  "diagnostics": []
+}

@@ -154,3 +154,61 @@ export interface LayoutSettledMessage {
 }
 
 export type LayoutResponse = LayoutTickMessage | LayoutSettledMessage;
+
+// ─── Z-computation worker message protocol (task 6.2.2) ──────────────────────
+
+/**
+ * A serializable item descriptor for the COMPUTE_Z message.
+ * Only the fields needed for z-computation are transmitted — not the full item.
+ */
+export interface ZComputeItem {
+  /** Stable item id. */
+  id: string;
+  /** Whether this item is in the current path (used to identify origin). */
+  isInPath: boolean;
+  /** Whether this item is a cycle placeholder. */
+  isNavigationContainer: boolean;
+}
+
+/**
+ * Serializable vector score entry for the COMPUTE_Z message.
+ * id → cosine_similarity ∈ [−1, 1] from retrieval_trace_items.strategy_score.
+ */
+export interface ZVectorScoreEntry {
+  id: string;
+  score: number;
+}
+
+/**
+ * Generation token to guard against stale workers.
+ * The main thread increments this for every new computation.
+ * The worker echoes it back; the main thread discards responses whose
+ * generation does not match the latest expected value.
+ */
+export type ZGeneration = number;
+
+/** Main-thread → worker: compute z-axis values for a scene snapshot. */
+export interface ZComputeMessage {
+  type: 'COMPUTE_Z';
+  /** Generation token — worker echoes back unchanged. */
+  generation: ZGeneration;
+  /** Item descriptors (order matches scene.items order). */
+  items: ZComputeItem[];
+  /** Vector scores from retrieval_trace_items.strategy_score where strategy='vector'. */
+  vectorScores: ZVectorScoreEntry[];
+}
+
+/** Worker → main-thread: z computation result (transferable). */
+export interface ZComputedMessage {
+  type: 'Z_COMPUTED';
+  /** Generation echoed from ZComputeMessage — stale if !== expected generation. */
+  generation: ZGeneration;
+  /**
+   * Packed Float32Array of shape [nodeIndex, x, y, z, hasZ] × items.length.
+   * Must be transferred (not copied) via postMessage([positions.buffer]).
+   */
+  positions: Float32Array;
+}
+
+export type ZWorkerRequest = ZComputeMessage;
+export type ZWorkerResponse = ZComputedMessage;

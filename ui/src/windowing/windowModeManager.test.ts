@@ -70,7 +70,7 @@ import {
   planNativeTransition,
 } from "./windowModeManager";
 
-const STORAGE_KEY = "kria_window_geometry_v1";
+const STORAGE_KEY = "kria_window_geometry_v2";
 const MONITOR: GeometryMonitor = h.state.monitors[0];
 const MONITORS: readonly GeometryMonitor[] = [MONITOR];
 
@@ -137,25 +137,25 @@ describe("planNativeTransition — Section 10 transition table", () => {
 });
 
 /**
- * Mini fallback geometry math (design §10): ~30% work-area width, 70% height,
- * minimum 400×500 CSS-scaled px, right-margin cap 24 CSS-scaled px, monitor-anchored.
+ * Mini fallback geometry: one quarter of the work area (50% × 50%), practical
+ * 400×320 CSS-pixel minimums, right-margin cap 24 CSS px, monitor-anchored.
  *
  * Validates: Requirements 10.9
  */
 describe("miniDefault — Mini fallback geometry", () => {
-  it("derives 30%/70% right-anchored geometry with a 24px margin cap on a standard monitor", () => {
-    expect(miniDefault(MONITOR)).toEqual({ x: 1320, y: 156, width: 576, height: 728, scaleFactor: 1 });
+  it("derives quarter-screen right-anchored geometry with a 24px margin cap", () => {
+    expect(miniDefault(MONITOR)).toEqual({ x: 936, y: 260, width: 960, height: 520, scaleFactor: 1 });
   });
 
-  it("honours the 400×500 CSS-px minimums, scaled by the monitor scale factor", () => {
+  it("honours the 400×320 CSS-px minimums, scaled by the monitor scale factor", () => {
     const small: GeometryMonitor = {
       workArea: { position: { x: 0, y: 0 }, size: { width: 900, height: 600 } },
       scaleFactor: 2,
     };
     const geo = miniDefault(small);
-    // 30% of 900 = 270 < 400*2=800 → clamped up to 800, then bounded by work width 900.
+    // 50% of 900 = 450 < 400*2=800 → clamped up to 800.
     expect(geo.width).toBe(800);
-    // 70% of 600 = 420 < 500*2=1000 → clamped up but bounded by work height 600.
+    // 50% of 600 = 300 < 320*2=640 → clamped up but bounded by work height.
     expect(geo.height).toBe(600);
     // Margin cannot exceed the remaining horizontal space.
     expect(geo.x).toBe(900 - geo.width - Math.min(24 * 2, 900 - geo.width));

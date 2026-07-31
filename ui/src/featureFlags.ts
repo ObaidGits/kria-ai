@@ -46,14 +46,6 @@ export const FEATURE_FLAGS = {
    * defaulting to 2D until an on-device Core-3D gate passes.
    */
   "home.presence.v2": true,
-  /**
-   * Command Center homepage (frontend-only, static demo data). When ON, the
-   * app renders the full-screen `CommandCenter` HUD surface instead of the
-   * standard shell. Default ON. Flip OFF via a
-   * `kria.flag.home.command-center=false` localStorage override (used by the
-   * shell-based e2e fixtures) or `resetFeatureFlag`.
-   */
-  "home.command-center": true,
 } as const;
 
 export type FeatureFlag = keyof typeof FEATURE_FLAGS;

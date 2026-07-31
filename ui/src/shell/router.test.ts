@@ -364,9 +364,11 @@ describe("hash synchronization", () => {
     expect(replaceSpy).toHaveBeenCalledTimes(1);
 
     dispose();
+    // Disposing hash sync removes its reactive effect and hashchange listener;
+    // the navigation API still owns canonical route → hash serialization.
     router.navigate("settings");
     await Promise.resolve();
-    expect(window.location.hash).toBe("#/automations/run/workflow-9");
+    expect(window.location.hash).toBe("#/settings");
 
     window.history.replaceState(null, "", "#/machines/device/device-1");
     window.dispatchEvent(new HashChangeEvent("hashchange"));

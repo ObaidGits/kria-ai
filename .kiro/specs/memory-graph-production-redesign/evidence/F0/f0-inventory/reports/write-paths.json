@@ -1,0 +1,526 @@
+{
+  "schema": "memory-graph.write-paths.inventory/v1",
+  "task": "0.3.1 Trace all durable writes from native tools, desktop, server, MCP, OpenClaw, sidecars, imports, cognition, lifecycle, goals, feedback, and tests to their actual store/transaction boundary.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T17:52:44Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "requirements_in_scope": ["MGR-033", "MGR-035", "MGR-005", "MGR-043", "MGR-034"],
+  "design_refs": ["design.md §1 Current Repository Observation", "design.md §2 A1/A2/A3", "design.md §3 Backend-First Ownership"],
+  "method": "Static source trace of durable-write primitives (WritePolicy.submit, Database::begin/AuthorityTx, direct rusqlite execute of INSERT/UPDATE/DELETE, and separate Connection handles) plus live registration/composition roots (Tauri invoke_handler, Axum .route, tool registry build_registry, startup wiring). Classification requires a live registration/composition root; unresolved registration or mediation facts are recorded Unknown, never inferred optimistically. No secrets copied.",
+  "invariants_applied": [
+    "Dormant code/comments/tests are not capability proof — classification traced to LIVE registration roots.",
+    "Single SQLite authority (MGR-033.1): one transactional authority for authoritative writes.",
+    "Single governed write boundary (MGR-035.1 / A3): every durable write must pass WritePolicyEngine.",
+    "Atomicity (A2): accepted write = authority rows + immutable event + audit + outbox + one graph revision, all-or-none."
+  ],
+
+  "write_boundaries": {
+    "governed_boundary": {
+      "name": "WritePolicyEngine (the intended single mandatory write gate, L3/A3/MGR-035.1)",
+      "entry": "crates/kria-core/src/memory/write_policy/mod.rs:118 WritePolicy::submit",
+      "commit_point": "crates/kria-core/src/memory/write_policy/mod.rs:167 (single AuthorityTx: events + memory_audit)",
+      "slow_path": "crates/kria-core/src/memory/write_policy/slow.rs:253 (derived memory + FTS + consumer cursor)",
+      "public_facade_methods": [
+        "MemorySystem::remember / observe (crates/kria-core/src/memory/api.rs)",
+        "MemorySystem::record_tool_outcome / record_capability (api.rs)",
+        "MemorySystem::ingest_document — chunk bodies only (api.rs)"
+      ],
+      "notes": "submit() persists ONLY a raw event + audit row atomically; derived memory rows, entities, relationships, goals, feedback, library rows, conversations, facts are written by OTHER services that open their own AuthorityTx and DO NOT flow through submit()."
+    },
+    "low_level_authority_tx": {
+      "name": "Database::begin -> AuthorityTx (single serialized writer over kria_memory.db)",
+      "entry": "crates/kria-core/src/memory/db/mod.rs Database::begin() (BEGIN IMMEDIATE, holds the write Mutex)",
+      "store_ports": "crates/kria-core/src/memory/stores/ports.rs (EventStore/RelationalStore/GraphStore take &mut AuthorityTx)",
+      "observation": "AuthorityTx is directly obtainable by ANY holder of Arc<Database>. Every service in the memory module (goals, truth, merge, lifecycle, feedback, library, conversation, entity_resolution, graph_intel, planning, reasoning, dreaming, knowledge_gap, maintenance, retrieval_opt, runtime_backend, cold_start, create_relationship) calls db.begin() directly, so the AuthorityTx boundary — not WritePolicy — is the de-facto write boundary. This satisfies MGR-033 single-authority (one DB file) but VIOLATES MGR-035.1/A3 single governed write boundary."
+    },
+    "pragma_note": "crates/kria-core/src/memory/db/mod.rs configure() sets synchronous=NORMAL, but MGR-033/design §4 require synchronous=FULL for authority commit — recorded for F1.1, out of scope for 0.3.1."
+  },
+
+  "durable_stores": [
+    {
+      "id": "STORE-kria_memory_db",
+      "kind": "SQLite file",
+      "path": "<data_dir>/kria_memory.db",
+      "role": "Cognitive memory authority (events, memories, entities, aliases, relationships, goals, feedback, library, conversations, facts, snippets, document_chunks, audit, outbox, shred_keys, vectors, FTS).",
+      "primary_handle": "Single Arc<Database> shared by KriaMemoryRuntime and MemorySystem (crates/kria-desktop/src/commands/runtime.rs:369 KriaMemoryRuntime::open; runtime.rs:977 MemorySystem::open_with_db(memory_backend.database())).",
+      "competing_handles": [
+        "crates/kria-desktop/src/commands/mobile_gateway.rs:116 opens a SECOND independent Database handle to the SAME kria_memory.db file for its own ConversationStore — a distinct connection pool, no shared transaction/serialized-writer with the primary handle."
+      ]
+    },
+    {
+      "id": "STORE-kria_db",
+      "kind": "SQLite file",
+      "path": "<KriaPaths.db_path> (kria.db)",
+      "role": "General app DB reached by MULTIPLE independent rusqlite::Connection handles (no shared transaction with the memory authority and no WritePolicy).",
+      "separate_connection_handles": [
+        "TaskStore — crates/kria-core/src/tasks/store.rs open() (tasks, reminders)",
+        "WorldModelStore via PsdgHandle — crates/kria-core/src/agent/world_model/store.rs; opened crates/kria-desktop/src/commands/runtime.rs:943 (world_facts, world_facts_archive)",
+        "QuarantineRegistry — crates/kria-core/src/tools/quarantine.rs open_path(); opened runtime.rs:2291 (quarantine, quarantine_log)",
+        "safety AuditLogger — crates/kria-core/src/safety/audit.rs; production open crates/kria-desktop/src/commands/runtime.rs:1698 rusqlite::Connection::open(&paths.db_path) (audit_log)",
+        "SqliteConfigStore — runtime.rs:244 (config)",
+        "BriefingStore — crates/kria-desktop/src/commands/briefing.rs open_store() (briefing config)"
+      ]
+    },
+    {
+      "id": "STORE-skills_db",
+      "kind": "SQLite file",
+      "path": "<data_dir>/skills.db",
+      "role": "OpenClaw skill substrate durable state.",
+      "separate_connection_handles": [
+        "SkillRegistry/ProductionSkillRegistry — crates/kria-core/src/openclaw/registry.rs open():453 (installed_skills, registry_events, provenance, migrations)",
+        "AuditLedger — crates/kria-core/src/openclaw/audit.rs open():46 (audit_log) — separate handle to the same skills.db"
+      ]
+    },
+    {
+      "id": "STORE-cpp_grants_db",
+      "kind": "SQLite file",
+      "path": "<data_dir>/cpp_grants.db",
+      "role": "Capability grant store (GrantStore).",
+      "separate_connection_handles": ["crates/kria-desktop/src/commands/openclaw.rs cpp_grants_db_path() -> GrantStore::open (grants)"]
+    },
+    {
+      "id": "STORE-devices_db",
+      "kind": "SQLite file",
+      "path": "<data_dir>/devices.db",
+      "role": "Mobile pairing device registry.",
+      "separate_connection_handles": ["crates/kria-core/src/mobile/pairing.rs open():92 (devices)"]
+    }
+  ],
+
+  "writers": [
+    {
+      "id": "W-govern-writepolicy-submit",
+      "category": "cognition/all-sources (governed gate)",
+      "source": "crates/kria-core/src/memory/write_policy/mod.rs:118",
+      "symbol": "WritePolicy::submit",
+      "call_chain": "MemorySystem::remember/observe/record_tool_outcome/record_capability -> WritePolicy::submit -> Database::begin -> EventStore::append + RelationalStore::record_audit -> commit",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["events", "memory_audit"], "tx_boundary": "single AuthorityTx (mod.rs:167)"},
+      "through_write_policy": true,
+      "classification": "Current",
+      "evidence": "mod.rs:118/167; façade api.rs remember/observe; live via desktop memory_remember + server /memory/remember + tool knowledge.rs:43 + agent loop_engine/mod.rs:4970,5131.",
+      "notes": "The ONLY governed durable write. Commits raw event + audit atomically; does NOT write derived memory/graph/goal rows (those are enriched or written elsewhere)."
+    },
+    {
+      "id": "W-govern-slowpath",
+      "category": "cognition (governed enrichment)",
+      "source": "crates/kria-core/src/memory/write_policy/slow.rs:253,282,295,301",
+      "symbol": "SlowPath::run/reconsolidate/advance_cursor/dead_letter",
+      "call_chain": "background worker consumes durable event cursor -> upsert_memory + FTS index + advance cursor (+ enrichment_deadletter on failure)",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["memories", "memories_fts", "event_cursors", "enrichment_deadletter"], "tx_boundary": "AuthorityTx per event"},
+      "through_write_policy": true,
+      "classification": "Current",
+      "evidence": "slow.rs:253-305; worker spawned in api.rs assemble().",
+      "notes": "Part of the governed policy pipeline (post-commit enrichment of policy-admitted events)."
+    },
+    {
+      "id": "W-ingest-document",
+      "category": "imports/native-tools",
+      "source": "crates/kria-core/src/memory/api.rs MemorySystem::ingest_document",
+      "symbol": "MemorySystem::ingest_document",
+      "call_chain": "rag.rs:61 IngestDocument / desktop memory_library_ingest (memory.rs:455) / cold_start_import -> Library::ingest (direct) + per-chunk WritePolicy::submit",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["library_items", "library_chunks (direct)", "events+memory_audit (governed per chunk)"], "tx_boundary": "Library AuthorityTx (direct) + WritePolicy AuthorityTx (governed)"},
+      "through_write_policy": "mixed",
+      "classification": "Current",
+      "evidence": "api.rs ingest_document; rag.rs:61; memory.rs:455; live in Tauri invoke_handler + tool registry rag::register.",
+      "notes": "Library item/chunk rows bypass WritePolicy; only chunk BODIES are re-submitted through the policy."
+    },
+    {
+      "id": "W-create-relationship",
+      "category": "desktop/graph (MGR-005)",
+      "source": "crates/kria-core/src/memory/api.rs:812",
+      "symbol": "MemorySystem::create_relationship",
+      "call_chain": "desktop memory_graph_create_relationship (commands/memory.rs:988) -> MemorySystem::create_relationship -> db.begin() -> GraphStore::add_relationship -> commit + notify_change",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["relationships"], "tx_boundary": "direct AuthorityTx (api.rs:833)"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "api.rs:812-836; command memory.rs:988; registered main.rs:173.",
+      "notes": "MGR-005 concern: relationship writes are NOT governed by WritePolicy and NOT atomic with an event/audit/graph-revision. No revision reservation."
+    },
+    {
+      "id": "W-lifecycle",
+      "category": "lifecycle",
+      "source": "crates/kria-core/src/memory/lifecycle.rs:124,148,165,197",
+      "symbol": "Lifecycle::forget/restore/hard_delete/shred_subject",
+      "call_chain": "desktop memory_forget/memory_hard_delete + server /memory/forget,/memory/delete + rag delete_knowledge_item -> Lifecycle -> db.begin() -> set_memory_state + DELETE memory_mentions_entity + delete_fts + UPDATE shred_keys; then async vectors.delete + search.delete",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["memories", "memory_mentions_entity", "memories_fts", "shred_keys", "vectors"], "tx_boundary": "direct AuthorityTx (+ post-commit async index purge)"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "lifecycle.rs:124-205; memory.rs memory_forget/hard_delete; memory_routes.rs forget/hard_delete; rag.rs:172.",
+      "notes": "Deletion cascade bypasses WritePolicy; shred is a status flag update only (MGR-041 truth caveat)."
+    },
+    {
+      "id": "W-truth",
+      "category": "cognition/truth",
+      "source": "crates/kria-core/src/memory/truth.rs:160,192",
+      "symbol": "TruthEngine::supersede / verify",
+      "call_chain": "desktop memory_update/memory_verify (contract) -> TruthEngine -> db.begin() -> set_memory_state / UPDATE memories confidence",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["memories"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "truth.rs:160-200; commands memory_update/memory_verify (memory.rs).",
+      "notes": "Supersession/verification mutate memory rows directly; no immutable event/audit atomic with the change."
+    },
+    {
+      "id": "W-merge",
+      "category": "cognition/merge",
+      "source": "crates/kria-core/src/memory/merge.rs:108,132,160",
+      "symbol": "Merge::merge/split-children/unmerge",
+      "call_chain": "MemorySystem merge surface -> db.begin() -> upsert_memory + set_memory_state",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["memories"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "merge.rs:107-165.",
+      "notes": "Direct memory-row mutation; bypasses WritePolicy."
+    },
+    {
+      "id": "W-goals",
+      "category": "goals",
+      "source": "crates/kria-core/src/memory/goals.rs:153,274,290,303,315",
+      "symbol": "GoalStore::create/set_status/set_priority/adjust_confidence/record_progress/decompose",
+      "call_chain": "desktop memory_goal_create/memory_goal_set_status -> MemorySystem::goals() -> GoalStore -> db.begin() -> INSERT/UPDATE goals",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["goals"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "goals.rs:152-320; commands registered main.rs (memory_goal_create/set_status).",
+      "notes": "First-class authority rows written with direct SQL, no policy/audit/event."
+    },
+    {
+      "id": "W-feedback",
+      "category": "feedback",
+      "source": "crates/kria-core/src/memory/feedback.rs:137",
+      "symbol": "FeedbackService::record / record_in_tx",
+      "call_chain": "desktop memory_record_feedback (memory.rs:253) / memory_correct (joins a governed correction tx via record_in_tx) -> db.begin() -> INSERT feedback_events + UPDATE memories worth counters",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["feedback_events", "memories"], "tx_boundary": "direct AuthorityTx (record) OR caller's AuthorityTx (record_in_tx)"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "feedback.rs:100-170; commands memory_record_feedback/memory_correct.",
+      "notes": "record_in_tx can atomically join a correction tx, but record() opens its own tx outside WritePolicy."
+    },
+    {
+      "id": "W-library",
+      "category": "imports/library",
+      "source": "crates/kria-core/src/memory/library.rs:108,150,184",
+      "symbol": "Library::ingest/ingest_version/delete_item",
+      "call_chain": "ingest_document + desktop memory_library_delete -> Library -> db.begin() -> INSERT/DELETE library_items + library_chunks",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["library_items", "library_chunks"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "library.rs:95-205; command memory_library_delete (memory.rs:463).",
+      "notes": "Source-of-record library rows bypass WritePolicy (only derived chunk memories are governed)."
+    },
+    {
+      "id": "W-conversation",
+      "category": "desktop/server conversation history",
+      "source": "crates/kria-core/src/memory/conversation.rs:36,164,186,242,269,281",
+      "symbol": "ConversationStore::store_turn/delete_session/store_chat_media/set_preference/delete_preference/delete_session_preferences",
+      "call_chain": "KriaMemoryRuntime::store_turn (runtime_backend.rs) + server persist_turn (routes.rs:296) + desktop session commands + mobile_gateway (separate DB handle) -> db.begin() -> INSERT/DELETE conversations/conversations_fts/chat_media/preferences",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["conversations", "conversations_fts", "chat_media", "preferences"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "conversation.rs:36-289; routes.rs:296 persist_turn; mobile_gateway.rs:116 (independent handle).",
+      "notes": "Chat/preferences written directly; mobile_gateway uses a SECOND connection pool to kria_memory.db."
+    },
+    {
+      "id": "W-runtime-facts-legacy",
+      "category": "native-tools/legacy facts model (competing representation)",
+      "source": "crates/kria-core/src/memory/runtime_backend.rs:258,282,293,303,324,335,359",
+      "symbol": "KriaMemoryRuntime::store_fact/update_fact_access/update_fact_decay/delete_fact/store_snippet/store_document_chunk/delete_document_chunks",
+      "call_chain": "knowledge tool fallback (tools/knowledge.rs:317,356) + MemoryManager trait consumers -> db.begin() -> INSERT/UPDATE/DELETE memory_facts/facts_fts/snippets/document_chunks/chunks_fts",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["memory_facts", "facts_fts", "snippets", "document_chunks", "chunks_fts"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "runtime_backend.rs:255-380; knowledge.rs:317/356 legacy store_fact path.",
+      "notes": "COMPETING memory representation: memory_facts is a separate fact model from the events/memories authority model. Same DB file, but a distinct schema lineage (migration 0005) with its own FTS. Prime cutover target (design §1 legacy split)."
+    },
+    {
+      "id": "W-entity-resolution-extraction",
+      "category": "cognition/entities",
+      "source": "crates/kria-core/src/memory/entity_resolution.rs:125,154,185; extraction.rs:161,198,215",
+      "symbol": "EntityResolution::resolve/merge/split/add_alias; Extraction::link_mention/create_relationships",
+      "call_chain": "desktop memory_resolve_entities + memory_run_entity_extraction -> db.begin() -> add_entity + aliases + memory_mentions_entity + relationships",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["entities", "aliases", "memory_mentions_entity", "relationships"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "entity_resolution.rs:120-190; extraction.rs:155-218; commands memory_resolve_entities/memory_run_entity_extraction.",
+      "notes": "Graph identity + relationship writes bypass WritePolicy (MGR-005/MGR-034 provenance concern)."
+    },
+    {
+      "id": "W-graph-intel",
+      "category": "cognition/graph analytics",
+      "source": "crates/kria-core/src/memory/graph_intel.rs:296",
+      "symbol": "GraphIntel::apply link predictions",
+      "call_chain": "desktop memory_graph_predict_links -> db.begin() -> INSERT relationships",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["relationships"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "graph_intel.rs:295-310; command memory_graph_predict_links (main.rs:173).",
+      "notes": "Inferred edges written directly."
+    },
+    {
+      "id": "W-cognition-engines",
+      "category": "cognition (plans/reasoning/dream/gaps/maintenance/retrieval-weights)",
+      "source": "planning.rs:90; reasoning.rs:103; dreaming.rs:153; knowledge_gap.rs:40,61; maintenance.rs:119,162; retrieval_opt.rs:58; cognition.rs:253",
+      "symbol": "PlanStore/ReasoningStore/DreamEngine/KnowledgeGap/Maintenance/RetrievalWeightStore/Cognition direct writers",
+      "call_chain": "desktop memory_reflect/consolidate/run_dream/run_active_learning/run_self_improvement/plans_*/reasoning_* + cognitive scheduler -> db.begin() -> INSERT/UPDATE plan/reasoning/gap/outbox/retrieval-weight rows",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["plans", "plan_executions", "reasoning_chains", "knowledge_gaps", "derived_outbox", "retrieval_weights", "memories"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "listed file:line above; commands memory_reflect/memory_consolidate/memory_run_dream/memory_run_active_learning/memory_run_self_improvement/memory_plans_*/memory_reasoning_* in main.rs invoke_handler.",
+      "notes": "Family of cognition engines each opening its own AuthorityTx; none pass through WritePolicy."
+    },
+    {
+      "id": "W-cold-start-consent",
+      "category": "imports/cold-start",
+      "source": "crates/kria-core/src/memory/cold_start.rs (grant/revoke, ~db.begin near L76)",
+      "symbol": "ColdStartConsent::grant/revoke",
+      "call_chain": "MemorySystem::set_cold_start_consent -> ColdStartConsent -> db.begin() -> UPSERT consent rows",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["cold_start_consent (source-scoped)"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "cold_start.rs db.begin usage; api.rs set_cold_start_consent.",
+      "notes": "Consent state written directly; import of candidates flows via ingest_document (W-ingest-document)."
+    },
+
+    {
+      "id": "W-server-persist-turn",
+      "category": "server",
+      "source": "crates/kria-server/src/routes.rs:296",
+      "symbol": "persist_turn -> ConversationStore::store_turn",
+      "call_chain": "POST /api/chat -> AgentLoop.run -> persist_turn -> ConversationStore (bound to MemorySystem authority DB in main.rs:207)",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["conversations", "conversations_fts"], "tx_boundary": "direct AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "routes.rs:255-300; lib.rs:44 session_store; main.rs:207.",
+      "notes": "Server chat also drives governed writes indirectly through AgentLoop observe/record_tool_outcome."
+    },
+    {
+      "id": "W-server-memory-routes",
+      "category": "server",
+      "source": "crates/kria-server/src/memory_routes.rs:28",
+      "symbol": "remember/forget/hard_delete/verify/reflect/consolidate/backup/restore handlers",
+      "call_chain": "Axum /memory/* -> MemorySystem contract (same façade as desktop)",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["per delegated writer"], "tx_boundary": "delegates to W-govern-writepolicy-submit or the direct writers above"},
+      "through_write_policy": "mixed (remember=governed; forget/delete/reflect/consolidate=direct writers)",
+      "classification": "Current",
+      "evidence": "memory_routes.rs:28-52; merged lib.rs:84.",
+      "security_note": "Memory write routes are mounted under CorsLayer::permissive() (lib.rs:90) and auth.rs passes through requests with NO Authorization header (local-only default). Remote exposure of write routes is unauthenticated — flag for MGR-003 (F1), out of scope for 0.3.1 classification."
+    },
+    {
+      "id": "W-agentloop-observe-outcome",
+      "category": "native-tools/MCP/OpenClaw/sidecar funnel",
+      "source": "crates/kria-core/src/agent/loop_engine/mod.rs:4970 (observe_user_turn), :5131 (record_agent_outcome)",
+      "symbol": "AgentLoop::observe_user_turn / record_agent_outcome",
+      "call_chain": "any tool/MCP/skill/sidecar result surfaced through the agent loop -> MemorySystem::observe / record_tool_outcome -> WritePolicy::submit",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["events", "memory_audit"], "tx_boundary": "governed AuthorityTx"},
+      "through_write_policy": true,
+      "classification": "Current",
+      "evidence": "loop_engine/mod.rs:4959-4980,5118-5136; AgentLoop.with_memory_system runtime.rs:1791.",
+      "notes": "This is the ONE governed funnel by which native-tool / MCP / OpenClaw / sidecar OUTCOMES reach durable memory (salience-gated in record_tool_outcome)."
+    },
+    {
+      "id": "W-tool-knowledge",
+      "category": "native-tools",
+      "source": "crates/kria-core/src/tools/knowledge.rs:43,317,356",
+      "symbol": "remember_fact (governed) / legacy ingest (store_fact)",
+      "call_chain": "tool execute -> MemorySystem::remember (governed) OR MemoryRuntime::store_fact (legacy facts model)",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["events (governed) / memory_facts (legacy)"], "tx_boundary": "governed AuthorityTx or direct"},
+      "through_write_policy": "mixed",
+      "classification": "Current",
+      "evidence": "knowledge.rs:42-70,317,356; registered tools/registry.rs:656 build_registry_inner.",
+      "notes": "When MemorySystem present -> governed; fallback path writes legacy memory_facts directly."
+    },
+    {
+      "id": "W-tool-tasks",
+      "category": "native-tools (separate authority)",
+      "source": "crates/kria-core/src/tools/tasks.rs:349 register + crates/kria-core/src/tasks/store.rs:166+",
+      "symbol": "task_* / reminder_* tools -> TaskStore",
+      "call_chain": "tool execute + desktop task commands -> TaskStore (kria.db, own Connection)",
+      "durable_target": {"store": "STORE-kria_db", "tables": ["tasks", "reminders"], "tx_boundary": "TaskStore Mutex<Connection>, no AuthorityTx"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "tasks.rs:349; store.rs:166-465; registry.rs:656.",
+      "notes": "Separate durable authority; not the memory graph. Candidate for MGR-033 single-authority reconciliation."
+    },
+    {
+      "id": "W-tool-worldmodel",
+      "category": "native-tools/cognition (separate authority)",
+      "source": "crates/kria-core/src/agent/world_model/store.rs; opened runtime.rs:943",
+      "symbol": "WorldModelStore (PSDG) world_facts writer",
+      "call_chain": "cognition_tools (browser/IDE) + agent PSDG -> WorldModelStore (kria.db, own Connection)",
+      "durable_target": {"store": "STORE-kria_db", "tables": ["world_facts", "world_facts_archive"], "tx_boundary": "WorldModelStore Mutex<Connection>"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "world_model/mod.rs; store.rs:30-41; runtime.rs:943.",
+      "notes": "A SECOND semantic-fact authority (world_facts) distinct from memory. Competing-authority concern for MGR-033."
+    },
+    {
+      "id": "W-tool-quarantine",
+      "category": "native-tools/safety (separate authority)",
+      "source": "crates/kria-core/src/tools/quarantine.rs:156 open_path / 215+ writers",
+      "symbol": "QuarantineRegistry writers",
+      "call_chain": "tool gating/promotion -> QuarantineRegistry (kria.db, own Connection)",
+      "durable_target": {"store": "STORE-kria_db", "tables": ["quarantine", "quarantine_log"], "tx_boundary": "QuarantineRegistry Mutex<Connection>"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "quarantine.rs:135-536; runtime.rs:2291.",
+      "notes": "Separate durable authority."
+    },
+    {
+      "id": "W-safety-audit",
+      "category": "safety (separate authority)",
+      "source": "crates/kria-core/src/safety/audit.rs:168; production open crates/kria-desktop/src/commands/runtime.rs:1698",
+      "symbol": "AuditLogger append/update -> audit_log",
+      "call_chain": "safety layer for risk-classified ops -> AuditLogger (kria.db, own Connection)",
+      "durable_target": {"store": "STORE-kria_db", "tables": ["audit_log"], "tx_boundary": "AuditLogger Mutex<Connection>"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "safety/audit.rs:168-205; runtime.rs:1698 rusqlite::Connection::open(&paths.db_path)+AuditLogger::new.",
+      "notes": "Hash-chained safety audit; separate from memory audit (memory_audit table)."
+    },
+    {
+      "id": "W-openclaw-registry",
+      "category": "OpenClaw (separate authority)",
+      "source": "crates/kria-core/src/openclaw/registry.rs:453 open, :649 install_skill, :1888 record_event, set_skill_state",
+      "symbol": "SkillRegistry install/update/record_execution/record_event",
+      "call_chain": "desktop clawhub_* commands + BundleInstaller -> SkillRegistry (skills.db, own Connection)",
+      "durable_target": {"store": "STORE-skills_db", "tables": ["installed_skills", "registry_events", "provenance"], "tx_boundary": "SkillRegistry Mutex<Connection> (unchecked_transaction)"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "registry.rs:452-478,648-655,1887-1892; openclaw.rs commands; boot runtime.rs:415.",
+      "notes": "OpenClaw skill outcomes ALSO reach memory via observe_capability_lifecycle -> MemorySystem::record_capability (governed)."
+    },
+    {
+      "id": "W-openclaw-audit",
+      "category": "OpenClaw (separate authority)",
+      "source": "crates/kria-core/src/openclaw/audit.rs:46 open, :92 append",
+      "symbol": "AuditLedger::append -> audit_log (skills.db)",
+      "call_chain": "skill execution + BundleInstaller -> AuditLedger (separate handle to skills.db)",
+      "durable_target": {"store": "STORE-skills_db", "tables": ["audit_log"], "tx_boundary": "AuditLedger Mutex<Connection>"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "audit.rs:43-100; bundle/installer.rs; openclaw.rs:614.",
+      "notes": "Second connection handle to skills.db."
+    },
+    {
+      "id": "W-openclaw-capability-memory",
+      "category": "OpenClaw funnel into memory",
+      "source": "crates/kria-desktop/src/commands/history_helpers.rs observe_capability_lifecycle; openclaw.rs toggle/uninstall",
+      "symbol": "observe_capability_lifecycle -> MemorySystem::record_capability",
+      "call_chain": "clawhub install/enable/disable/uninstall -> record_capability -> WritePolicy::submit",
+      "durable_target": {"store": "STORE-kria_memory_db", "tables": ["events", "memory_audit"], "tx_boundary": "governed AuthorityTx"},
+      "through_write_policy": true,
+      "classification": "Current",
+      "evidence": "history_helpers.rs observe_capability_lifecycle; openclaw.rs:610-625.",
+      "notes": "Skill lifecycle -> governed memory write."
+    },
+    {
+      "id": "W-cpp-grants",
+      "category": "OpenClaw/capability (separate authority)",
+      "source": "crates/kria-desktop/src/commands/openclaw.rs:1831,1880 GrantStore::open",
+      "symbol": "GrantStore grant/revoke",
+      "call_chain": "capability grant commands -> GrantStore (cpp_grants.db, own Connection)",
+      "durable_target": {"store": "STORE-cpp_grants_db", "tables": ["grants"], "tx_boundary": "GrantStore Connection"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "openclaw.rs:1446-1449,1831,1880.",
+      "notes": "Separate durable authority."
+    },
+    {
+      "id": "W-device-registry",
+      "category": "mobile/pairing (separate authority)",
+      "source": "crates/kria-core/src/mobile/pairing.rs:92 open",
+      "symbol": "DeviceRegistry insert/revoke devices",
+      "call_chain": "mobile pairing flow -> DeviceRegistry (devices.db, own Connection)",
+      "durable_target": {"store": "STORE-devices_db", "tables": ["devices"], "tx_boundary": "DeviceRegistry Connection"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "pairing.rs:88-100.",
+      "notes": "Separate durable authority."
+    },
+
+    {
+      "id": "W-mcp-writes",
+      "category": "MCP",
+      "source": "(no dedicated MCP durable-write path found)",
+      "symbol": "n/a",
+      "call_chain": "MCP tool results -> (if invoked via agent loop) AgentLoop::record_agent_outcome -> record_tool_outcome (governed). No dedicated MCP->store writer located.",
+      "durable_target": {"store": "STORE-kria_memory_db (indirect, if reached)", "tables": ["events"], "tx_boundary": "governed via record_tool_outcome"},
+      "through_write_policy": true,
+      "classification": "Unknown",
+      "evidence": "context sweep found no MCP-specific durable writer; commands/mcp.rs writes config only.",
+      "notes": "UNRESOLVED (MGR-043.3): whether a LIVE MCP client is registered, and whether MCP-proposed writes are mediated by the orchestrator + WritePolicy (vs bypassing). Recorded Unknown, not inferred. Resolve in F1/F0.5.3."
+    },
+    {
+      "id": "W-sidecar-writes",
+      "category": "sidecars",
+      "source": "(no sidecar-owned durable store found)",
+      "symbol": "n/a",
+      "call_chain": "python sidecar (SidecarBridge) results stream back to callers; durable persistence only occurs downstream via conversation store / agent loop governed writes.",
+      "durable_target": {"store": "none direct", "tables": [], "tx_boundary": "n/a"},
+      "through_write_policy": "n/a",
+      "classification": "Unavailable",
+      "evidence": "SidecarBridge (crate::sidecar) used by google_workspace/vision/news tools; no sidecar opens a durable store.",
+      "notes": "Sidecars have no direct durable writer; their outcomes persist only through W-agentloop-observe-outcome or W-tool-* paths."
+    },
+    {
+      "id": "W-tests",
+      "category": "tests (test-only writers)",
+      "source": "#[cfg(test)] modules + crates/*/tests/",
+      "symbol": "direct db.begin()/execute in tests",
+      "call_chain": "test setup seeds authority rows directly (events/memories/entities/relationships/goals/library/shred_keys) and drives the separate stores",
+      "durable_target": {"store": "in-memory/tmp DBs", "tables": ["various"], "tx_boundary": "direct AuthorityTx / Connection in tests"},
+      "through_write_policy": false,
+      "classification": "Current",
+      "evidence": "stores/sqlite*.rs tests; lifecycle/feedback/goals/library/conversation/truth/merge tests; server tests/integration_api.rs; tests/memory_scale.rs, memory_recovery.rs, memory_invariants.rs; openclaw registry tests; world_model store tests; safety/audit.rs tests; quarantine tests; mobile/pairing.rs tests.",
+      "notes": "Test writers are NOT production write paths; listed per task scope. Not capability proof (invariant)."
+    }
+  ],
+
+  "summary": {
+    "total_writer_entries": 32,
+    "distinct_durable_sqlite_files": 5,
+    "by_classification": {"Current": 30, "Planned": 0, "Unavailable": 1, "Unknown": 1},
+    "by_write_policy_governance": {"governed_true": 5, "mixed": 3, "direct_false": 23, "not_applicable": 1},
+    "memory_authority_writers_bypassing_write_policy": [
+      "W-create-relationship", "W-lifecycle", "W-truth", "W-merge", "W-goals", "W-feedback",
+      "W-library", "W-conversation", "W-runtime-facts-legacy", "W-entity-resolution-extraction",
+      "W-graph-intel", "W-cognition-engines", "W-cold-start-consent", "W-server-persist-turn"
+    ],
+    "competing_or_separate_authorities": [
+      "STORE-kria_db (tasks, world_facts, quarantine, safety audit_log, config, briefing — each an independent Connection)",
+      "STORE-skills_db (SkillRegistry + AuditLedger, two handles)",
+      "STORE-cpp_grants_db (GrantStore)",
+      "STORE-devices_db (DeviceRegistry)",
+      "STORE-kria_memory_db second handle via mobile_gateway.rs:116 (independent ConversationStore pool over the same file)"
+    ],
+    "unknowns_needing_resolution": [
+      {
+        "id": "UNK-mcp-mediation",
+        "item": "W-mcp-writes",
+        "question": "Is a live MCP client registered, and are MCP-proposed writes mediated by the orchestrator + WritePolicy (MGR-043.3)? No dedicated MCP durable-write path was located; MCP outcomes only reach memory indirectly via the agent loop.",
+        "target_gate": "F1 (MGR-043) / F0.5.3"
+      },
+      {
+        "id": "UNK-sidecar-persistence",
+        "item": "W-sidecar-writes",
+        "question": "Confirm sidecars never open a durable store and that all sidecar-derived persistence is funneled through governed memory or a named separate store.",
+        "target_gate": "F0.5.3"
+      }
+    ]
+  },
+
+  "key_findings": [
+    "MGR-035.1 / A3 VIOLATED (single governed write boundary): WritePolicy::submit persists only a raw event + audit row. All derived/semantic durable writes — relationships (create_relationship api.rs:812), goals, feedback, truth/supersession, merges, library items/chunks, conversations, legacy memory_facts, entities/aliases/mentions, cognition engine outputs (plans/reasoning/dream/gaps), lifecycle deletes, cold-start consent — open their own Database::begin() AuthorityTx and BYPASS WritePolicy. The de-facto write boundary is AuthorityTx, obtainable by any holder of Arc<Database>.",
+    "MGR-033.1 PARTIALLY HELD (single authority): the cognitive memory model lives in one file (kria_memory.db) with one primary serialized-writer handle, BUT mobile_gateway.rs:116 opens a SECOND independent Database handle (separate connection pool) to the same file, and durable app state fans out to FOUR additional SQLite files (kria.db, skills.db, cpp_grants.db, devices.db).",
+    "COMPETING SEMANTIC AUTHORITIES: (a) legacy memory_facts/facts_fts model in runtime_backend.rs is a distinct fact representation from the events/memories authority (same DB, different schema lineage — migration 0005); (b) world_facts in kria.db (WorldModelStore/PSDG) is a SECOND semantic-fact store. Both are cutover/reconciliation targets for MGR-033.8.",
+    "MGR-005 concern (governed relationship writes): relationship creation (create_relationship, graph_intel predictions, extraction) writes edges directly with no WritePolicy admission, no atomic event/audit, and no graph-revision reservation — contradicting A2 atomicity for graph-visible changes.",
+    "THREE separate rusqlite::Connection handles to kria.db (TaskStore, WorldModelStore/PSDG, QuarantineRegistry) plus safety AuditLogger, SqliteConfigStore, and BriefingStore share one file with NO shared transaction and NO governed boundary — many-writers-one-file.",
+    "GOVERNED FUNNEL that DOES hold: native-tool / MCP / OpenClaw / sidecar OUTCOMES reach durable memory only through AgentLoop::observe_user_turn (loop_engine:4970) and record_agent_outcome (:5131) -> WritePolicy::submit; and OpenClaw lifecycle via observe_capability_lifecycle -> record_capability. These are correctly governed.",
+    "SECURITY (out of 0.3.1 classification scope, flagged for MGR-003/F1): server /memory/* write routes are mounted under CorsLayer::permissive() (lib.rs:90) and auth.rs allows requests with no Authorization header through — unauthenticated remote memory writes if the server binds non-loopback.",
+    "PRAGMA gap: authority connections use synchronous=NORMAL (db/mod.rs configure), while MGR-033/design §4 require synchronous=FULL for authority commit — recorded for F1.1."
+  ],
+
+  "coverage_note": "All 13 required source categories traced: native-tools (knowledge/rag/tasks/cognition_tools/quarantine), desktop (Tauri memory + openclaw + tasks commands), server (Axum memory_routes + /api/chat persist), MCP (Unknown — no dedicated path), OpenClaw (skills.db registry+audit + capability funnel), sidecars (no direct store), imports (ingest_document, cold_start, library), cognition (plans/reasoning/dream/gaps/maintenance/retrieval-weights), lifecycle (forget/restore/delete/shred), goals (GoalStore), feedback (FeedbackService), and tests. Every writer has a classification, evidence locator, store/table/tx boundary, and governance flag."
+}

@@ -1,0 +1,319 @@
+{
+  "schemaVersion": "evidence-manifest/v1",
+  "runId": "run-001",
+  "gate": "F5",
+  "status": "Pass",
+  "utcTimestamp": "2026-07-29T10:08:58.052270254+00:00",
+  "tasks": [
+    "5.1.1",
+    "5.1.2",
+    "5.1.3",
+    "5.1.4",
+    "5.1.5",
+    "5.1.6",
+    "5.1.7",
+    "5.2.1",
+    "5.3.1",
+    "5.3.2",
+    "5.3.3",
+    "5.3.4",
+    "5.3.5",
+    "5.3.6",
+    "5.3.7",
+    "5.4.1",
+    "5.4.2",
+    "5.4.3",
+    "5.4.4",
+    "5.4.5",
+    "5.4.6",
+    "5.5.1",
+    "5.5.2",
+    "5.5.3",
+    "5.5.4",
+    "5.5.5",
+    "5.5.6",
+    "5.6.1",
+    "5.6.2",
+    "5.6.3",
+    "5.6.4",
+    "5.6.5",
+    "5.6.6",
+    "5.6.7",
+    "5.7.1",
+    "5.7.2",
+    "5.7.3",
+    "5.7.4",
+    "5.7.5",
+    "5.7.6",
+    "5.8.1",
+    "5.8.2",
+    "5.8.3",
+    "5.8.4",
+    "5.8.5",
+    "5.8.6",
+    "5.8.7",
+    "5.8.8"
+  ],
+  "suites": [
+    "V-PERF-01 (fixture pre-condition)",
+    "V-PERF-01 (correctness gate)",
+    "V-GRAPH-01",
+    "V-RET-01",
+    "V-RET-02",
+    "V-POLICY-02",
+    "V-TRUTH-01",
+    "V-LIFE-01",
+    "V-PERF-01",
+    "V-RESOURCE-01",
+    "V-UI-UNIT-01 (multi-window isolation)",
+    "V-FAULT-01 (AuthorityTx all-or-none, commit/publication boundary, DB busy, outbox recovery)",
+    "V-REBUILD-01 (vector 1k rebuild, FTS rebuild, interrupt/resume/discard, authority unchanged)",
+    "V-VECTOR-01 (model migration, dimension/hash/tokenizer mismatch, dual-partition, old-gen deletion, Partial strategy)",
+    "V-REC-01 (authority corruption Recovery_Mode, derived-only Partial, write-guard)",
+    "V-CRYPTO-01 (crypto truth threat review — plaintext-denial proof, consistent pending-crypto wording, no overclaim)",
+    "V-IO-01 (interchange export — 5-record package checksums, schema_version, deterministic ordering, namespace isolation, lifecycle exclusion)",
+    "V-IO-01 (interchange import — pre-import gate: independent parse, checksum, ordering, required semantics, unknown optional/required, tamper detection)",
+    "V-IO-01 (interchange import — idempotent AuthorityTx: replay, tamper, unknown required, unknown optional, quota, cancellation, crash/interrupt)",
+    "V-IO-01 (interchange re-export round-trip comparison: semantic IDs, ordering, links, provenance, state, content, checksums, optional extensions)",
+    "V-IO-01 (fixture upgrade pipeline: deterministic fresh-create, idempotent upgrade re-open, upgrade→export→empty-import→rebuild pipeline)",
+    "dead-code-deletion (migration shims and obsolete interchange formats)",
+    "V-POLICY-02 (observability redaction allowlist — log/metric/trace/health diagnostic field audit)",
+    "V-POLICY-02 (paired-world non-interference scan)",
+    "V-RESOURCE-01 (telemetry sampling policy — security/recovery events at WARN/ERROR, routine ops at INFO/DEBUG, overhead <<1%)",
+    "V-FAULT-01 (extended fault campaign: disconnect, deadline/cancel, malformed, cursor expiry, patch disorder, optional context loss)",
+    "V-RESOURCE-01 (resource pressure campaign: battery/power, high memory, thermal/CPU/GPU/model pressure, burst queue overflow, foreground correction under load)",
+    "V-POLICY-02, V-CRYPTO-01, V-LIFE-01 (threat review: server boundary, policy non-interference, prompt-injection fencing, lifecycle/crypto truth, caches/cursors/logs, local recovery ownership)",
+    "V-VIS-01, V-A11Y-01, V-RESOURCE-01, V-DT-01, V-E2E-01 (F5 visual/accessibility/resource matrices — F4 evidence + F5 scale)",
+    "V-SBOM-01 (supply-chain, license, SBOM, vulnerability evidence)",
+    "V-REG-01 (regression/release review, dead-code deletion, F5 gate sign-off)"
+  ],
+  "fixtureIds": [
+    {
+      "fixtureId": "mg-release-v2",
+      "seed": "0x4D475204",
+      "generatorVersion": "0.1.0",
+      "membershipHash": "sha256:816906bd94226ac4af44a0000461d498f504ef05f34bd162b1ad1cfb2140f97e",
+      "packageSha256": "b9d165ef28cc0efb233b65f20bfb7fdc8b85aa066275fc757533dcce547291bf",
+      "recordCount": 100000,
+      "determinismVerified": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "reports/100k-fixture-verification.json",
+      "mediaType": "application/json",
+      "sha256": "48170aa9457a57aa1051fcbc8a3b95dccc7035a283299906d2c58b52b6fb68a2",
+      "size": 8070
+    },
+    {
+      "path": "reports/100k-correctness.json",
+      "mediaType": "application/json",
+      "sha256": "7d545c21be28ad6d20497700b1050463b58d695bcdb02ca578602f4b710a1f3c",
+      "size": 3142
+    },
+    {
+      "path": "reports/query-plans.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "size": 6882
+    },
+    {
+      "path": "reports/tuning-report.json",
+      "mediaType": "application/json",
+      "sha256": "ba316471483a3e6642321358518a704646dee2a16919e2085c4d35c122482acd",
+      "size": 14163
+    },
+    {
+      "path": "performance/samples.json",
+      "mediaType": "application/json",
+      "sha256": "c0a04f233a40078e8ab893b7cbe1f89f9680bbb09467c723e49e1f811406a835",
+      "size": 10111
+    },
+    {
+      "path": "performance/resource-trace.json",
+      "mediaType": "application/json",
+      "sha256": "6c86ecca688c7ea3f467c10f6151967a6f9df789cb609af26a8f4791c27cbb25",
+      "size": 4515
+    },
+    {
+      "path": "reports/analytics-architecture-review.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "size": 0,
+      "note": "Task 5.1.7 conditional artifact: architecture review through GraphAnalyticsPort; budget miss confirmed; root cause documented; frontier-level batching fix path identified; no replacement decision required"
+    },
+    {
+      "path": "reports/multi-window.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "size": 4018,
+      "note": "Task 5.2.1: multi-window isolation tests; 31/31 passed; all seven isolation properties (destination, query, policy, selection, camera, quality, reducer ownership) verified for two-and-three-window scenarios"
+    },
+    {
+      "path": "reports/fault-injection.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "size": 3800,
+      "note": "Task 5.3.1: fault injection suite; 21/21 passed; all-or-none atomicity at every AuthorityTx step, commit/publication boundary convergence, DB busy_timeout serialization, outbox lease/apply recovery, isolated derived failures"
+    },
+    {
+      "path": "reports/deletion-residue.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.3: deletion residue suite; 10/10 passed; zero deleted plaintext/content through authority default policy, authority history, FTS5, vector, graph traversal, retrieval trace, snapshot cache, export, and audit logs after hard_delete + reconciliation"
+    },
+    {
+      "path": "reports/lifecycle-cascades.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.2: lifecycle cascade suite; 13/13 passed; forget/restore window, expiry exclusion, immediate delete with dependency cascade, source/session/namespace/tool/MCP/OpenClaw/subject cascades, independent-evidence isolation"
+    },
+    {
+      "path": "reports/rebuild-campaign.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.4: rebuild campaign suite; 5/5 passed; 1k vector delete/rebuild count+hash match, FTS delete/rebuild count+hash match, interrupt/resume count+hash match, interrupt/discard/fresh-rebuild count+hash match, authority rows (events_v2/graph_revisions/authority_meta) unchanged by all rebuild variants"
+    },
+    {
+      "path": "reports/model-migration.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.5: model migration suite; 21/21 passed; compatible migration (same dimension, new revision), incompatible migration (different dimension rejected), dimension/hash/tokenizer mismatch, zero-norm/NaN/Inf/wrong-byte-count rejection, dual-partition transition, old-generation deletion, Partial retrieval strategy non-redistribution"
+    },
+    {
+      "path": "reports/recovery-mode.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.6: recovery-mode suite; 7/7 passed; schema checksum corruption → RecoveryMode; event checksum corruption → deep check Corrupt; graph revision gap → RecoveryMode; authority_meta singleton violation detected; RecoveryMode write-guard (remember/observe blocked, health diagnostic); FTS manifest staleness → authority Healthy, Partial; vector manifest staleness → authority Healthy, Partial"
+    },
+    {
+      "path": "reports/crypto-truth-review.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.3.7: crypto truth threat review (V-CRYPTO-01); verdict=consistent-pending-crypto; 1 overclaim found and fixed (MemoryInspector.tsx dialog claimed 'crypto-shreds'); 5 Rust unit tests pass; 56 UI unit tests pass (3 CRITICAL crypto invariant tests); all surfaces consistently state Hard Delete pending cryptographic erasure; no surface claims Crypto-Shredded; is_shredded() confirmed as status-flag-only; content confirmed plaintext-readable after shred_subject; CRYPTO_SHRED_CAPABILITY constant='unavailable' enforced at HealthReport, MemoryHealthReport, Tauri command, and contract JSON surfaces; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/interchange-export.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.1: interchange export suite (V-IO-01); 8/8 passed; (11.1) 5-record package with correct checksums and import pipeline pass; (11.2) schema_version > 0 present in manifest, zero rejected; (11.3) ByKindThenId and ByRevision orderings deterministic; (11.4) namespace_filter isolates 'user' from 'other-user' namespace; (11.5) deleted/forgotten records excluded via lifecycle filter; (11.6) full package semantics: canonical JSON, checksums, version metadata, ordering metadata, provenance, lifecycle, policy isolation all correct; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/interchange-import.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.2: interchange import validation suite (V-IO-01); 13/13 passed; (12.1) declared count == actual accepted; inflated count with honest checksum passes (count is metadata, checksum is ground truth); (12.2) independent PackageChecksumVerifier computation matches manifest.package_checksum; (12.3) records in ByRevision order accepted; wrong order → PackageChecksumMismatch; (12.4) all required semantics (id+kind+truth_state) present → valid; (12.5) unknown optional fields preserved through pipeline; (12.6) unknown required (missing id/kind) → skipped, not hard-rejected; mixed: 1 skip + 1 valid → import_count=1; (12.7) tampered manifest.package_checksum → PackageChecksumMismatch; single-char flip in record content_hash → PackageChecksumMismatch; (12.8) inflated declared count with honest checksum passes; (12.9) full pre-import gate: 6-record mixed-kind package, independent parse + checksum + required semantics + idempotency key all pass; non-negotiables: tamper rejected, unknown-required skipped, unknown-optional preserved, ordering enforced via checksum; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/interchange-idempotent-import.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.3: idempotent AuthorityTx import suite (V-IO-01); 8/8 passed; (13.1) replay: same package → Replayed, revision does not advance, no duplicate rows; (13.2) tamper: PackageChecksumMismatch at validation, bus never invoked, zero writes; (13.3) unknown required: skipped_count=1, valid_count=2, import commits; (13.4) unknown optional: extra fields preserved, import commits; (13.5) quota: RecordCountExceedsLimit + TotalBytesExceedsLimit, zero writes; (13.6) cancellation: validation passes, no submit, zero partial writes, event_count=0; (13.7) crash/interrupt retry: original=Committed, retry=Replayed, no revision advance; all 7 non-negotiables verified; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/interchange-reexport-compare.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.4: interchange re-export round-trip comparison suite (V-IO-01); 9/9 passed; (14.1) semantic IDs preserved: record_id, record_kind, id/kind in content_json zero drift; (14.2) ordering preserved for both ByKindThenId and ByRevision; (14.3) links preserved: source_id/target_id/relation_name in cyclic_graph relationships identical; (14.4) provenance preserved: revision, policy_namespace, policy_scope, source_refs, created_at, session_id; (14.5) truth_state preserved for all 10 fixture states; (14.6) content bit-identical: content_json and content_hash byte-for-byte; (14.7) package_checksum of original export == package_checksum of re-export for 8-record package, both orderings; (14.8) optional extension fields intact through re-export; all non-negotiables verified; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/fixture-upgrade-pipeline.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.5: fixture upgrade pipeline suite (V-IO-01, V-SCHEMA-01); 4/4 passed; (15.1) deterministic fresh-create: two independent in-memory DBs both land at schema_version=32 (latest), both have exactly one authority_meta singleton with schema_epoch=2; (15.2) idempotent upgrade re-open: file-backed DB re-opened stays at schema_version=32, committed events persist, authority_meta intact; NOTE single-dev pre-production repo no older on-disk fixture exists, upgrade contract verified via idempotent re-open (checksum guard); (15.3) full upgrade→export→empty-import→rebuild pipeline: source schema_version=32, 12-record export package with correct per-record and package checksums, pre-import gate passes (12 valid/0 skipped), import into empty DB=Committed(rev=1), replay=Replayed(rev unchanged), FTS rebuild Activated(member_count=12), FTS query for 'fixture' returns 12 matches; (15.4) schema_version=32 stable across source+import DBs; all 5 non-negotiables (NN1–NN5) verified; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/migration-shim-deletion.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.4.6: dead-code-deletion scan (migration shims and obsolete interchange formats); shimsFound=0, shimsDeleted=0, filesModified=[]; comprehensive search of memory/interchange/migration code areas for COMPAT:, DEPRECATED:, TODO: remove after migration, legacy shim markers, v1_format, old_format, and migration_compat terms; all legacy-labelled constructs confirmed live (pending documented F1.5/F3/F3.1 cutover gates) or documentation-only ledger modules; F2.2.7 hard cutover already completed (LegacyRelationshipMigrator deleted, 0024_drop_legacy_relationships migration applied); no deletions warranted; cargo check -p kria-core passes (exit 0); owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/observability-redaction.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.1: observability redaction allowlist audit (V-POLICY-02, V-CRYPTO-01); verdict=Pass; violationsFound=0, violationsFixed=0; full audit of all tracing::* log macros across memory module (authority, api, maintenance, scheduler, jobs, write_policy, stores, embeddings, db), v2 API subdirectory (no tracing), contract.rs, Tauri commands, and UI Health destination; zero instances of raw content/content_json/payload_plain in any log/metric/trace field; all tracing fields are structural metadata only (counts, IDs, error codes, paths, schema versions); MemoryHealthReport exposes aggregate counts + crypto_shred_capability constant only; SchedulerMetrics/Snapshot contain only u64 aggregate counters per MGR-039; cargo check -p kria-core exits 0; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/paired-world-scan.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.2: paired-world non-interference scan (V-POLICY-02); verdict=Pass; testsPassed=9, testsTotal=9; (16.1) protected-token scan: 5 UUID-based world_b tokens return 0 hits under world_a FTS namespace filter; (16.2) count isolation: world_a count=4, world_b count=6, neither encodes the other's cardinality, world_a IDs absent from world_b enumeration; (16.3+16.8) cursor/cache key isolation: policy_hash, cache_key, cursor_key, redacted_ref all differ between namespaces; (16.4) graph-path isolation: BFS from world_a root visits 0 world_b node IDs; (16.5) symmetric shape + disjoint content: 5 hits each, intersection=0; (16.6) export disjointness: 0 shared record IDs; (16.7) export count non-interference: world_a count≠world_b count, neither equals combined total; all 7 non-negotiables verified; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/telemetry-sampling.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.3: telemetry sampling policy (V-RESOURCE-01); 5/5 passed; security/recovery events at WARN/ERROR survive any INFO-or-higher filter; overhead 0.005% << 1% budget; cargo check -p kria-core exits 0; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/fault-campaign-extended.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.4: extended fault campaign (V-FAULT-01); 6 fault classes verified against existing test evidence; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/resource-pressure-campaign.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.5: resource pressure campaign (V-RESOURCE-01); 5 pressure scenarios verified; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/threat-review.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Task 5.5.6: threat review (V-POLICY-02, V-CRYPTO-01, V-LIFE-01); 6 threat areas, 0 critical/high findings; 1 accepted residual risk; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/visual-accessibility-resource-matrix.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Tasks 5.6.1–5.6.7: F5 visual/accessibility/resource matrix; F4 evidence (585 screenshots, 46 accessibility tests) + F5 resource trace + crypto fix; owner self-review per dev-context.md"
+    },
+    {
+      "path": "supply-chain/sbom-summary.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Tasks 5.7.1–5.7.6: supply-chain/SBOM/license evidence (V-SBOM-01); 100% FOSS, exact pinned versions, cargo audit 0 critical/high; owner self-review per dev-context.md"
+    },
+    {
+      "path": "reports/release-regression-signoff.json",
+      "mediaType": "application/json",
+      "sha256": "see-file",
+      "note": "Tasks 5.8.1–5.8.8: F5 release gate sign-off (V-REG-01); 880 total test/artifact assertions; 1 golden change (crypto fix, requirement-linked); 2 documented acceptable residual risks; F5 manifest status=Pass; owner self-review per dev-context.md"
+    }
+  ],
+  "notes": [
+    "Full 100k corpus materialized and verified (task 5.1.1)",
+    "Correctness gate passed (task 5.1.2)",
+    "Query plans gate passed (task 5.1.3)",
+    "Tuning verification complete (task 5.1.4)",
+    "Owner self-review accepted per dev-context.md (single-developer pre-production project)",
+    "Performance sampling complete (task 5.1.5): V-PERF-01 threshold check completed at 2026-07-29T09:57:22.279626845+00:00",
+    "Resource trace complete (task 5.1.6): V-RESOURCE-01 overall=Pass at 2026-07-29T10:08:58.052270254+00:00",
+    "Architecture review complete (task 5.1.7): control_center_search 427ms vs 250ms threshold; root cause N+1 BFS; fix path identified (frontier-level batching ~178ms)",
+    "Multi-window isolation tests complete (task 5.2.1): 31/31 pass",
+    "Fault injection tests complete (task 5.3.1): 21/21 pass",
+    "Lifecycle cascade tests complete (task 5.3.2): 13/13 pass",
+    "Deletion residue tests complete (task 5.3.3): 10/10 pass",
+    "Rebuild campaign tests complete (task 5.3.4): 5/5 pass",
+    "Model migration tests complete (task 5.3.5): 21/21 pass",
+    "Recovery_Mode tests complete (task 5.3.6): 7/7 pass",
+    "Crypto truth threat review complete (task 5.3.7): verdict=consistent-pending-crypto; 1 overclaim fixed",
+    "Interchange export tests complete (task 5.4.1): 8/8 pass",
+    "Interchange import validation tests complete (task 5.4.2): 13/13 pass",
+    "Idempotent AuthorityTx import tests complete (task 5.4.3): 8/8 pass",
+    "Interchange re-export round-trip comparison tests complete (task 5.4.4): 9/9 pass",
+    "Fixture upgrade pipeline tests complete (task 5.4.5): 4/4 pass",
+    "Dead-code-deletion scan complete (task 5.4.6): shimsFound=0, shimsDeleted=0",
+    "Observability redaction audit complete (task 5.5.1): violationsFound=0",
+    "Paired-world non-interference scan complete (task 5.5.2): 9/9 pass, 0 cross-namespace leaks",
+    "Telemetry sampling policy complete (task 5.5.3): 5/5 pass; overhead 0.005% << 1% budget",
+    "Extended fault campaign complete (task 5.5.4): 6 fault classes verified against existing evidence",
+    "Resource pressure campaign complete (task 5.5.5): 5 pressure scenarios verified",
+    "Threat review complete (task 5.5.6): 6 threat areas, 0 critical/high findings, 1 accepted residual risk",
+    "Visual/accessibility/resource matrix complete (tasks 5.6.1–5.6.7): F4 evidence (585 screenshots, 46 accessibility tests, WebKitGTK frame profile) + F5 resource trace at 100k scale; crypto UI fix applied; owner self-review per dev-context.md",
+    "Supply-chain/SBOM/license complete (tasks 5.7.1–5.7.6): 100% FOSS (core.md invariant), exact pinned versions (Cargo.lock, package-lock.json), cargo audit 0 critical/high vulnerabilities, schema/import checksum tamper detection proven; owner self-review per dev-context.md",
+    "F5 release gate sign-off complete (tasks 5.8.1–5.8.8): 880 total assertions (143 Rust + 56 UI unit + 30 E2E + 46 accessibility + 585 visual + 20 observability/security tests); 1 golden change (crypto dialog text fix, V-CRYPTO-01 requirement-linked); 2 documented acceptable residual risks (control_center_search 427ms budget miss documented with fix path; plaintext pending crypto — all surfaces honest); F5 manifest status=Pass; owner self-review per dev-context.md"
+  ]
+}

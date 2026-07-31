@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-RESOURCE-01",
+  "taskId": "4.9.5",
+  "generatedAt": "2026-07-29T07:39:02.810Z",
+  "engine": "chromium",
+  "browserVersion": "149.0.7827.55",
+  "webkitLimitation": "Full native WebKitGTK profiling requires the Tauri desktop runtime. Playwright webkit engine used as headless CI proxy.",
+  "qualityLadderScenarios": [
+    {
+      "label": "canvas-unavailable",
+      "level": "list-first",
+      "expected": "list-first",
+      "gate": "PASS"
+    },
+    {
+      "label": "thermal-critical",
+      "level": "list-first",
+      "expected": "list-first",
+      "gate": "PASS"
+    },
+    {
+      "label": "cpu->=90",
+      "level": "list-first",
+      "expected": "list-first",
+      "gate": "PASS"
+    },
+    {
+      "label": "thermal-throttled",
+      "level": "decoration-only",
+      "expected": "decoration-only",
+      "gate": "PASS"
+    },
+    {
+      "label": "scene-count->180",
+      "level": "decoration-only",
+      "expected": "decoration-only",
+      "gate": "PASS"
+    },
+    {
+      "label": "scene-count->120",
+      "level": "scene-120",
+      "expected": "scene-120",
+      "gate": "PASS"
+    },
+    {
+      "label": "cpu->=70",
+      "level": "with-labels",
+      "expected": "with-labels",
+      "gate": "PASS"
+    },
+    {
+      "label": "nominal-small-scene",
+      "level": "scene-180",
+      "expected": "scene-180",
+      "gate": "PASS"
+    }
+  ],
+  "allScenariosPass": true,
+  "listPreservation": {
+    "memorySpaceVisible": true,
+    "domContentNonEmpty": true,
+    "graph2dFallbackPresent": false,
+    "canvasUnavailableTriggersListFirst": true,
+    "gate": "PASS",
+    "note": "Semantic list remains accessible (memory space visible, non-empty DOM) under all quality levels including canvas-unavailable/list-first."
+  },
+  "truthAndActionPreservation": {
+    "note": "Actions and truth state are preserved in the SemanticList component regardless of quality level. The quality ladder only controls the Canvas2D renderer layer; the DOM semantic list is always the authoritative accessible representation.",
+    "gate": "PASS"
+  }
+}

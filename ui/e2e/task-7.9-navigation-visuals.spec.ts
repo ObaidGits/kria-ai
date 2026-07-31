@@ -69,8 +69,8 @@ test.describe("Task 7.9 mode navigation visuals", () => {
       await expect(dock.getByRole("button", { name, exact: true })).toBeVisible();
     }
     // Primary emphasis on Converse + three decorative group separators.
-    await expect(page.locator(".kria-dock__button--primary")).toHaveCount(1);
-    await expect(page.locator(".kria-dock__separator")).toHaveCount(3);
+    await expect(page.locator(".kria-navrail__button--primary")).toHaveCount(1);
+    await expect(page.locator(".kria-navrail__separator")).toHaveCount(3);
 
     await dock.screenshot({ path: evidencePath(project, "dock-standard"), animations: "disabled" });
   });
@@ -82,7 +82,7 @@ test.describe("Task 7.9 mode navigation visuals", () => {
 
     const dock = page.getByRole("navigation", { name: "Spaces" });
     // Visible label text is hidden in Compact …
-    await expect(dock.locator(".kria-dock__label").first()).toBeHidden();
+    await expect(dock.locator(".kria-navrail__label").first()).toBeHidden();
     // … but every Space is still reachable BY ITS ACCESSIBLE NAME (aria-label).
     await expect(dock.getByRole("button")).toHaveCount(7);
     for (const name of CANONICAL) {

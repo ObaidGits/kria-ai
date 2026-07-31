@@ -12,7 +12,18 @@ pub fn classify_type(content: &str, proposed: Option<&MemoryType>, source: &Sour
         return t.clone();
     }
     let lower = content.to_lowercase();
-    if matches!(source, Source::Tool(_) | Source::Mcp { .. }) {
+    // Every invocation source's outcome is capability knowledge (design §46.1,
+    // MGR-044 AC1: "native tool, MCP tool, OpenClaw skill, or sidecar task").
+    // `Source::OpenClaw`/`Source::Sidecar` were added to this arm at task
+    // F1.5.4: before that, every outcome writer uniformly tagged its source
+    // `Source::Tool` (see `classify_tool_outcome_source`), so this arm's
+    // narrower match was never actually exercised by an OpenClaw/sidecar
+    // outcome in practice — now that the write path attributes its real
+    // source, this classification must cover all four.
+    if matches!(
+        source,
+        Source::Tool(_) | Source::Mcp { .. } | Source::OpenClaw(_) | Source::Sidecar(_)
+    ) {
         return MemoryType::Capability;
     }
     if lower.contains("failed") || lower.contains("error") || lower.contains("could not") {
@@ -88,6 +99,31 @@ pub fn estimate_tokens(content: &str) -> u32 {
     ((content.len() as f32) / 4.0).ceil() as u32
 }
 
+/// First-person preference/identity phrasing that marks `content` as a durable
+/// user-preference statement worth an eager `user_preference` fact write,
+/// ahead of (and independent from) the slow-path LLM
+/// [`crate::memory::semantic_parser::SemanticMemoryParser`] extraction. This is
+/// the deterministic classification rule the desktop/server adapters
+/// previously duplicated inline (task F1.5.2: adapters construct
+/// caller/command only and carry no standalone domain-classification
+/// decision) — LLM-free (L8), matching this module's other governance rules.
+pub fn is_preference_statement(content: &str) -> bool {
+    const PATTERNS: [&str; 10] = [
+        "i prefer ",
+        "i like ",
+        "my name is ",
+        "i am a ",
+        "i work ",
+        "i use ",
+        "my favorite ",
+        "i always ",
+        "i never ",
+        "i live ",
+    ];
+    let lower = content.to_lowercase();
+    PATTERNS.iter().any(|p| lower.contains(p))
+}
+
 /// Quality filter: is this event noise not worth deriving a memory from?
 /// (design §18.2 / R4). Deterministic.
 pub fn is_noise(content: &str) -> bool {
@@ -153,5 +189,14 @@ mod tests {
         assert!(is_noise("cancelled"));
         assert!(is_noise("  "));
         assert!(!is_noise("the user prefers dark mode"));
+    }
+
+    #[test]
+    fn preference_statement_detection() {
+        assert!(is_preference_statement("I prefer dark mode"));
+        assert!(is_preference_statement("My name is Alice"));
+        assert!(is_preference_statement("I live in Berlin"));
+        assert!(!is_preference_statement("the build failed with an error"));
+        assert!(!is_preference_statement(""));
     }
 }

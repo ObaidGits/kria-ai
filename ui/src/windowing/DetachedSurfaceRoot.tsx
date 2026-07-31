@@ -16,7 +16,7 @@ import { ApprovalCenter } from "../shell/approvals";
 import { ModalHost } from "../shell/ModalHost";
 import MessageStream from "../shell/spaces/converse/MessageStream";
 import Composer from "../shell/spaces/converse/Composer";
-import KnowledgeGraphLens from "../shell/spaces/memory/graph/KnowledgeGraphLens";
+import { Knowledge } from "../shell/spaces/memory/destinations/Knowledge";
 import ConstellationLens from "../shell/spaces/capabilities/constellation/ConstellationLens";
 import RemoteDesktopCanvas from "../shell/spaces/machines/RemoteDesktopCanvas";
 import { NowRegion } from "../shell/spaces/ObservatorySpace";
@@ -140,7 +140,30 @@ function DetachedLens() {
     <section class="kria-detached__lens" aria-label="Detached lens">
       <Show
         when={windowPresentation.context() === "capabilities"}
-        fallback={<KnowledgeGraphLens />}
+        fallback={
+          <Knowledge
+            items={[]}
+            scene={null}
+            selectedId={null}
+            focusTrail={[]}
+            loadedNodeCount={0}
+            snapshotItemCount={null}
+            graphRevision={null}
+            snapshotTruncated={false}
+            filterQuery=""
+            inspectorAvailable={false}
+            pathAvailable={false}
+            correctionAvailable={false}
+            mapParityReady={false}
+            isLoading={false}
+            onFilterQuery={() => {}}
+            onSelectItem={() => {}}
+            onOpenInspector={() => {}}
+            onRequestPath={() => {}}
+            onBack={() => {}}
+            onReset={() => {}}
+          />
+        }
       >
         <ConstellationLens />
       </Show>

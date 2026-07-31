@@ -29,7 +29,7 @@
  *  R4/5/6 Composer .......... Composer.test.tsx, Composer.stageSend.test.tsx (stage-not-send / draft / Send↔Stop)
  *  R5  Chips ................ ContextualChips.test.tsx (≤3 / stage|route only / omit when no action)
  *  R6  Orbit ................ ContextualOrbit.test.tsx (partial / routing-only / static-dot fallback)
- *  R7/14 Hidden Dock ........ HiddenDock.test.tsx (invisible-at-rest / reveal triggers / AT reach / dismiss)
+ *  R7/14 Navigation Rail ... NavigationRail.test.tsx (canonical order / AT reach / modes)
  *  R8  ACS .................. AdaptiveContextSurface.test.tsx (single subject / ≤1 action / dissolve-no-empty-box)
  *                             + this file (Voice-Line/ACS same-subject binding via deriveFocusFrame)
  *  R9  Trust ................ TrustIndicator.test.tsx, trustIndicator.pbt.test.ts

@@ -1,0 +1,74 @@
+[
+  {
+    "label": "ultrawide",
+    "width": 3440,
+    "height": 1440,
+    "device_pixel_ratio_x100": 100,
+    "composition": "three_pane",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "desktop_wide",
+    "width": 1920,
+    "height": 1080,
+    "device_pixel_ratio_x100": 100,
+    "composition": "three_pane",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "desktop",
+    "width": 1280,
+    "height": 800,
+    "device_pixel_ratio_x100": 100,
+    "composition": "three_pane",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "tablet",
+    "width": 1000,
+    "height": 800,
+    "device_pixel_ratio_x100": 200,
+    "composition": "rail_overlay",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "small",
+    "width": 760,
+    "height": 600,
+    "device_pixel_ratio_x100": 100,
+    "composition": "single_column",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "min_640x480",
+    "width": 640,
+    "height": 480,
+    "device_pixel_ratio_x100": 100,
+    "composition": "single_column",
+    "coarse_pointer": false,
+    "zoom_percent": 100
+  },
+  {
+    "label": "coarse_pointer",
+    "width": 800,
+    "height": 1200,
+    "device_pixel_ratio_x100": 300,
+    "composition": "single_column",
+    "coarse_pointer": true,
+    "zoom_percent": 100
+  },
+  {
+    "label": "zoom_200",
+    "width": 1280,
+    "height": 800,
+    "device_pixel_ratio_x100": 100,
+    "composition": "list_first",
+    "coarse_pointer": false,
+    "zoom_percent": 200
+  }
+]

@@ -3,6 +3,7 @@
 // modules are deleted at task 19 (hard cutover). See
 // `.kiro/specs/memory-upgrade/`.
 pub mod api;
+pub mod authority;
 pub mod causal;
 pub mod cognition;
 pub mod cold_start;
@@ -18,6 +19,7 @@ pub mod extraction;
 pub mod feedback;
 pub mod goals;
 pub mod governance;
+pub mod graph;
 pub mod graph_intel;
 pub mod ids;
 pub mod integration;
@@ -27,11 +29,14 @@ pub mod library;
 pub mod lifecycle;
 pub mod maintenance;
 pub mod merge;
+pub mod model;
 pub mod modes;
 pub mod observability;
 pub mod planning;
+pub mod policy;
 pub mod reasoning;
 pub mod research;
+pub mod retrieval;
 pub mod retrieval_opt;
 pub mod retriever;
 pub mod runtime_backend;
@@ -43,6 +48,7 @@ pub mod sensitivity;
 pub mod stores;
 pub mod truth;
 pub mod types;
+pub mod worker_pool;
 pub mod write_policy;
 
 pub mod active_learning;
@@ -61,3 +67,7 @@ pub use runtime_types::{
     PreferenceRecord,
 };
 pub use semantic_parser::{MemoryExtraction, SemanticMemoryParser};
+
+// ── Integration tests ─────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests;

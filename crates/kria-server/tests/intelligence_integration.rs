@@ -17,6 +17,17 @@ use tokio::net::TcpListener;
 // ── Test helpers ────────────────────────────────────────────────────
 
 /// Build app with default config (all intelligence flags OFF).
+/// The authenticated-remote caller the server adapter constructs at its
+/// boundary (F1.2.4) — shared by the test `ServerState` literals.
+fn test_caller() -> kria_core::memory::model::CallerContext {
+    kria_core::memory::model::CallerContext::authenticated_remote(
+        "test-server",
+        "test-server",
+        kria_core::memory::model::PolicyPartition::new("user", "chat", 0).unwrap(),
+    )
+    .unwrap()
+}
+
 async fn build_app_default() -> Router {
     let config = kria_core::config::KriaConfig::default();
     let fleet = Arc::new(
@@ -37,6 +48,7 @@ async fn build_app_default() -> Router {
         notifier: None,
         session_store: None,
         memory_system: None,
+        caller: test_caller(),
         remote_desktop: None,
         remote_desktop_backend: None,
     });
@@ -88,6 +100,7 @@ async fn build_app_executive() -> Router {
         notifier: None,
         session_store: None,
         memory_system: None,
+        caller: test_caller(),
         remote_desktop: None,
         remote_desktop_backend: None,
     });

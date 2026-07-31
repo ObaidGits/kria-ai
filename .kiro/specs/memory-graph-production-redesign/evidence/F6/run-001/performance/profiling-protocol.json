@@ -1,0 +1,275 @@
+{
+  "schema_version": "1.0.0",
+  "gate": "F6",
+  "run_id": "run-001",
+  "status": "PENDING_EXECUTION",
+  "reference_hardware": "RHW-001",
+  "fixture": {
+    "id": "mg-medium-v2",
+    "version": "0.1.0",
+    "seed_hex": "0x4D475203",
+    "path_dir": "tests/fixtures/memory-graph/generated/mg-medium-v2/0.1.0/",
+    "scene_size": "maximum_path_scene"
+  },
+  "protocol_note": "This protocol defines the measurements to collect during the F6 spike performance run on reference hardware RHW-001. No data has been collected yet. All thresholds are preregistered from design.md §4.7.8 and §4.8.9. Execute CMD-MG-PROFILE-SPIKE to collect data and populate evidence/F6/run-001/performance/results/.",
+
+  "load_conditions": {
+    "idle": {
+      "description": "No competing local model inference. System at desktop idle. Only KRIA process running. No browser, no LLM backend process active.",
+      "warm_up_steps": [
+        "Launch KRIA and navigate to Knowledge destination.",
+        "Load mg-medium-v2/0.1.0 fixture.",
+        "Execute one path query (discard data — warm-up only).",
+        "Wait 5 seconds for JIT/GC to settle.",
+        "Begin measurements."
+      ]
+    },
+    "local_model_contention": {
+      "description": "Local model (all-MiniLM-L6-v2 via ONNX Runtime) actively performing embedding inference on a background corpus of 500 records simultaneously with 3D rendering. This simulates the worst-case ambient cognition scenario from design.md §4.8.",
+      "contention_process": "CMD-MG-CONTENTION-LOAD — background embedding loop on mg-medium-v2 entity records, one batch per 200ms, serialized through the same ort runtime instance used by the retrieval pipeline.",
+      "warm_up_steps": [
+        "Launch KRIA and navigate to Knowledge destination.",
+        "Load mg-medium-v2/0.1.0 fixture.",
+        "Start CMD-MG-CONTENTION-LOAD in background.",
+        "Wait 10 seconds for thermal and JIT equilibrium.",
+        "Execute one path query (discard data — warm-up only).",
+        "Wait 5 seconds.",
+        "Begin measurements."
+      ]
+    }
+  },
+
+  "measurement_categories": {
+    "fps": {
+      "description": "Rendered frames per second during active path-scene interaction.",
+      "tool_api": "requestAnimationFrame timestamp delta, computed over a 1-second sliding window by ProfilingSession.addFrameSample()",
+      "sample_count_required": 300,
+      "sample_unit": "frames (one FrameTimingSample per rAF callback)",
+      "warm_up_frames": 30,
+      "collection_note": "Record timestamps via performance.now() at each rAF callback. Derive FPS from inverse of mean frame time over the trailing 60 frames.",
+      "pass_threshold": "p95 frame time ≤ 33.3ms (≥30 FPS at p95)",
+      "fail_threshold": "p95 frame time > 33.3ms"
+    },
+    "frame_time": {
+      "description": "Per-frame render duration from rAF callback start to draw-call completion.",
+      "tool_api": "performance.now() delta bracketing the Three.js renderer.render() call in graphCanvas3DSpike.ts",
+      "sample_count_required": 300,
+      "sample_unit": "milliseconds per frame (FrameTimingSample.durationMs)",
+      "warm_up_frames": 30,
+      "collection_note": "Record durationMs = end - start around each renderer.render() invocation. Feed into ProfilingSession.addFrameSample().",
+      "pass_threshold": "p95 ≤ 33.3ms; p99 ≤ 50ms",
+      "fail_threshold": "p95 > 33.3ms OR p99 > 50ms"
+    },
+    "cpu_pct": {
+      "description": "CPU utilization percentage of the KRIA process during active rendering.",
+      "tool_api": "Linux: /proc/[pid]/stat sampled at 500ms intervals via CMD-MG-PROFILE-CPU sidecar; macOS: top -pid [pid] -l 0 -s 0.5",
+      "sample_count_required": 60,
+      "sample_unit": "percent (0–100)",
+      "warm_up_seconds": 5,
+      "collection_note": "Average over the 60-second measurement window under each load condition.",
+      "pass_threshold": "mean CPU ≤ 80% under local-model contention",
+      "fail_threshold": "mean CPU > 80% under local-model contention"
+    },
+    "gpu_pct": {
+      "description": "GPU utilization percentage during active 3D path-scene rendering.",
+      "tool_api": "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits -l 1 (NVIDIA); intel_gpu_top (Intel); radeontop (AMD). Fallback: unavailable — record as null.",
+      "sample_count_required": 60,
+      "sample_unit": "percent (0–100) or null if GPU monitoring unavailable",
+      "warm_up_seconds": 5,
+      "collection_note": "Sample at 1-second intervals for 60 seconds during peak rendering.",
+      "pass_threshold": "mean GPU ≤ 90% under local-model contention",
+      "fail_threshold": "mean GPU > 90% under local-model contention"
+    },
+    "ram_bytes": {
+      "description": "RSS (resident set size) of the KRIA process during active rendering.",
+      "tool_api": "Linux: /proc/[pid]/status VmRSS sampled at 500ms intervals; macOS: ps -o rss= -p [pid]",
+      "sample_count_required": 60,
+      "sample_unit": "bytes",
+      "warm_up_seconds": 5,
+      "collection_note": "Record peak and mean RSS over the 60-second window. Peak is the binding threshold value.",
+      "pass_threshold": "peak RSS ≤ 512 MiB during rendering under local-model contention",
+      "fail_threshold": "peak RSS > 512 MiB"
+    },
+    "vram_bytes": {
+      "description": "GPU VRAM consumed by the WebGL context for the 3D path scene.",
+      "tool_api": "WEBGL_debug_renderer_info + EXT_disjoint_timer_query for size estimation; nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits (NVIDIA); null if unavailable.",
+      "sample_count_required": 10,
+      "sample_unit": "bytes or null if VRAM monitoring unavailable",
+      "warm_up_seconds": 2,
+      "collection_note": "Sample at scene load, after 30s of interaction, and at peak. Record minimum, mean, peak.",
+      "pass_threshold": "peak VRAM ≤ 256 MiB for the WebGL context",
+      "fail_threshold": "peak VRAM > 256 MiB"
+    },
+    "heap_bytes": {
+      "description": "JavaScript heap used and total bytes during rendering.",
+      "tool_api": "performance.memory.usedJSHeapSize and totalJSHeapSize (Chrome/Chromium WebView only). Fallback: HeapSample via ProfilingSession.addHeapSample() with estimated values.",
+      "sample_count_required": 60,
+      "sample_unit": "bytes (heapUsedBytes, heapTotalBytes)",
+      "warm_up_seconds": 5,
+      "collection_note": "Sample at 500ms intervals. Record peak heapUsedBytes over the window. Feed into ProfilingSession.addHeapSample().",
+      "pass_threshold": "peak heap ≤ 150 MiB used",
+      "fail_threshold": "peak heap > 150 MiB used"
+    },
+    "gc_pause_ms": {
+      "description": "GC pause durations observed during rendering.",
+      "tool_api": "PerformanceObserver({ entryTypes: ['measure'] }) wrapping GC events in Chromium DevTools; or Node.js --expose-gc with gc() timing. Production: indirect detection via frame-time spike correlation.",
+      "sample_count_required": "all GC pauses during the 60-second window (may be 0 if no GC occurs)",
+      "sample_unit": "milliseconds per pause (GcPauseSample.pauseMs)",
+      "warm_up_seconds": 5,
+      "collection_note": "Record every detected GC pause as a GcPauseSample. Feed into ProfilingSession.addGcPauseSample(). Record gcType as 'minor', 'major', or 'unknown'.",
+      "pass_threshold": "no individual GC pause ≥ 50ms",
+      "fail_threshold": "any GC pause ≥ 50ms"
+    },
+    "idle_cpu_delta": {
+      "description": "CPU utilization delta between idle baseline and active-rendering state. Measures the incremental CPU cost of the 3D renderer.",
+      "tool_api": "Computed from cpu_pct measurements: idle_cpu_delta = mean_rendering_cpu_pct - mean_idle_cpu_pct. Both measurements use the same sampling tool.",
+      "sample_count_required": "derived from cpu_pct samples (no additional samples required)",
+      "sample_unit": "percentage points",
+      "warm_up_seconds": "inherits from cpu_pct warm-up",
+      "collection_note": "Measure CPU under pure idle (no rendering), then under rendering. Subtract. This isolates the renderer's CPU contribution.",
+      "pass_threshold": "idle_cpu_delta ≤ 40 percentage points under local-model contention",
+      "fail_threshold": "idle_cpu_delta > 40 percentage points under local-model contention"
+    }
+  },
+
+  "thresholds": {
+    "source": "design.md §4.7.8, §4.8.9; preregistration task_6_1_x",
+    "fps_p95_frame_time_ms": {
+      "value": 33.3,
+      "operator": "le",
+      "description": "p95 frame time must be ≤ 33.3ms (≥30 FPS) — from design.md §4.7.8 quality ladder"
+    },
+    "fps_p99_frame_time_ms": {
+      "value": 50.0,
+      "operator": "le",
+      "description": "p99 frame time must be ≤ 50ms — prevents visible jank at the 99th percentile"
+    },
+    "gc_pause_max_ms": {
+      "value": 50.0,
+      "operator": "lt",
+      "description": "No GC pause may be ≥ 50ms — GC pauses above this threshold cause a visible dropped frame"
+    },
+    "heap_peak_bytes": {
+      "value": 157286400,
+      "operator": "le",
+      "description": "Peak JS heap ≤ 150 MiB (157,286,400 bytes)"
+    },
+    "ram_peak_bytes": {
+      "value": 536870912,
+      "operator": "le",
+      "description": "Peak RSS ≤ 512 MiB (536,870,912 bytes)"
+    },
+    "vram_peak_bytes": {
+      "value": 268435456,
+      "operator": "le",
+      "description": "Peak VRAM ≤ 256 MiB (268,435,456 bytes)"
+    },
+    "cpu_mean_pct_contention": {
+      "value": 80.0,
+      "operator": "le",
+      "description": "Mean CPU ≤ 80% under local-model contention"
+    },
+    "idle_cpu_delta_pct": {
+      "value": 40.0,
+      "operator": "le",
+      "description": "Renderer incremental CPU ≤ 40 percentage points above idle baseline"
+    },
+    "minimum_frame_samples": {
+      "value": 30,
+      "operator": "ge",
+      "description": "At least 30 FrameTimingSamples required for p95/p99 computation — matches ProfilingSession.computeP95FrameTime() null guard"
+    }
+  },
+
+  "interaction_phases": [
+    {
+      "phase": "load",
+      "description": "Load the maximum-path-scene for mg-medium-v2/0.1.0 (longest available path in the fixture). Measure time from query dispatch to first rendered frame.",
+      "duration_seconds": 5,
+      "measurement_active": ["fps", "frame_time", "heap_bytes", "vram_bytes"]
+    },
+    {
+      "phase": "navigate",
+      "description": "Orbit/pan/zoom the 3D scene through 10 distinct camera positions (preregistered in CMD-MG-PROFILE-SPIKE). Each camera transition is triggered by a simulated pointer event.",
+      "duration_seconds": 30,
+      "measurement_active": ["fps", "frame_time", "cpu_pct", "gpu_pct", "heap_bytes", "gc_pause_ms"]
+    },
+    {
+      "phase": "interact",
+      "description": "Select 5 distinct nodes in sequence via simulated click events. For each selection, allow the Inspector to load (up to 2s). Measure rendering during Inspector load contention.",
+      "duration_seconds": 20,
+      "measurement_active": ["fps", "frame_time", "cpu_pct", "heap_bytes", "gc_pause_ms"]
+    },
+    {
+      "phase": "idle",
+      "description": "Allow scene to go idle (no input, no scene change) for 3 seconds. Verify shouldStopRendering fires at >2000ms per design §4.8.9. Measure CPU during idle render-stop.",
+      "duration_seconds": 5,
+      "measurement_active": ["cpu_pct", "idle_cpu_delta"]
+    },
+    {
+      "phase": "context_loss_simulation",
+      "description": "Trigger a simulated WebGL context loss event (WEBGL_lose_context.loseContext()). Measure time to fallback activation and any associated GC pauses.",
+      "duration_seconds": 10,
+      "measurement_active": ["fps", "frame_time", "heap_bytes", "gc_pause_ms"]
+    }
+  ],
+
+  "instrumentation": {
+    "typescript_module": "ui/src/shell/spaces/memory/graph/profiling3D.ts",
+    "session_class": "ProfilingSession",
+    "integration_points": [
+      "Call ProfilingSession.addFrameSample() at each rAF callback in graphCanvas3DSpike.ts.",
+      "Call ProfilingSession.addHeapSample() every 500ms via a setInterval during the profiling window.",
+      "Call ProfilingSession.addGcPauseSample() from the PerformanceObserver GC handler.",
+      "Call ProfilingSession.toReport() at the end of each interaction phase to snapshot metrics.",
+      "Check ProfilingSession.checkFpsThreshold() and ProfilingSession.checkGcThreshold() after each phase; log PASS/FAIL/insufficient-data."
+    ]
+  },
+
+  "output_artifacts": {
+    "results_dir": "evidence/F6/run-001/performance/results/",
+    "files": [
+      {
+        "path": "results/idle-condition.json",
+        "description": "ProfilingReport for all phases under idle load condition",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/contention-condition.json",
+        "description": "ProfilingReport for all phases under local-model contention",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/raw-frame-samples-idle.json",
+        "description": "All FrameTimingSamples collected under idle condition",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/raw-frame-samples-contention.json",
+        "description": "All FrameTimingSamples collected under contention condition",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/raw-gc-samples.json",
+        "description": "All GcPauseSamples across both conditions",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/raw-heap-samples.json",
+        "description": "All HeapSamples across both conditions",
+        "status": "PENDING_EXECUTION"
+      },
+      {
+        "path": "results/system-metrics.json",
+        "description": "CPU/GPU/RAM/VRAM time-series sampled by CMD-MG-PROFILE-CPU sidecar",
+        "status": "PENDING_EXECUTION"
+      }
+    ]
+  },
+
+  "go_no_go_criteria": {
+    "go": "All eight thresholds pass under BOTH idle and local-model contention conditions.",
+    "no_go": "Any single threshold fails under local-model contention. A fail under idle only (with pass under contention) is treated as a protocol error — re-run idle.",
+    "insufficient_data": "Any ProfilingSession reports insufficient-data for fps or gc thresholds after a full run. Re-run the affected phase with increased sample count."
+  }
+}

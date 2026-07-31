@@ -1,0 +1,10 @@
+{
+  "task": "4.9.5",
+  "description": "WebKitGTK frame/idle/heap/quality-ladder profiles; p95 frame ≤33.3ms, loops stop ≤2s, idle CPU delta ≤2pp, bounded heap/queues, list preservation",
+  "timestamp": "2025-07-28T00:00:00Z",
+  "status": "deferred-nbw",
+  "disposition": "NBW-F4-01",
+  "note": "WebKitGTK frame/idle/heap profiling is a heavy run requiring a running Tauri window, WebKitGTK inspector, and sustained measurement sessions on the owner laptop. Deferred to F5 per NBW deferral pattern established in F3. The lensController unit tests (lensController.test.ts) verify that the render loop freezes on idle and stops within the required time budget at the unit level. The 100k fixture and full quality-ladder run are also deferred as NBW-F4-04.",
+  "deferredTo": "F5",
+  "nbrIds": ["NBW-F4-01", "NBW-F4-04"]
+}

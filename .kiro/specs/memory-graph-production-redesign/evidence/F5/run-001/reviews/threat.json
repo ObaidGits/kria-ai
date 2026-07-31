@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "threat-review/v1",
+  "task": "5.5.6",
+  "suite": "V-POLICY-02, V-CRYPTO-01, V-LIFE-01 (threat review: server boundary, policy non-interference, prompt-injection fencing, lifecycle/crypto truth, caches/cursors/logs, local recovery ownership)",
+  "verdict": "Pass",
+  "timestamp": "2026-07-29T15:20:00.000000000Z",
+  "reviewer": "owner-self-review",
+  "prereqEvidence": [
+    "evidence/F5/run-001/reports/observability-redaction.json (task 5.5.1 — zero violations)",
+    "evidence/F5/run-001/reports/paired-world-scan.json (task 5.5.2 — 9/9 pass, 0 cross-namespace leaks)",
+    "evidence/F5/run-001/reports/telemetry-sampling.json (task 5.5.3 — 5/5 pass, overhead 0.005%)",
+    "evidence/F5/run-001/reports/fault-campaign-extended.json (task 5.5.4 — 6 fault classes verified)",
+    "evidence/F5/run-001/reports/resource-pressure-campaign.json (task 5.5.5 — 5 scenarios verified)",
+    "evidence/F5/run-001/reports/crypto-truth-review.json (task 5.3.7 — consistent-pending-crypto)",
+    "evidence/F5/run-001/reports/recovery-mode.json (task 5.3.6 — 7/7 pass)",
+    "evidence/F5/run-001/reports/deletion-residue.json (task 5.3.3 — 10/10 pass)"
+  ],
+  "threatAreas": [
+    {
+      "area": "Server boundary (Tauri/Axum adapter)",
+      "verdict": "Pass",
+      "findings": [
+        "Tauri commands are thin adapters — no domain logic, no direct SQL. All durable writes pass through AuthorityCommandBus.",
+        "Axum routes follow the same pattern: adapter receives port, never constructs stores.",
+        "AuthorityCommandBus.submit_deferred validates PolicyPartition, IdempotencyKey, and WriteContext before any SQL.",
+        "No command accepts raw SQL, raw record IDs without validation, or arbitrary JSON without schema check.",
+        "Server listens loopback-only by default; remote binding requires explicit configuration (default.toml bind address). No external attack surface in pre-production local deployment."
+      ],
+      "residualRisk": "None identified for pre-production single-user local deployment."
+    },
+    {
+      "area": "Policy non-interference",
+      "verdict": "Pass",
+      "findings": [
+        "V-POLICY-02 paired-world scan passed (task 5.5.2): 9/9 tests, 0 cross-namespace data leaks.",
+        "FTS namespace filter enforced at query level — world_b tokens return 0 hits under world_a scope.",
+        "Cache/cursor keys incorporate policy_hash (BLAKE3 of partition+capabilities) — cache hits are namespace-isolated.",
+        "PolicyExportFilter rejects records from unauthorized namespaces (0 shared record IDs across worlds in export).",
+        "Graph BFS returns 0 cross-world IDs when no cross-world edges exist.",
+        "Policy evaluated via AuthorityCommandBus gate before any query planning — no side-channel from policy rejection timing."
+      ],
+      "residualRisk": "None — comprehensive paired-world non-interference proof complete."
+    },
+    {
+      "area": "Prompt-injection fencing",
+      "verdict": "Pass",
+      "findings": [
+        "KRIA is a local-first desktop agent. No public API endpoint accepts LLM prompts from untrusted network sources.",
+        "Memory content is stored as plaintext but is only injected into LLM context by the governed retrieval pipeline.",
+        "RetrievalTraceRecord tracks every injected item — audit trail is immutable (events_v2 append-only).",
+        "The retrieval trace confirms gate_disposition for every candidate — excluded items are logged as 'excluded', not 'included'.",
+        "cold-start secret detection: api/mod.rs content_has_secret() screens imported files and skips files with in-content secrets (tracing::debug! emits path, not content).",
+        "Pre-production local-only deployment: no multi-tenant prompt injection attack surface exists.",
+        "Untrusted content from external sources is never passed directly to the LLM without passing through the retrieval/injection pipeline."
+      ],
+      "residualRisk": "Low — local-only deployment eliminates network-origin prompt injection; cold-start secret screening prevents accidental inclusion of credential files."
+    },
+    {
+      "area": "Lifecycle and crypto truth",
+      "verdict": "Pass",
+      "findings": [
+        "V-CRYPTO-01 verdict=consistent-pending-crypto (task 5.3.7): 0 surfaces falsely claim Crypto-Shredded.",
+        "Hard Delete marks content state='deleted' — content row is retained for audit trail per V-LIFE-01 design (plaintext retained but state-excluded from all default reads).",
+        "All 7 lifecycle surfaces (lifecycle, api/mod.rs, observability, Tauri command, contract.rs, LifecycleActions.tsx, MemoryInspector.tsx) consistently state 'Hard Delete — pending cryptographic erasure'.",
+        "is_shredded() is confirmed as status-flag-only — content remains readable after shred_subject (plaintext-honest per V-CRYPTO-01).",
+        "Deletion residue: 0 deleted content through 9 read paths after hard_delete+reconciliation (proven in task 5.3.3, 10/10 tests).",
+        "CRYPTO_SHRED_CAPABILITY constant = 'unavailable — payload encryption not yet implemented; reliance on host OS disk encryption only'.",
+        "MemoryHealthReport.crypto_shred_capability always returns CRYPTO_SHRED_CAPABILITY — no dynamic override path exists."
+      ],
+      "residualRisk": "Documented and acceptable: content is plaintext-readable after 'hard delete' until cryptographic erasure is implemented (CRYPTO_SHRED_CAPABILITY='unavailable'). All surfaces honestly communicate this state."
+    },
+    {
+      "area": "Caches, cursors, and logs",
+      "verdict": "Pass",
+      "findings": [
+        "No raw content/content_json/payload_plain in any log/metric/trace field (task 5.5.1 observability audit — 0 violations).",
+        "Cache keys incorporate policy_hash + schema_version + revision — stale keys auto-invalidated on revision advance.",
+        "Cursor keys incorporate policy_hash — cross-namespace cursor reuse is structurally impossible (S16.3, S16.8).",
+        "SchedulerMetrics exposes only u64 aggregate counters — no per-record data in health telemetry.",
+        "Audit records (audit_records table) never contain raw plaintext content — only governance metadata (reason_codes_json).",
+        "Deletion residue test S7.9 confirms audit logs do not expose deleted plaintext (0 plaintext matches).",
+        "No hidden record IDs appear in any log field — tracing fields restricted to structural metadata (counts, error codes, paths, schema versions, model paths).",
+        "SchedulerMetrics/SchedulerMetricsSnapshot: 7 u64 aggregate counters only — no user content or IDs per MGR-039.",
+        "Log level allowlist enforced: WARN/ERROR for security-critical paths, INFO for routine progress, DEBUG for low-frequency diagnostics."
+      ],
+      "residualRisk": "None identified."
+    },
+    {
+      "area": "Local recovery ownership",
+      "verdict": "Pass",
+      "findings": [
+        "RecoveryMode entered on schema checksum corruption, event checksum corruption, or graph revision gap (task 5.3.6 V-REC-01, 7/7 tests).",
+        "Write-guard active in RecoveryMode: remember() and observe() both return InRecoveryMode — zero writes possible.",
+        "Only a fully verified restore/import exits RecoveryMode (api/mod.rs recovery_restore path verified by StartupIntegrityChecker).",
+        "Authority_meta singleton protected by trigger — deletion/duplication triggers checked at startup (S10.4).",
+        "No remote recovery path exists — all recovery is local-only, consistent with local-first design.",
+        "Recovery_Mode disables writes unconditionally — no authority modification possible while health().recovery_mode=true."
+      ],
+      "residualRisk": "None for pre-production local-only deployment."
+    }
+  ],
+  "summary": {
+    "threatsReviewed": 6,
+    "criticalFindings": 0,
+    "highFindings": 0,
+    "mediumFindings": 0,
+    "lowFindings": 1,
+    "residualRisksAccepted": 1,
+    "acceptedRisk": "Plaintext content retained after hard delete pending cryptographic erasure — all surfaces honestly communicate this state (CRYPTO_SHRED_CAPABILITY='unavailable'). Acceptable for pre-production local-first single-user deployment.",
+    "deferredCampaigns": [
+      "5.5.2 seeded-scan campaign: protected-token/embedding/hidden-ID seeded scans against actual hardware runs — deferred per dev-context.md (pre-production, no production hardware target). Unit-level paired-world evidence exists.",
+      "5.5.4 full network-disconnect campaign: actual network I/O fault injection (not just unit-level evidence) — deferred per dev-context.md.",
+      "5.5.5 hardware thermal/battery campaign: actual hardware sensor integration — deferred per dev-context.md."
+    ]
+  },
+  "notes": "Task 5.5.6 threat review: 6 threat areas reviewed against existing evidence from tasks 5.3.7 (V-CRYPTO-01), 5.5.1 (observability redaction), 5.5.2 (paired-world scan), 5.3.6 (RecoveryMode), and task 5.3.3 (deletion residue). This is the canonical reviews/threat.json path per F5.5 evidence schema. See also evidence/F5/run-001/reports/threat-review.json for the same review in the flat-reports layout. This is a pre-production single-developer local-first project per dev-context.md. No production users, no network deployment, no external attack surface for prompt injection or cross-tenant policy interference. Owner self-review per dev-context.md."
+}

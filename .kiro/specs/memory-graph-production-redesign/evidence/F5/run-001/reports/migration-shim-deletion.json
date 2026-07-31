@@ -1,0 +1,85 @@
+{
+  "task": "5.4.6",
+  "suite": "dead-code-deletion (migration shims and obsolete interchange formats)",
+  "verdict": "Pass",
+  "timestamp": "2026-07-29T13:32:17.182040441Z",
+  "shimsFound": 0,
+  "shimsDeleted": 0,
+  "filesModified": [],
+  "scanScope": [
+    "crates/kria-core/src/memory/model/",
+    "crates/kria-core/src/memory/db/",
+    "crates/kria-core/src/memory/stores/",
+    "crates/kria-core/src/memory/api/",
+    "crates/kria-core/src/memory/authority/",
+    "crates/kria-core/tests/"
+  ],
+  "searchTerms": [
+    "TODO.*remove after migration",
+    "COMPAT:",
+    "DEPRECATED:",
+    "// legacy",
+    "// shim",
+    "// compat",
+    "migration_compat",
+    "v1_format",
+    "old_format",
+    "legacy_format",
+    "v1_to_v2",
+    "upgrade_path",
+    "migrate_from_v1",
+    "epoch_shim",
+    "backcompat"
+  ],
+  "findings": [
+    {
+      "file": "crates/kria-core/src/memory/model/legacy_mapping.rs",
+      "kind": "documentation-ledger",
+      "verdict": "retain",
+      "rationale": "Pure documentation module with no runtime items. Compiler-checked intra-doc links serve as the authoritative removal ledger for legacy structs still retained pending F1.5/F3 cutover. The module explicitly lists what gates will remove which types. It is not dead code — it is the anti-drift safety net."
+    },
+    {
+      "file": "crates/kria-core/src/memory/stores/sqlite_vectors.rs",
+      "kind": "legacy VectorStore impl + cosine() wrapper",
+      "verdict": "retain",
+      "rationale": "The legacy VectorStore impl (targeting `mem_vectors`, migration 0002) is still actively called by: write_policy/slow.rs (F3.1 write path), Lifecycle module (deletion residue), and memory_graph_v2.rs integration tests (lc_seed / seed_ns_pair helpers). The `cosine()` wrapper is called directly from the legacy `VectorStore::search` impl (line 869 of sqlite_vectors.rs). Both are retained pending the F3.1 write-path cutover explicitly documented in the source header. Not dead code."
+    },
+    {
+      "file": "crates/kria-core/src/memory/db/lifecycle.rs",
+      "kind": "LEGACY_TABLES const array",
+      "verdict": "retain",
+      "rationale": "LEGACY_TABLES is a live allow-list used by `reconciliation_report()` to count legacy rows before a hard reset. It is defensive reporting infrastructure (count-if-exists guards), not a compatibility shim. It reads but never writes or deletes."
+    },
+    {
+      "file": "crates/kria-core/src/memory/api/mod.rs:1212",
+      "kind": "comment",
+      "verdict": "retain",
+      "rationale": "The comment `// Legacy relationships table dropped; v2 edge reads land in F3.3.` is an inline documentation note explaining why graph_relationships() returns Vec::new(). It is accurate and not dead code."
+    },
+    {
+      "file": "crates/kria-core/src/memory/model/interchange.rs",
+      "kind": "interchange format version model",
+      "verdict": "retain",
+      "rationale": "This is the CURRENT V-IO-01 canonical interchange format (v1.0). There is no old/superseded interchange format alongside it. `InterchangeVersion::v1()` IS the current version. The version compatibility logic (major version match, minor backward-compat) is the live policy for round-trip semantics, not a legacy shim."
+    },
+    {
+      "file": "crates/kria-core/src/memory/db/schema/0005_runtime_compat.sql",
+      "kind": "SQL migration file",
+      "verdict": "retain",
+      "rationale": "Despite the `_compat` in its name, migration 0005 creates memory_facts, snippets, and document_chunks tables that are actively used by runtime_backend.rs (live write/read paths) and tools/knowledge.rs (list_snippets tool). These are live production tables, not dead schema."
+    },
+    {
+      "file": "crates/kria-core/src/memory/db/migrations.rs",
+      "kind": "migration runner",
+      "verdict": "retain",
+      "rationale": "The migration runner is the live schema upgrade engine. All legacy-related comments are accurate transition documentation (e.g. notes that `events` coexists until F1.5 cutover). No dead code in the runner itself."
+    }
+  ],
+  "conclusion": "Clean-bill-of-health scan. Zero migration compatibility shims, zero obsolete interchange format handlers, and zero dead-code markers of the targeted categories (TODO: remove after migration, COMPAT:, DEPRECATED:, legacy shim paths) were found in the memory/interchange/migration code area. All legacy-labelled constructs are either: (a) live code retained intentionally pending a documented future cutover gate (F1.5, F3, F3.1), (b) documentation-only ledger modules with no runtime items, or (c) active production tables/tools. The codebase has already completed the F2.2.7 hard cutover (LegacyRelationshipMigrator deleted, relationships table dropped via migration 0024, Rust callers removed). No further deletions are warranted at this stage.",
+  "buildVerification": {
+    "command": "cargo check -p kria-core",
+    "exitCode": 0,
+    "result": "Finished dev profile — no errors"
+  },
+  "notes": "Task 5.4.6 scan complete. No shims found, no deletions performed. Evidence report produced as clean-bill-of-health confirmation. cargo check -p kria-core passes (exit 0)."
+}

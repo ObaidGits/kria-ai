@@ -1,0 +1,2440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Focus Orbit — KRIA Memory Graph prototype</title>
+<style>
+  /* ─────────────────────────────────────────────────────────────────────────
+     THROWAWAY PROTOTYPE. Not KRIA production code.
+     Purpose: let the owner SEE the Focus Orbit design before committing to it.
+     Zero dependencies, zero network, zero build step.
+     ───────────────────────────────────────────────────────────────────────── */
+
+  :root {
+    --bg:            #04050c;
+    --bg-2:          #080b18;
+    --panel:         rgba(12, 16, 30, 0.72);
+    --panel-solid:   #0a0d1a;
+    --hair:          rgba(140, 170, 255, 0.13);
+    --hair-2:        rgba(140, 170, 255, 0.07);
+    --txt:           #e8ecf8;
+    --txt-2:         rgba(232, 236, 248, 0.62);
+    --txt-3:         rgba(232, 236, 248, 0.36);
+    --accent:        #7c9cff;
+    --rail-w:        352px;
+    --bar-h:         50px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter",
+            "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--txt);
+    font-family: var(--font);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 1fr var(--rail-w);
+    grid-template-rows: var(--bar-h) 1fr;
+    height: 100vh;
+  }
+  #app.rail-hidden { grid-template-columns: 1fr 0; }
+
+  /* ── Top bar ─────────────────────────────────────────────────────────── */
+  #bar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 14px;
+    background: linear-gradient(180deg, #0a0e1c 0%, #070a14 100%);
+    border-bottom: 1px solid var(--hair);
+    z-index: 20;
+  }
+  #brand {
+    font-size: 12px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--txt-2);
+    white-space: nowrap;
+  }
+  #brand b { color: var(--accent); font-weight: 700; }
+
+  #crumbs {
+    display: flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0; overflow: hidden;
+    font-size: 12.5px;
+  }
+  .crumb {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px; border-radius: 6px;
+    background: rgba(124, 156, 255, 0.08);
+    border: 1px solid var(--hair);
+    color: var(--txt-2);
+    cursor: pointer; white-space: nowrap;
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    font-family: var(--font);
+  }
+  .crumb:hover { background: rgba(124, 156, 255, 0.16); color: var(--txt); }
+  .crumb.is-last { background: none; border-color: transparent; color: var(--txt); cursor: default; font-weight: 600; }
+  .crumb-sep { color: var(--txt-3); font-size: 11px; }
+
+  .tools { display: flex; align-items: center; gap: 6px; }
+  .tbtn {
+    font-family: var(--font); font-size: 11.5px; font-weight: 600;
+    letter-spacing: .02em;
+    padding: 6px 11px; border-radius: 6px;
+    background: rgba(124, 156, 255, 0.07);
+    border: 1px solid var(--hair);
+    color: var(--txt-2); cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .tbtn:hover { background: rgba(124, 156, 255, 0.16); color: var(--txt); }
+  .tbtn[aria-pressed="true"] {
+    background: rgba(124, 156, 255, 0.22);
+    border-color: rgba(124, 156, 255, 0.45);
+    color: #fff;
+  }
+  .tbtn.warn[aria-pressed="true"] {
+    background: rgba(255, 96, 96, 0.2);
+    border-color: rgba(255, 120, 120, 0.5);
+    color: #ffdada;
+  }
+  .tbtn.hot[aria-pressed="true"] {
+    background: rgba(34, 211, 238, 0.22);
+    border-color: rgba(34, 211, 238, 0.55);
+    color: #d6f8ff;
+  }
+  #btn-view { display: none; }
+  #app.is3d #btn-view { display: inline-block; }
+  .tbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── Stage ───────────────────────────────────────────────────────────── */
+  #stage { position: relative; overflow: hidden; background: var(--bg); }
+  #cv { position: absolute; inset: 0; display: block; }
+  #cv:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* HUD — the whole thesis in one line */
+  #hud {
+    position: absolute; top: 12px; left: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    pointer-events: none;
+  }
+  .hud-card {
+    background: var(--panel);
+    backdrop-filter: blur(9px);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 11.5px; color: var(--txt-2);
+    line-height: 1.55;
+  }
+  .hud-big {
+    font-family: var(--mono);
+    font-size: 19px; font-weight: 600; color: var(--txt);
+    letter-spacing: -.01em;
+  }
+  .hud-big small { font-size: 12px; color: var(--txt-3); font-weight: 400; }
+  .hud-label { text-transform: uppercase; letter-spacing: .11em; font-size: 9.5px; color: var(--txt-3); }
+
+  /* Legend — every visual channel must mean something */
+  #legend {
+    position: absolute; bottom: 12px; left: 12px;
+    background: var(--panel);
+    backdrop-filter: blur(9px);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-size: 11px; color: var(--txt-2);
+    max-width: 268px;
+    pointer-events: none;
+  }
+  #legend h4 {
+    margin: 0 0 8px; font-size: 9.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .12em; color: var(--txt-3);
+  }
+  #legend dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
+  #legend dt { color: var(--txt); font-weight: 600; white-space: nowrap; }
+  #legend dd { margin: 0; color: var(--txt-2); }
+
+  /* Hint strip */
+  #hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-size: 11.5px; color: var(--txt-3);
+    background: var(--panel); backdrop-filter: blur(9px);
+    border: 1px solid var(--hair-2); border-radius: 999px;
+    padding: 6px 15px; white-space: nowrap;
+    pointer-events: none;
+  }
+  #hint kbd {
+    font-family: var(--mono); font-size: 10px;
+    background: rgba(124,156,255,.14); border: 1px solid var(--hair);
+    border-radius: 4px; padding: 1px 5px; color: var(--txt-2);
+  }
+
+  /* Tooltip */
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0;
+    transition: opacity .1s;
+    background: #0c1122f2; backdrop-filter: blur(9px);
+    border: 1px solid var(--hair);
+    border-radius: 8px; padding: 9px 11px;
+    font-size: 12px; max-width: 280px;
+    box-shadow: 0 10px 34px #000a;
+    z-index: 15;
+  }
+  #tip .t-name { font-weight: 650; color: #fff; margin-bottom: 5px; line-height: 1.35; }
+  #tip .t-meta { color: var(--txt-2); font-size: 10.5px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; }
+  #tip .t-meta b { color: var(--txt-3); font-weight: 500; }
+
+  /* Idle badge — demonstrates freeze-on-idle, no perpetual simulation */
+  #idle {
+    position: absolute; top: 12px; right: 12px;
+    font-size: 10.5px; font-family: var(--mono);
+    color: var(--txt-3);
+    background: var(--panel); border: 1px solid var(--hair-2);
+    border-radius: 6px; padding: 5px 9px;
+    pointer-events: none;
+  }
+  #idle.frozen { color: #ffd28a; border-color: #ffd28a44; }
+
+  #hud-z { display: none; }
+  #app.is3d #hud-z { display: block; border-color: #22d3ee3d; }
+  #hint3d { display: none; }
+  #app.is3d #hint2d { display: none; }
+  #app.is3d #hint3d { display: inline; }
+
+  /* ── Right rail ──────────────────────────────────────────────────────── */
+  #rail {
+    background: var(--panel-solid);
+    border-left: 1px solid var(--hair);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    z-index: 10;
+  }
+  .rail-hidden #rail { display: none; }
+
+  #rail-head { padding: 13px 14px 11px; border-bottom: 1px solid var(--hair); }
+  #rail-title { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--txt-3); margin-bottom: 6px; }
+  #rail-sub { font-size: 14px; font-weight: 650; color: var(--txt); line-height: 1.35; }
+  #rail-count { font-size: 11px; color: var(--txt-2); margin-top: 5px; font-family: var(--mono); }
+
+  #rail-list { flex: 1; overflow-y: auto; padding: 7px; }
+  #rail-list::-webkit-scrollbar { width: 9px; }
+  #rail-list::-webkit-scrollbar-thumb { background: #ffffff14; border-radius: 5px; }
+
+  .ritem {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 1px solid transparent;
+    border-radius: 8px; padding: 9px 10px; margin-bottom: 3px;
+    color: var(--txt); font-family: var(--font); font-size: 12.5px;
+    cursor: pointer; line-height: 1.4;
+    border-left: 2px solid transparent;
+  }
+  .ritem:hover { background: #ffffff09; }
+  .ritem.sel { background: #7c9cff1f; border-color: #7c9cff44; }
+  .ritem:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ritem .r-top { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .ritem .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .ritem .r-kind { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--txt-3); font-weight: 700; }
+  .ritem .r-name { color: var(--txt); }
+  .ritem .r-meta {
+    margin-top: 5px; display: flex; gap: 9px; flex-wrap: wrap;
+    font-size: 10px; color: var(--txt-3); font-family: var(--mono);
+  }
+  .ritem .r-meta span { white-space: nowrap; }
+  .conf { display: inline-flex; align-items: center; gap: 4px; }
+  .conf i { display: block; width: 26px; height: 3px; border-radius: 2px; background: #ffffff1c; position: relative; overflow: hidden; }
+  .conf i::after { content: ""; position: absolute; inset: 0; width: var(--w, 0%); background: currentColor; }
+
+  .rail-more {
+    width: 100%; margin-top: 6px;
+    background: #ffffff08; border: 1px dashed var(--hair);
+    border-radius: 8px; padding: 9px; cursor: pointer;
+    color: var(--txt-2); font-family: var(--font); font-size: 11.5px;
+  }
+  .rail-more:hover { background: #ffffff12; color: var(--txt); }
+
+  #rail-foot {
+    border-top: 1px solid var(--hair);
+    padding: 10px 14px; font-size: 10.5px; color: var(--txt-3);
+    line-height: 1.5;
+  }
+
+  /* Truncation notice */
+  #trunc {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: #3a2a0ce0; border: 1px solid #ffcc7744; color: #ffd9a0;
+    border-radius: 7px; padding: 7px 13px; font-size: 11.5px;
+    display: none; pointer-events: none;
+  }
+  #app.hairball #trunc { display: block; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* ── Decision Lab extension: every new colour routes through semantic tokens ── */
+  :root {
+    --sem-info: #7c9cff;
+    --sem-recall: #22d3ee;
+    --sem-success: #42d392;
+    --sem-warning: #ffc76b;
+    --sem-danger: #ff6b88;
+    --sem-conflict: #ff4f91;
+    --sem-muted: #8892ad;
+    --sem-surface: rgba(10, 14, 29, .94);
+    --sem-surface-raised: rgba(17, 23, 45, .97);
+    --sem-focus: #b8c8ff;
+    --sem-shadow: rgba(0, 0, 0, .5);
+    --sem-info-soft: rgba(124, 156, 255, .12);
+    --sem-info-faint: rgba(124, 156, 255, .07);
+    --sem-info-active: rgba(124, 156, 255, .2);
+    --sem-recall-soft: rgba(34, 211, 238, .14);
+    --sem-recall-faint: rgba(34, 211, 238, .05);
+    --sem-backdrop: rgba(2, 3, 10, .72);
+    --dock-w: 286px;
+  }
+  button, input, select { font: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--sem-focus) !important; outline-offset: 2px;
+  }
+  #lab-toggle { color: var(--sem-recall); }
+  #lab-dock {
+    position: absolute; z-index: 18; top: 10px; left: 10px; width: var(--dock-w);
+    max-height: calc(100% - 20px); overflow: auto; scrollbar-width: thin;
+    border: 1px solid var(--hair); border-radius: 12px;
+    background: var(--sem-surface); backdrop-filter: blur(18px);
+    box-shadow: 0 18px 60px var(--sem-shadow);
+  }
+  #lab-dock.collapsed { width: 48px; overflow: hidden; }
+  #lab-dock.collapsed .lab-body, #lab-dock.collapsed .lab-title span { display: none; }
+  .lab-title { display:flex; align-items:center; justify-content:space-between; padding:10px; border-bottom:1px solid var(--hair); }
+  .lab-title span { font-size:10px; font-weight:800; letter-spacing:.14em; color:var(--sem-recall); }
+  .icon-btn, .lab-btn, .mode-btn, .chip, .action-btn {
+    border:1px solid var(--hair); color:var(--txt-2); background:var(--sem-info-faint);
+    border-radius:7px; cursor:pointer;
+  }
+  .icon-btn { width:27px; height:27px; }
+  .lab-body { padding:10px; display:grid; gap:11px; }
+  .lab-section { border-top:1px solid var(--hair-2); padding-top:10px; }
+  .lab-section:first-child { border-top:0; padding-top:0; }
+  .lab-label { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; font-size:9px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; color:var(--txt-3); }
+  .sim-tag { color:var(--sem-warning); font-family:var(--mono); font-size:8px; letter-spacing:.04em; }
+  .query-row { display:flex; gap:5px; }
+  #query-input { min-width:0; width:100%; border:1px solid var(--hair); background:var(--bg-2); color:var(--txt); border-radius:7px; padding:8px 9px; }
+  .lab-btn { padding:7px 9px; white-space:nowrap; }
+  .lab-btn:hover, .mode-btn:hover, .chip:hover, .action-btn:hover { color:var(--txt); border-color:var(--sem-info); }
+  .mode-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  .mode-btn { padding:7px 6px; text-align:left; font-size:10.5px; line-height:1.25; }
+  .mode-btn b { display:block; color:var(--txt); font-size:11px; }
+  .mode-btn[aria-pressed="true"] { background:var(--sem-info-active); border-color:var(--sem-info); }
+  .mode-btn.wide { grid-column:1 / -1; }
+  .control-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+  .chip { padding:5px 7px; font-family:var(--mono); font-size:9.5px; }
+  .chip[aria-pressed="true"], .chip.active { color:var(--txt); border-color:var(--sem-recall); background:var(--sem-recall-soft); }
+  .lab-note { margin:6px 0 0; font-size:10px; line-height:1.45; color:var(--txt-3); }
+  .synthetic-actions { display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; }
+  .synthetic-actions .lab-btn { padding:7px 4px; font-size:10px; }
+  #synthetic-reset { grid-column:1 / -1; color:var(--sem-warning); }
+  #synthetic-progress { width:100%; height:7px; margin:7px 0 3px; accent-color:var(--sem-recall); }
+  #synthetic-status { min-height:29px; font:9px/1.45 var(--mono); color:var(--txt-2); }
+  #synthetic-status[data-state="complete"] { color:var(--sem-success); }
+  #synthetic-status[data-state="error"] { color:var(--sem-danger); }
+  #synthetic-metrics { margin-top:6px; display:grid; grid-template-columns:1fr 1fr; gap:3px 8px; font:8.5px/1.4 var(--mono); color:var(--txt-3); }
+  #synthetic-metrics b { color:var(--txt-2); font-weight:600; }
+  .worker-held { color:var(--sem-success); }
+  #path-pins { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  #path-pins select { min-width:0; width:100%; padding:6px; border-radius:6px; color:var(--txt); background:var(--bg-2); border:1px solid var(--hair); }
+  #decay-range { width:100%; accent-color:var(--sem-warning); }
+  .decay-legend { display:flex; justify-content:space-between; font-size:9px; color:var(--txt-3); }
+  .event-feed { margin-top:6px; max-height:52px; overflow:hidden; font-family:var(--mono); font-size:8.5px; color:var(--sem-recall); line-height:1.5; }
+  #proof-card { border-left:2px solid var(--sem-recall); padding:7px 8px; background:var(--sem-recall-faint); font-size:10px; line-height:1.45; color:var(--txt-2); }
+  #proof-card b { color:var(--txt); }
+  #hud { left: calc(var(--dock-w) + 22px); }
+  #legend { left: calc(var(--dock-w) + 22px); }
+  #context-panel {
+    position:absolute; z-index:17; top:12px; right:12px; width:300px; max-height:calc(100% - 24px); overflow:auto;
+    background:var(--sem-surface); border:1px solid var(--hair); border-radius:11px; padding:12px;
+    box-shadow:0 16px 46px var(--sem-shadow); display:none;
+  }
+  #context-panel.show { display:block; }
+  #context-panel h3 { margin:0 0 5px; font-size:13px; }
+  #context-panel p { margin:4px 0 10px; font-size:10.5px; line-height:1.5; color:var(--txt-2); }
+  .context-row { display:flex; gap:5px; flex-wrap:wrap; margin-top:8px; }
+  .action-btn { padding:6px 8px; font-size:10px; }
+  .action-btn.danger { color:var(--sem-danger); border-color:color-mix(in srgb, var(--sem-danger) 45%, transparent); }
+  .action-btn.good { color:var(--sem-success); }
+  .compare-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .claim { padding:7px; border:1px solid var(--hair); border-radius:7px; font-size:9.5px; color:var(--txt-2); }
+  .claim b { display:block; color:var(--txt); margin-bottom:4px; }
+  #state-preview {
+    position:absolute; z-index:19; inset:18% 19%; display:none; place-items:center; text-align:center;
+    border:1px solid var(--hair); border-radius:14px; background:var(--sem-surface-raised); box-shadow:0 20px 80px var(--sem-shadow); padding:30px;
+  }
+  #state-preview.show { display:grid; }
+  #state-preview .state-icon { font-size:30px; color:var(--sem-warning); }
+  #state-preview h2 { margin:8px 0 4px; font-size:17px; }
+  #state-preview p { max-width:430px; margin:0 0 13px; color:var(--txt-2); font-size:11px; line-height:1.55; }
+  #graph-mirror {
+    position:absolute; left:calc(var(--dock-w) + 22px); bottom:12px; width:420px; max-height:190px; overflow:auto; z-index:16;
+    padding:10px; border:1px solid var(--hair); border-radius:9px; background:var(--sem-surface); display:none;
+  }
+  #graph-mirror.preview { display:block; width:420px; height:auto; margin:0; overflow:auto; clip:auto; white-space:normal; }
+  #sr-graph { position:absolute!important; width:1px!important; height:1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; }
+  #graph-mirror h2 { margin:0 0 6px; font-size:11px; }
+  #graph-mirror ul { margin:0; padding-left:19px; font-size:9.5px; color:var(--txt-2); }
+  #graph-mirror button { border:0; background:none; color:var(--sem-info); cursor:pointer; padding:2px; text-align:left; }
+  .modal-backdrop { position:fixed; z-index:100; inset:0; display:none; place-items:start center; padding-top:12vh; background:var(--sem-backdrop); }
+  .modal-backdrop.show { display:grid; }
+  .dialog { width:min(560px, calc(100vw - 30px)); background:var(--sem-surface-raised); border:1px solid var(--hair); border-radius:13px; box-shadow:0 30px 100px var(--sem-shadow); padding:14px; }
+  .dialog h2 { margin:0 0 9px; font-size:14px; }
+  #cmd-input { width:100%; padding:10px; color:var(--txt); background:var(--bg); border:1px solid var(--sem-info); border-radius:8px; }
+  #cmd-results { margin-top:8px; display:grid; gap:4px; }
+  .cmd-item { border:1px solid var(--hair); background:transparent; color:var(--txt-2); text-align:left; border-radius:7px; padding:8px; cursor:pointer; }
+  .cmd-item:hover, .cmd-item.active { color:var(--txt); background:var(--sem-info-soft); }
+  .sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+  #status-live { position:fixed; left:12px; bottom:12px; z-index:150; padding:7px 10px; border-radius:7px; background:var(--sem-surface-raised); color:var(--sem-success); font-size:10px; opacity:0; pointer-events:none; transition:opacity .15s; }
+  #status-live.pop { opacity:1; }
+  body.still-mode * { animation:none!important; transition:none!important; }
+  body.still-mode #idle { color:var(--sem-warning); }
+  @media (max-width: 1050px) {
+    :root { --rail-w: 300px; --dock-w: 250px; }
+    #context-panel { width:260px; }
+    #legend { display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="bar">
+    <div id="brand">K.R.I.A · <b>Focus Orbit</b></div>
+    <nav id="crumbs" aria-label="Focus trail"></nav>
+    <div class="tools">
+      <button class="tbtn" id="btn-back" title="Go back (Esc / Backspace)">← Back</button>
+      <button class="tbtn" id="btn-reset" title="Return to root focus">Reset</button>
+      <button class="tbtn hot" id="btn-3d" aria-pressed="false" title="Lift the same layout into 3D. Drag to orbit, wheel to zoom.">3D</button>
+      <button class="tbtn" id="btn-view" title="Recentre the camera">Reset view</button>
+      <button class="tbtn" id="btn-motion" aria-pressed="false" title="Toggle particle flow + parallax">Motion</button>
+      <button class="tbtn warn" id="btn-hair" aria-pressed="false" title="Show every node at once — the thing we are avoiding">Hairball compare</button>
+      <button class="tbtn" id="btn-rail" aria-pressed="true" title="Toggle reading list">Reading list</button>
+      <button class="tbtn" id="lab-toggle" aria-pressed="true" title="Toggle the comparison lab dock">UX Lab</button>
+      <button class="tbtn" id="btn-command" title="Open command palette (Ctrl+K)">⌘K</button>
+    </div>
+  </div>
+
+  <div id="stage">
+    <section id="lab-dock" aria-label="UX strategy comparison lab">
+      <div class="lab-title"><span>Decision Lab · local prototype</span><button class="icon-btn" id="dock-collapse" aria-label="Collapse decision lab" title="Collapse lab">‹</button></div>
+      <div class="lab-body">
+        <div class="lab-section">
+          <div class="lab-label"><span>Query context</span><span class="sim-tag">STATIC DATA</span></div>
+          <div class="query-row"><input id="query-input" type="search" value="memory authority" aria-label="Search memories" placeholder="Search memories…"><button class="lab-btn" id="query-go">Search</button></div>
+          <p class="lab-note" id="query-summary">Try “no result” or choose a strategy below.</p>
+        </div>
+        <div class="lab-section" id="synthetic-dataset">
+          <div class="lab-label"><span>Synthetic dataset</span><span class="sim-tag">ACTUAL · WORKER-HELD</span></div>
+          <div class="synthetic-actions" role="group" aria-label="Generate compact synthetic graph">
+            <button class="lab-btn" data-generate="10000">Generate 10k</button>
+            <button class="lab-btn" data-generate="100000">Generate 100k</button>
+            <button class="lab-btn" data-generate="1000000"><b>Generate 1M</b></button>
+            <button class="lab-btn" id="synthetic-reset">Cancel / reset and release</button>
+          </div>
+          <progress id="synthetic-progress" max="100" value="0" aria-label="Synthetic graph generation progress"></progress>
+          <div id="synthetic-status" data-state="idle" role="status" aria-live="polite">Ready · fixed seed 0x4b524941</div>
+          <div id="synthetic-metrics" aria-label="Generated graph metrics"><span>nodes <b>—</b></span><span>relations <b>—</b></span><span>clusters <b>—</b></span><span>worker bytes <b>—</b></span><span>duration <b>—</b></span><span>checksum <b>—</b></span></div>
+          <p class="lab-note">The worker retains every compact record and relation. This scene intentionally shows only ≤24 samples plus aggregate hubs: semantic zoom, not a failed attempt to draw 1M points.</p>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Layout strategy</span><span id="strategy-context">overview</span></div>
+          <div class="mode-grid" role="group" aria-label="Graph layout strategy">
+            <button class="mode-btn" data-mode="search" aria-pressed="true"><b>Overview / search</b>treemap-grid</button>
+            <button class="mode-btn" data-mode="ego" aria-pressed="false"><b>Ego</b>radial-rings</button>
+            <button class="mode-btn" data-mode="path" aria-pressed="false"><b>Path A → B</b>layered-DAG</button>
+            <button class="mode-btn" data-mode="temporal" aria-pressed="false"><b>Temporal</b>time lanes</button>
+            <button class="mode-btn wide" data-mode="grouped" aria-pressed="false"><b>Goal / source</b>grouped lanes</button>
+          </div>
+        </div>
+        <div class="lab-section" id="path-controls" hidden>
+          <div class="lab-label"><span>Path pins</span><span class="sim-tag">MOCK</span></div>
+          <div id="path-pins"><select id="pin-a" aria-label="Pin A"></select><select id="pin-b" aria-label="Pin B"></select></div>
+          <div class="control-row" style="margin-top:6px"><button class="chip" id="path-find">Find path</button><button class="chip" id="path-none" aria-pressed="false">Preview no-path</button></div>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Projection density</span><span id="bounded-label">12 sampled records max</span></div>
+          <div class="control-row" id="density-controls"><span class="lab-note" style="margin:0">bounded scene</span><button class="chip" data-density="6">6</button><button class="chip active" data-density="12">12</button><button class="chip" data-density="24">24</button><button class="chip" id="bundle-toggle" aria-pressed="false">bundle fan</button></div>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Decay horizon</span><span id="decay-value">≤ 7 months</span></div>
+          <input id="decay-range" type="range" min="7" max="210" value="210" aria-label="Maximum memory age in days">
+          <div class="decay-legend"><span style="color:var(--sem-success)">strong · recent</span><span style="color:var(--sem-warning)">faint · aging</span></div>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Recall events</span><span class="sim-tag">EVENT-DRIVEN</span></div>
+          <button class="lab-btn" id="recall-pulse">▶ Simulate recall pulse</button>
+          <div class="event-feed" id="event-feed">Waiting — no perpetual recall motion.</div>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Preview states</span><span class="sim-tag">NON-PERSISTENT</span></div>
+          <div class="control-row"><button class="chip" data-preview="empty">Empty</button><button class="chip" data-preview="none">No result</button><button class="chip" data-preview="degraded">DB degraded</button></div>
+        </div>
+        <div class="lab-section">
+          <div class="lab-label"><span>Accessibility</span><span class="sim-tag">DOM MIRROR</span></div>
+          <div class="control-row"><button class="chip" id="mirror-toggle" aria-pressed="false">Preview mirror</button><button class="chip" id="still-toggle" aria-pressed="false">Still mode</button></div>
+          <p class="lab-note">Ctrl+K palette · Esc returns focus · visible focus rings.</p>
+        </div>
+        <div id="proof-card"><b>What this proves</b><br><span id="proof-text">Search benefits from bounded grid scanning; the graph remains a projection, not the database.</span></div>
+      </div>
+    </section>
+
+    <canvas id="cv" tabindex="0" role="application"
+            aria-label="Focus Orbit memory graph. Arrow keys to move between nodes, Enter to focus, Escape to go back."></canvas>
+
+    <div id="hud">
+      <div class="hud-card">
+        <div class="hud-label" id="hud-count-label">Shown / static sample</div>
+        <div class="hud-big" id="hud-nodes">—</div>
+      </div>
+      <div class="hud-card" id="hud-strategy">
+        <div class="hud-label">Layout strategy</div>
+        <div style="color:var(--txt);font-weight:600;font-size:12px" id="hud-strat-name">ego-radial-rings</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--txt-3);margin-top:3px" id="hud-seed">seed 0x—</div>
+      </div>
+      <div class="hud-card" id="hud-z">
+        <div class="hud-label">Z axis source</div>
+        <div style="color:#7fe3f5;font-weight:600;font-size:12px">recency &nbsp;·&nbsp; authority-backed</div>
+        <div style="font-size:10px;color:var(--txt-3);margin-top:3px;line-height:1.45">
+          near = today · far = ~7 months old<br>no decorative depth
+        </div>
+      </div>
+    </div>
+
+    <div id="idle">live</div>
+    <div id="trunc">Hairball compare: 1,024 representative/downsampled visual points. The actual compact graph remains worker-held.</div>
+
+    <div id="legend">
+      <h4>Every channel carries data</h4>
+      <dl>
+        <dt>Distance</dt><dd>relevance to focus</dd>
+        <dt>Direction</dt><dd>semantic cluster</dd>
+        <dt>Size</dt><dd>evidence count</dd>
+        <dt>Colour</dt><dd>category / truth state</dd>
+        <dt>Glow</dt><dd>relation strength</dd>
+        <dt>Depth</dt><dd>recency — 3D only</dd>
+        <dt>Stars</dt><dd>memories outside this scope</dd>
+      </dl>
+    </div>
+
+    <div id="hint">
+      <span id="hint2d"><kbd>Click</kbd> a ring to open · <kbd>Click</kbd> an item to re-focus · <kbd>Esc</kbd> back · <kbd>←→</kbd> move · <kbd>Enter</kbd> focus</span>
+      <span id="hint3d"><kbd>Drag</kbd> to orbit · <kbd>Wheel</kbd> to zoom · <kbd>Click</kbd> to open / re-focus · <kbd>Esc</kbd> back</span>
+    </div>
+
+    <div id="context-panel" aria-label="Context inspector"></div>
+    <section id="state-preview" role="region" aria-live="polite"></section>
+    <section id="graph-mirror" tabindex="-1" aria-label="Accessible graph mirror"><h2>Canvas accessibility mirror</h2><p class="lab-note">Same current projection as DOM controls:</p><ul id="mirror-list"></ul></section>
+    <section id="sr-graph" aria-label="Current canvas graph nodes and actions" aria-live="polite"><h2>Current graph projection</h2><ul id="sr-list"></ul></section>
+    <div id="tip" role="tooltip"></div>
+  </div>
+
+  <aside id="rail" aria-label="Reading list">
+    <div id="rail-head">
+      <div id="rail-title">Reading list — same set, readable form</div>
+      <div id="rail-sub">—</div>
+      <div id="rail-count">—</div>
+    </div>
+    <div id="rail-list" role="list"></div>
+    <div id="rail-foot">
+      The graph selects. The list explains. Nothing is reachable only by pointing —
+      every item here is keyboard- and screen-reader-navigable.
+    </div>
+  </aside>
+
+</div>
+<script src="synthetic.worker.js"></script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   PART 1 — determinism helpers + fake corpus
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** FNV-1a 32-bit — mirrors kria's computeLayoutSeed so layouts are reproducible. */
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 — seeded PRNG. Same seed → same layout, forever. */
+function rng(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const CATEGORIES = [
+  { id: "knowledge",     name: "Knowledge",     color: "#3d8bfd", total: 412, icon: "book" },
+  { id: "goals",         name: "Goals",         color: "#22c55e", total: 18,  icon: "target" },
+  { id: "skills",        name: "Skills",        color: "#f59e0b", total: 64,  icon: "cap" },
+  { id: "events",        name: "Events",        color: "#06b6d4", total: 74,  icon: "cal" },
+  { id: "ideas",         name: "Ideas",         color: "#10b981", total: 96,  icon: "bulb" },
+  { id: "people",        name: "People",        color: "#c084fc", total: 58,  icon: "person" },
+  { id: "conversations", name: "Conversations", color: "#a855f7", total: 132, icon: "chat" },
+  { id: "projects",      name: "Projects",      color: "#6366f1", total: 24,  icon: "folder" },
+];
+
+const TITLES = {
+  knowledge: [
+    "SQLite is the single transactional authority",
+    "FTS5 index is a rebuildable projection",
+    "kria-core owns all domain logic; adapters stay thin",
+    "all-MiniLM-L6-v2 emits 384-dimensional vectors",
+    "WebKitGTK ships weak WebGL on Linux",
+    "Risk tiers are GREEN / YELLOW / RED / BLACK",
+    "Piper TTS runs fully offline",
+    "Force-directed layouts are non-deterministic",
+    "Frontier-level BFS collapses ~360 statements to ~5",
+    "OpenClaw skills execute inside Docker sandboxes",
+    "Whisper STT is quantised to int8 for CPU",
+    "Every durable write passes one governed boundary",
+    "Vector, cache and scene are all projections",
+    "Tauri command names are a frozen contract",
+  ],
+  goals: [
+    "Close the F5 release gate",
+    "Re-measure control_center_search p95",
+    "Ship the Focus Orbit memory view",
+    "Run all 7 hardware campaigns",
+    "Decide F6 3D go / no-go",
+    "Hold 100% of memory::* tests green",
+    "Stay inside the WebKitGTK frame budget",
+    "Remove every decorative visual channel",
+  ],
+  skills: [
+    "Rust async with Tokio",
+    "SolidJS fine-grained reactivity",
+    "Canvas2D performance tuning",
+    "SQLite FTS5 + vector hybrid search",
+    "Tauri v2 IPC contract design",
+    "Docker sandbox hardening",
+    "WebGL versus Canvas trade-offs",
+    "Polar layout mathematics",
+    "Accessibility via AT-SPI2 and Orca",
+    "Property-based testing with proptest",
+    "Seccomp profile authoring",
+    "Embedding model evaluation",
+  ],
+  events: [
+    "F1 SQLite-authority gate closed",
+    "F2 semantic records completed",
+    "Frontier BFS fix landed in graph_strategy",
+    "2025 / 2025 memory tests went green",
+    "Perf evidence detected as stale",
+    "Demo seeder command added",
+    "authorize_read gate wired into search",
+    "batch_neighbors_v2 replaced per-node reads",
+    "51-test integration suite created",
+    "Hardware campaign harness added",
+    "10 pre-existing UI failures triaged",
+  ],
+  ideas: [
+    "Angle should encode semantic cluster",
+    "Radius should encode relevance decay",
+    "Open exactly one category at a time",
+    "Starfield density = out-of-scope memory count",
+    "Particles move only when a real recall happens",
+    "2.5D parallax gives depth without geometry",
+    "Breadcrumb trail makes drilling reversible",
+    "The graph selects, the list explains",
+    "Ship a hairball toggle to prove the point",
+    "Freeze the render loop on idle",
+    "Use embeddings for clustering, not coordinates",
+    "Aggregate in Rust, never in the renderer",
+  ],
+  people: [
+    "Obaid — owner, sole operator",
+    "Ben Shneiderman — information-seeking mantra",
+    "Jerry Michalski — 600k-thought public brain",
+    "Kumu — step-by-step focus walking",
+    "Obsidian community — graph sculpting thread",
+    "Cambridge Intelligence — hairball analysis",
+    "Andrei Kashcha — ngraph author",
+    "Vasco Asturiano — 3d-force-graph author",
+  ],
+  conversations: [
+    "Memory graph UI ka idea — kaisa banayein",
+    "3D versus 2D — final faisla",
+    "control_center_search perf regression",
+    "Hardware campaign checklist walkthrough",
+    "F5 gate blocker — what is actually left",
+    "Voice latency tuning session",
+    "Skill trust tier design review",
+    "Seccomp profile review",
+    "Embedding model swap discussion",
+    "Layout determinism debate",
+    "Should the prototype live inside ui/",
+    "Reference image critique",
+  ],
+  projects: [
+    "Memory Graph Production Redesign",
+    "Voice Pipeline v2",
+    "OpenClaw Skill Substrate",
+    "Fleet Remote Execution",
+    "ComfyUI Image Bridge",
+    "Cognition Event Bus",
+    "GUI Cognition v2",
+    "Ambient Cognition Loop",
+    "Connection Control Leases",
+    "Desktop Awareness Layer",
+  ],
+};
+
+const SOURCES = ["conversation", "document", "observation", "tool-result", "user-stated"];
+const TRUTH   = ["asserted", "asserted", "asserted", "corroborated", "disputed"];
+
+/** Build the corpus once, deterministically. */
+const CORPUS = (() => {
+  const out = {};
+  for (const cat of CATEGORIES) {
+    const r = rng(fnv1a("corpus:" + cat.id));
+    out[cat.id] = TITLES[cat.id].map((name, i) => ({
+      id: cat.id + ":" + i,
+      name,
+      cat: cat.id,
+      relevance: 1 - i / (TITLES[cat.id].length + 2) - r() * 0.11,
+      confidence: 0.55 + r() * 0.45,
+      evidence: 1 + Math.floor(r() * 24),
+      source: SOURCES[Math.floor(r() * SOURCES.length)],
+      truth: TRUTH[Math.floor(r() * TRUTH.length)],
+      days: Math.floor(r() * 210),
+    })).sort((a, b) => b.relevance - a.relevance);
+  }
+  return out;
+})();
+
+const TOTAL_IN_DB = CATEGORIES.reduce((s, c) => s + c.total, 0);
+
+/** Contextual category counts for a re-centred item — deterministic, derived. */
+function contextCounts(itemId) {
+  const r = rng(fnv1a("ctx:" + itemId));
+  const picked = [];
+  for (const cat of CATEGORIES) {
+    const keep = r();
+    if (keep < 0.34) continue;                     // not every category relates
+    picked.push({ ...cat, total: 1 + Math.floor(r() * Math.min(cat.total, 22)) });
+  }
+  // Always keep at least three rings so the shape stays legible.
+  if (picked.length < 3) {
+    for (const cat of CATEGORIES) {
+      if (picked.some(p => p.id === cat.id)) continue;
+      picked.push({ ...cat, total: 1 + Math.floor(rng(fnv1a(itemId + cat.id))() * 9) });
+      if (picked.length >= 3) break;
+    }
+  }
+  return picked;
+}
+</script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   PART 2 — state, layout, icons
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let R2_CAP = 12;   // decision-lab density budget: 6 / 12 / 24
+
+const state = {
+  /** Focus trail. Element 0 is the root. Last element is the active focus. */
+  trail: [{ id: "root", name: "Understanding LLM Memory Systems", sub: "Current Focus", cat: null }],
+  openCat: null,      // which R1 ring is expanded
+  hoverId: null,
+  selectedId: null,
+  motion: true,
+  hairball: false,
+  railOpen: true,
+  parallax: { x: 0, y: 0, tx: 0, ty: 0 },
+
+  /* ── 3D ────────────────────────────────────────────────────────────────
+     `mode3d` flips the view; `lift` tweens 0→1 so the change is a visible
+     morph rather than a jump. At lift === 0 the projection is mathematically
+     identical to the flat view (FOCAL === baseDist, z === 0), so the 2D
+     picture is provably unchanged by adding this path.                     */
+  mode3d: false,
+  lift: 0,
+  cam: { yaw: 0, pitch: 0, tyaw: 0.42, tpitch: 0.30, zoom: 1, tzoom: 1 },
+  dragging: false,
+};
+
+/** World depth budget and camera focal, both set on resize. */
+let DEPTH = 300, BASE_DIST = 1200;
+
+/** Recency → depth. Recent memories sit toward the viewer.
+ *  This is the ONLY z source: an authority-backed column, not decoration. */
+function zFromDays(days) {
+  const t = 1 - Math.min(1, days / 210);   // 1 = today, 0 = ~7 months old
+  return (t - 0.5) * 2 * DEPTH;            // −DEPTH … +DEPTH
+}
+
+/** Mean recency of a category, for hub depth. Derived, never invented. */
+function catMeanDays(catId) {
+  const pool = CORPUS[catId] || [];
+  if (!pool.length) return 105;
+  return pool.reduce((s, i) => s + i.days, 0) / pool.length;
+}
+
+const focus  = () => state.trail[state.trail.length - 1];
+const isRoot = () => state.trail.length === 1;
+
+/** Categories visible for the current focus. */
+function activeCategories() {
+  return isRoot() ? CATEGORIES : contextCounts(focus().id);
+}
+
+/** Members of the open ring, capped by both the readability budget and the
+ *  category's own count so the hub label never contradicts what is drawn. */
+function openMembers() {
+  if (!state.openCat) return [];
+  const pool = CORPUS[state.openCat] || [];
+  const cat = activeCategories().find(c => c.id === state.openCat);
+  const cap = Math.min(R2_CAP, cat ? cat.total : R2_CAP);
+  if (isRoot()) return pool.slice(0, cap);
+  // Contextual view: deterministic subset so re-focus reads like a real query.
+  const r = rng(fnv1a("mem:" + focus().id + ":" + state.openCat));
+  return pool.filter(() => r() > 0.28).slice(0, cap);
+}
+
+// ── Canvas plumbing ────────────────────────────────────────────────────────
+const cv    = document.getElementById("cv");
+const ctx2  = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(320, r.width); H = Math.max(240, r.height);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  ctx2.setTransform(DPR, 0, 0, DPR, 0, 0);
+  BASE_DIST = Math.min(W, H) * 1.45;
+  DEPTH = Math.min(W, H) * 0.30;
+  buildStarfield();
+  hairNodes = null;
+  layout();
+}
+
+/**
+ * World (pixel units, origin at screen centre, +z toward viewer) → screen.
+ * FOCAL === BASE_DIST so at yaw = pitch = z = 0 this is the identity.
+ */
+function project(wx, wy, wz) {
+  const L = state.lift;
+  const yaw = state.cam.yaw * L, pitch = state.cam.pitch * L;
+  const z = wz * L;
+  const cyw = Math.cos(yaw), syw = Math.sin(yaw);
+  const x1 = wx * cyw + z * syw;
+  const z1 = -wx * syw + z * cyw;
+  const cpt = Math.cos(pitch), spt = Math.sin(pitch);
+  const y2 = wy * cpt - z1 * spt;
+  const z2 = wy * spt + z1 * cpt;
+  const dist = BASE_DIST / (1 + (state.cam.zoom - 1) * L);
+  const depth = Math.max(40, dist - z2);
+  const sc = BASE_DIST / depth;
+  return { sx: W / 2 + x1 * sc, sy: H / 2 + y2 * sc, sc, depth };
+}
+
+// ── Starfield = out-of-scope memory count ──────────────────────────────────
+let stars = [];
+function buildStarfield() {
+  const scaledTotal = state.scaleTotal || TOTAL_IN_DB;
+  const count = Math.min(760, Math.round(scaledTotal * 0.8));
+  const r = rng(fnv1a("stars"));
+  stars = new Array(count);
+  for (let i = 0; i < count; i++) {
+    stars[i] = {
+      x: r() * W, y: r() * H,
+      s: 0.35 + r() * 1.15,
+      a: 0.05 + r() * 0.42,
+      layer: r() < 0.5 ? 0 : (r() < 0.7 ? 1 : 2),
+      tw: r() * Math.PI * 2,
+    };
+  }
+}
+
+// ── Node model ─────────────────────────────────────────────────────────────
+/**
+ * nodes[] entries:
+ *   kind: "focus" | "hub" | "member"
+ *   x,y target; cx,cy current (tweened); r radius; color; label; sub
+ */
+let nodes = [];
+let edges = [];
+let seedHex = "0x0";
+
+function layout() {
+  const f = focus();
+  const seed = fnv1a(f.id + "|" + (state.openCat || "-") + "|rev1");
+  seedHex = "0x" + seed.toString(16).padStart(8, "0");
+
+  const cx = W / 2, cy = H / 2 + 4;
+  const base = Math.min(W, H);
+  const R1 = base * 0.265;
+  const R2 = R1 * 1.72;
+
+  const cats = activeCategories();
+  const members = openMembers();
+  const prev = new Map(nodes.map(n => [n.id, n]));
+  const next = [];
+  const nextEdges = [];
+
+  // ── R0: the single focus ────────────────────────────────────────────────
+  next.push({
+    id: "focus", kind: "focus", x: cx, y: cy, r: 26,
+    color: "#a9c2ff", label: f.name, sub: isRoot() ? f.sub : "Focused memory",
+    ref: f,
+  });
+
+  // ── R1: category hubs ───────────────────────────────────────────────────
+  const n = cats.length;
+  cats.forEach((cat, i) => {
+    // Even distribution + deterministic jitter → organic but reproducible.
+    const jr = rng(fnv1a(seed + ":" + cat.id));
+    const jitter = (jr() - 0.5) * (Math.PI / (n * 2.6));
+    const ang = -Math.PI / 2 + (i / n) * Math.PI * 2 + jitter;
+    const dim = state.openCat && state.openCat !== cat.id;
+    const rad = R1 * (dim ? 0.94 : 1) * (state.openCat === cat.id ? 0.9 : 1);
+    next.push({
+      id: "hub:" + cat.id, kind: "hub",
+      x: cx + Math.cos(ang) * rad,
+      y: cy + Math.sin(ang) * rad,
+      r: 19 + Math.min(9, Math.log2(cat.total + 1) * 1.5),
+      color: cat.color, label: cat.name,
+      sub: cat.total + (cat.total === 1 ? " memory" : " memories"),
+      icon: cat.icon, cat: cat.id, ang, dim, total: cat.total,
+      open: state.openCat === cat.id,
+    });
+    nextEdges.push({
+      from: "focus", to: "hub:" + cat.id, color: cat.color,
+      strength: Math.min(1, 0.32 + Math.log2(cat.total + 1) / 11),
+      dim, curve: (jr() - 0.5) * 0.42,
+      particles: Math.min(11, 2 + Math.round(Math.log2(cat.total + 1))),
+    });
+  });
+
+  // ── R2: members of the open ring only ───────────────────────────────────
+  if (state.openCat && members.length) {
+    const hub = next.find(x => x.id === "hub:" + state.openCat);
+    const cat = cats.find(c => c.id === state.openCat);
+    const m = members.length;
+    const spread = Math.min(Math.PI * 0.92, 0.3 + m * 0.115);
+    members.forEach((it, i) => {
+      const t = m === 1 ? 0.5 : i / (m - 1);
+      const ang = hub.ang - spread / 2 + t * spread;
+      // Radius carries relevance: more relevant sits closer in.
+      const rad = R2 * (0.9 + (1 - it.relevance) * 0.24);
+      next.push({
+        id: "m:" + it.id, kind: "member",
+        x: cx + Math.cos(ang) * rad,
+        y: cy + Math.sin(ang) * rad,
+        r: 6.5 + Math.min(7, Math.sqrt(it.evidence) * 1.7),
+        color: cat.color, label: it.name, sub: it.evidence + " evidence",
+        item: it, ang,
+      });
+      nextEdges.push({
+        from: hub.id, to: "m:" + it.id, color: cat.color,
+        strength: 0.22 + it.confidence * 0.5, dim: false, curve: 0.06,
+        particles: 0,
+      });
+    });
+    // Remainder pill
+    const remaining = cat.total - members.length;
+    if (remaining > 0) {
+      const ang = hub.ang + spread / 2 + 0.2;
+      next.push({
+        id: "more", kind: "more",
+        x: cx + Math.cos(ang) * (R2 * 1.03),
+        y: cy + Math.sin(ang) * (R2 * 1.03),
+        r: 13, color: cat.color,
+        label: "+" + remaining + " more", sub: "open in reading list",
+        cat: cat.id,
+      });
+    }
+  }
+
+  // ── World coordinates ───────────────────────────────────────────────────
+  // x,y come from the polar layout above (cluster angle + relevance radius).
+  // z comes only from recency. Nothing else is allowed to move a node.
+  for (const nd of next) {
+    nd.x3 = nd.x - W / 2;
+    nd.y3 = nd.y - H / 2;
+    if (nd.kind === "focus") nd.z3 = 0;
+    else if (nd.kind === "hub") nd.z3 = zFromDays(catMeanDays(nd.cat));
+    else if (nd.kind === "member") nd.z3 = zFromDays(nd.item.days);
+    else {
+      const h = next.find(x => x.id === "hub:" + nd.cat);
+      nd.z3 = h ? h.z3 : 0;
+    }
+  }
+
+  // Carry over world positions so movement tweens instead of snapping.
+  // New nodes bloom outward from the centre; existing nodes glide.
+  for (const nd of next) {
+    const p = prev.get(nd.id);
+    if (p) {
+      nd.wx = p.wx; nd.wy = p.wy; nd.wz = p.wz;
+      nd.cx = p.cx; nd.cy = p.cy; nd.sc = p.sc; nd.alpha = p.alpha;
+    } else {
+      nd.wx = nd.x3 * 0.55; nd.wy = nd.y3 * 0.55; nd.wz = nd.z3 * 0.55;
+      const pr = project(nd.wx, nd.wy, nd.wz);
+      nd.cx = pr.sx; nd.cy = pr.sy; nd.sc = pr.sc; nd.alpha = 0;
+    }
+  }
+
+  nodes = next;
+  edges = nextEdges;
+  wake();
+  renderRail();
+  renderCrumbs();
+  renderHud();
+}
+
+// ── Icon paths (hand-drawn, no font dependency) ────────────────────────────
+function drawIcon(g, name, x, y, s, color) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s / 24, s / 24);
+  g.strokeStyle = color;
+  g.fillStyle = color;
+  g.lineWidth = 1.9;
+  g.lineJoin = "round";
+  g.lineCap = "round";
+  g.beginPath();
+  switch (name) {
+    case "book":
+      g.moveTo(-9, -7); g.quadraticCurveTo(-4, -9.5, 0, -7);
+      g.quadraticCurveTo(4, -9.5, 9, -7);
+      g.lineTo(9, 7); g.quadraticCurveTo(4, 4.5, 0, 7);
+      g.quadraticCurveTo(-4, 4.5, -9, 7); g.closePath(); g.stroke();
+      g.beginPath(); g.moveTo(0, -7); g.lineTo(0, 7); g.stroke();
+      break;
+    case "folder":
+      g.moveTo(-9, -6); g.lineTo(-2, -6); g.lineTo(0, -3.5); g.lineTo(9, -3.5);
+      g.lineTo(9, 7); g.lineTo(-9, 7); g.closePath(); g.stroke();
+      break;
+    case "person":
+      g.arc(0, -3.5, 3.6, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.moveTo(-6.5, 7.5);
+      g.quadraticCurveTo(0, 0.5, 6.5, 7.5); g.stroke();
+      break;
+    case "target":
+      g.arc(0, 0, 8, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(0, 0, 4, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(0, 0, 1.3, 0, Math.PI * 2); g.fill();
+      break;
+    case "cap":
+      g.moveTo(-9.5, -2); g.lineTo(0, -6.5); g.lineTo(9.5, -2);
+      g.lineTo(0, 2.5); g.closePath(); g.stroke();
+      g.beginPath(); g.moveTo(6, -0.4); g.lineTo(6, 5.5); g.stroke();
+      g.beginPath(); g.moveTo(-5, 0.2); g.quadraticCurveTo(0, 5.5, 5, 0.2); g.stroke();
+      break;
+    case "cal":
+      g.moveTo(-8, -5.5); g.lineTo(8, -5.5); g.lineTo(8, 7.5); g.lineTo(-8, 7.5);
+      g.closePath(); g.stroke();
+      g.beginPath(); g.moveTo(-8, -1.5); g.lineTo(8, -1.5); g.stroke();
+      g.beginPath(); g.moveTo(-4.5, -8.5); g.lineTo(-4.5, -4); g.stroke();
+      g.beginPath(); g.moveTo(4.5, -8.5); g.lineTo(4.5, -4); g.stroke();
+      break;
+    case "bulb":
+      g.arc(0, -2.5, 5.6, Math.PI * 0.85, Math.PI * 0.15); g.stroke();
+      g.beginPath(); g.moveTo(-3.4, 2.2); g.lineTo(-2.6, 5.6); g.lineTo(2.6, 5.6);
+      g.lineTo(3.4, 2.2); g.stroke();
+      g.beginPath(); g.moveTo(-2, 7.6); g.lineTo(2, 7.6); g.stroke();
+      break;
+    case "chat":
+      g.moveTo(-8.5, -6); g.lineTo(8.5, -6); g.lineTo(8.5, 3.5);
+      g.lineTo(-2.5, 3.5); g.lineTo(-6.5, 7.5); g.lineTo(-6.5, 3.5);
+      g.lineTo(-8.5, 3.5); g.closePath(); g.stroke();
+      break;
+  }
+  g.restore();
+}
+</script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   PART 3 — renderer
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const PREFERS_STILL = window.matchMedia &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (PREFERS_STILL) state.motion = false;
+
+let t0 = performance.now();
+let clock = 0;
+let lastInteract = performance.now();
+let frozen = false;
+let raf = 0;
+
+function wake() {
+  lastInteract = performance.now();
+  if (frozen) { frozen = false; document.getElementById("idle").className = ""; }
+  if (!raf) raf = requestAnimationFrame(frame);
+}
+
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ── Background ─────────────────────────────────────────────────────────────
+function drawBackground(g) {
+  g.fillStyle = "#04050c";
+  g.fillRect(0, 0, W, H);
+
+  // Deep vignette glow behind the focus.
+  const vg = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.min(W, H) * 0.72);
+  vg.addColorStop(0, "rgba(30, 46, 110, 0.30)");
+  vg.addColorStop(0.45, "rgba(18, 26, 66, 0.14)");
+  vg.addColorStop(1, "rgba(4, 5, 12, 0)");
+  g.fillStyle = vg;
+  g.fillRect(0, 0, W, H);
+
+  // Starfield: pointer parallax in 2D, camera parallax in 3D. Same layers.
+  const px = state.parallax.x, py = state.parallax.y;
+  const yawShift = state.cam.yaw * state.lift * 90;
+  const pitchShift = state.cam.pitch * state.lift * 70;
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  for (const s of stars) {
+    const k = (s.layer + 1) * 0.9;
+    const tw = state.motion ? 0.72 + 0.28 * Math.sin(clock * 0.0011 + s.tw) : 1;
+    g.fillStyle = `rgba(190,206,255,${s.a * tw})`;
+    let x = s.x + px * k - yawShift * (k / 2.7);
+    let y = s.y + py * k + pitchShift * (k / 2.7);
+    // Wrap so orbiting never empties the sky.
+    x = ((x % W) + W) % W; y = ((y % H) + H) % H;
+    g.beginPath();
+    g.arc(x, y, s.s, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+// ── Edges ──────────────────────────────────────────────────────────────────
+/** Control point lives in WORLD space, then gets projected, so the curve
+ *  bends correctly when the camera orbits. */
+function edgePath(e) {
+  const a = nodeById(e.from), b = nodeById(e.to);
+  if (!a || !b) return null;
+  const mx = (a.wx + b.wx) / 2, my = (a.wy + b.wy) / 2, mz = (a.wz + b.wz) / 2;
+  const dx = b.wx - a.wx, dy = b.wy - a.wy;
+  const p = project(mx - dy * e.curve, my + dx * e.curve, mz);
+  return { ax: a.cx, ay: a.cy, bx: b.cx, by: b.cy, cx: p.sx, cy: p.sy, a, b };
+}
+
+function bez(p, t) {
+  const u = 1 - t;
+  return {
+    x: u * u * p.ax + 2 * u * t * p.cx + t * t * p.bx,
+    y: u * u * p.ay + 2 * u * t * p.cy + t * t * p.by,
+  };
+}
+
+function drawEdges(g) {
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  g.lineCap = "round";
+  for (const e of edges) {
+    const p = edgePath(e);
+    if (!p) continue;
+    const fade = Math.min(p.a.alpha * p.a.df, p.b.alpha * p.b.df);
+    if (fade <= 0.01) continue;
+    const dimK = (e.dim ? 0.22 : 1) *
+      (state.bundle && p.b.kind === "member" ? 0.18 : 1);
+    const hot = state.hoverId === e.to || state.hoverId === e.from ||
+                state.selectedId === e.to;
+
+    const grad = g.createLinearGradient(p.ax, p.ay, p.bx, p.by);
+    grad.addColorStop(0, hexA("#8fb0ff", 0.05 * dimK * fade));
+    grad.addColorStop(0.35, hexA(e.color, e.strength * 0.34 * dimK * fade));
+    grad.addColorStop(1, hexA(e.color, e.strength * (hot ? 0.95 : 0.6) * dimK * fade));
+    g.strokeStyle = e.conflict ? SEM.conflict : grad;
+    g.lineWidth = (e.conflict ? 2.8 : (hot ? 2.3 : 1.25)) * (e.dim ? 0.7 : 1);
+    if (e.conflict) g.setLineDash([5, 4]);
+    g.beginPath();
+    g.moveTo(p.ax, p.ay);
+    g.quadraticCurveTo(p.cx, p.cy, p.bx, p.by);
+    g.stroke();
+    g.setLineDash([]);
+
+    const recallActive = state.recallUntil && performance.now() < state.recallUntil;
+    // Flow particles are event-driven: still markers at rest, travel only for a recall event.
+    if (e.particles && !e.dim) {
+      for (let i = 0; i < e.particles; i++) {
+        const phase = i / e.particles;
+        const t = state.motion && recallActive
+          ? (((performance.now() - state.recallStarted) * 0.00065 + phase) % 1)
+          : (phase * 0.86 + 0.07);
+        const q = bez(p, t);
+        const falloff = Math.sin(t * Math.PI);
+        g.fillStyle = hexA(e.color, (0.28 + 0.62 * falloff) * fade * (hot ? 1 : 0.78));
+        g.beginPath();
+        g.arc(q.x, q.y, 0.9 + falloff * 1.25, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  }
+  g.restore();
+}
+
+// ── Nodes ──────────────────────────────────────────────────────────────────
+function halo(g, x, y, r, color, strength) {
+  const grd = g.createRadialGradient(x, y, 0, x, y, r);
+  grd.addColorStop(0, hexA(color, 0.46 * strength));
+  grd.addColorStop(0.42, hexA(color, 0.15 * strength));
+  grd.addColorStop(1, hexA(color, 0));
+  g.fillStyle = grd;
+  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+}
+
+function drawFocusNode(g, nd) {
+  const { cx, cy } = nd;
+  const k = nd.sc;
+  const pulse = (state.motion ? 1 + Math.sin(clock * 0.0016) * 0.045 : 1) * k;
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  halo(g, cx, cy, 120 * pulse, "#7c9cff", 1.05 * nd.alpha);
+  halo(g, cx, cy, 46 * pulse, "#c9d8ff", 0.95 * nd.alpha);
+  g.restore();
+
+  // Concentric authority rings.
+  g.save();
+  g.globalAlpha = nd.alpha;
+  for (const [rr, aa, lw] of [[34, 0.16, 1], [26, 0.3, 1.2], [19, 0.5, 1.5]]) {
+    g.strokeStyle = hexA("#a9c2ff", aa);
+    g.lineWidth = lw;
+    g.beginPath(); g.arc(cx, cy, rr * pulse, 0, Math.PI * 2); g.stroke();
+  }
+  // Sweeping arc — moves only while live.
+  const sw = state.motion ? (clock * 0.0009) % (Math.PI * 2) : 0.6;
+  g.strokeStyle = hexA("#dce6ff", 0.8);
+  g.lineWidth = 1.8;
+  g.beginPath(); g.arc(cx, cy, 34 * pulse, sw, sw + 0.72); g.stroke();
+
+  // Bright core.
+  const cr = 13 * k;
+  const core = g.createRadialGradient(cx, cy, 0, cx, cy, cr);
+  core.addColorStop(0, "#ffffff");
+  core.addColorStop(0.45, "#cfd9ff");
+  core.addColorStop(1, hexA("#6f8dff", 0.15));
+  g.fillStyle = core;
+  g.beginPath(); g.arc(cx, cy, cr, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+
+function drawHub(g, nd) {
+  const hot = state.hoverId === nd.id;
+  const k = nd.dim ? 0.3 : 1;
+  const s = nd.alpha * nd.df * k;
+  const R = nd.r * nd.sc;
+
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  halo(g, nd.cx, nd.cy, R * (nd.open ? 4.6 : 3.4) * (hot ? 1.22 : 1), nd.color,
+       (nd.open ? 1.05 : 0.72) * s);
+  g.restore();
+
+  g.save();
+  g.globalAlpha = s;
+  // Disc
+  const dg = g.createRadialGradient(nd.cx, nd.cy - R * 0.3, 1, nd.cx, nd.cy, R);
+  dg.addColorStop(0, hexA(nd.color, 0.24));
+  dg.addColorStop(1, "rgba(6, 9, 20, 0.92)");
+  g.fillStyle = dg;
+  g.beginPath(); g.arc(nd.cx, nd.cy, R, 0, Math.PI * 2); g.fill();
+  // Ring
+  g.strokeStyle = hexA(nd.color, hot || nd.open ? 1 : 0.82);
+  g.lineWidth = (nd.open ? 2.6 : (hot ? 2.2 : 1.7)) * Math.min(1.4, nd.sc);
+  g.beginPath(); g.arc(nd.cx, nd.cy, R, 0, Math.PI * 2); g.stroke();
+  // Open indicator: outer dashed ring
+  if (nd.open) {
+    g.setLineDash([2, 5]);
+    g.strokeStyle = hexA(nd.color, 0.5);
+    g.lineWidth = 1.1;
+    g.beginPath(); g.arc(nd.cx, nd.cy, R + 7 * nd.sc, 0, Math.PI * 2); g.stroke();
+    g.setLineDash([]);
+  }
+  drawIcon(g, nd.icon, nd.cx, nd.cy, R * 1.12, hexA(nd.color, 0.98));
+  g.restore();
+
+  // Labels — in 3D the back half loses them, which is the honest cost.
+  const front = nd.sc > 0.985 || hot || nd.open;
+  if (!front && state.lift > 0.35) return;
+  g.save();
+  g.globalAlpha = s * (front ? 1 : 0.45);
+  g.textAlign = "center";
+  const fs = Math.max(10, Math.min(15, 13 * nd.sc));
+  g.font = "650 " + fs + "px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = hot || nd.open ? "#ffffff" : "rgba(236,240,252,0.94)";
+  g.fillText(nd.label, nd.cx, nd.cy + R + 19 * nd.sc);
+  g.font = "400 " + Math.max(9, fs - 2) + "px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = hexA(nd.color, 0.86);
+  g.fillText(nd.sub, nd.cx, nd.cy + R + 34 * nd.sc);
+  g.restore();
+}
+
+function drawMember(g, nd) {
+  const hot = state.hoverId === nd.id;
+  const sel = state.selectedId === nd.id;
+  const s = nd.alpha * nd.df * (nd.decayVisible == null ? 1 : nd.decayVisible);
+  const R = nd.r * nd.sc;
+
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  halo(g, nd.cx, nd.cy, R * (hot || sel ? 5.4 : 3.6), nd.color,
+       (hot || sel ? 0.95 : 0.5) * s);
+  g.restore();
+
+  g.save();
+  g.globalAlpha = s;
+  g.fillStyle = hot || sel ? "#f2f6ff" : hexA(nd.color, 0.9);
+  g.beginPath(); g.arc(nd.cx, nd.cy, R, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = hexA(nd.color, 1);
+  g.lineWidth = sel ? 2.4 : 1.2;
+  g.beginPath(); g.arc(nd.cx, nd.cy, R + (sel ? 4 : 2.4) * nd.sc, 0, Math.PI * 2); g.stroke();
+
+  // Truth state marker: disputed items get a hollow warning ring.
+  if (nd.item && nd.item.truth === "disputed") {
+    g.setLineDash([1.6, 3]);
+    g.strokeStyle = "rgba(255,180,90,0.95)";
+    g.lineWidth = 1.4;
+    g.beginPath(); g.arc(nd.cx, nd.cy, R + 6.5 * nd.sc, 0, Math.PI * 2); g.stroke();
+    g.setLineDash([]);
+  }
+  g.restore();
+
+  // Label — LOD. In 3D only the front half keeps its label, otherwise the
+  // text collides with itself. That loss is the price of the third axis.
+  const front = nd.sc > 0.985;
+  const showLabel = hot || sel ||
+    (nodes.filter(x => x.kind === "member").length <= 12 &&
+     (state.lift < 0.35 || front));
+  if (showLabel) {
+    const right = nd.cx >= W / 2;
+    g.save();
+    g.globalAlpha = s * (hot || sel ? 1 : 0.74);
+    g.textAlign = right ? "left" : "right";
+    const fs = Math.max(9.5, Math.min(13, 11.5 * nd.sc));
+    g.font = (hot || sel ? "600 " : "400 ") + fs + "px " + getComputedStyle(document.body).fontFamily;
+    g.fillStyle = hot || sel ? "#ffffff" : "rgba(226,232,248,0.9)";
+    const pad = R + 9;
+    const text = nd.label.length > 42 ? nd.label.slice(0, 40) + "…" : nd.label;
+    g.fillText(text, nd.cx + (right ? pad : -pad), nd.cy + 4);
+    g.restore();
+  }
+}
+
+function drawMore(g, nd) {
+  const hot = state.hoverId === nd.id;
+  const R = nd.r * nd.sc;
+  g.save();
+  g.globalAlpha = nd.alpha * nd.df;
+  g.setLineDash([3, 4]);
+  g.strokeStyle = hexA(nd.color, hot ? 1 : 0.6);
+  g.lineWidth = 1.3;
+  g.beginPath(); g.arc(nd.cx, nd.cy, R, 0, Math.PI * 2); g.stroke();
+  g.setLineDash([]);
+  g.textAlign = "center";
+  g.font = "600 " + Math.max(9, 10.5 * nd.sc) + "px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = hexA(nd.color, hot ? 1 : 0.82);
+  g.fillText(nd.label, nd.cx, nd.cy + 3.5);
+  if (state.lift < 0.35 || nd.sc > 0.985) {
+    g.font = "400 9.5px " + getComputedStyle(document.body).fontFamily;
+    g.fillStyle = "rgba(226,232,248,0.42)";
+    g.fillText(nd.sub, nd.cx, nd.cy + R + 14);
+  }
+  g.restore();
+}
+
+function drawFocusLabel(g, nd) {
+  g.save();
+  g.globalAlpha = nd.alpha;
+  g.textAlign = "center";
+  const k = nd.sc;
+  const words = wrap(g, nd.label, 250, "650 15px " + getComputedStyle(document.body).fontFamily);
+  g.font = "400 9.5px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = "rgba(169,194,255,0.62)";
+  g.fillText(nd.sub.toUpperCase(), nd.cx, nd.cy + 54 * k);
+  g.font = "650 15px " + getComputedStyle(document.body).fontFamily;
+  g.fillStyle = "#ffffff";
+  words.forEach((line, i) => g.fillText(line, nd.cx, nd.cy + 73 * k + i * 19));
+  g.restore();
+}
+
+function wrap(g, text, maxW, font) {
+  g.font = font;
+  const words = text.split(" ");
+  const lines = []; let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (g.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, 3);
+}
+
+// ── Hairball comparison mode ───────────────────────────────────────────────
+let hairNodes = null, hairEdges = null;
+function buildHairball() {
+  const r = rng(fnv1a("hairball"));
+  const N = 1024, E = 1900;
+  hairNodes = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const cat = CATEGORIES[Math.floor(r() * CATEGORIES.length)];
+    // Loose category clustering + heavy overlap — the realistic bad case.
+    const ca = CATEGORIES.indexOf(cat) / CATEGORIES.length * Math.PI * 2;
+    const spread = 0.62;
+    const ang = ca + (r() - 0.5) * spread * 2 + (r() - 0.5) * 1.5;
+    const rad = Math.pow(r(), 0.55) * Math.min(W, H) * 0.46;
+    hairNodes[i] = {
+      x: Math.cos(ang) * rad, y: Math.sin(ang) * rad,
+      z: (r() - 0.5) * 2 * DEPTH * 1.35,
+      c: cat.color, s: 1.1 + r() * 2.4,
+    };
+  }
+  hairEdges = new Array(E);
+  for (let i = 0; i < E; i++) {
+    hairEdges[i] = [Math.floor(r() * N), Math.floor(r() * N)];
+  }
+}
+
+function drawHairball(g) {
+  if (!hairNodes) buildHairball();
+  // Project once per frame; in 2D this collapses to the flat scatter.
+  for (const n of hairNodes) {
+    const p = project(n.x, n.y, n.z);
+    n.px = p.sx; n.py = p.sy; n.psc = p.sc;
+  }
+  g.save();
+  g.globalCompositeOperation = "lighter";
+  g.lineWidth = 0.5;
+  g.strokeStyle = "rgba(130,160,255,0.115)";
+  g.beginPath();
+  for (const [a, b] of hairEdges) {
+    const A = hairNodes[a], B = hairNodes[b];
+    g.moveTo(A.px, A.py);
+    g.lineTo(B.px, B.py);
+  }
+  g.stroke();
+  for (const n of hairNodes) {
+    const df = 1 - state.lift * 0.55 * (1 - Math.min(1, Math.max(0, (n.psc - 0.7) / 0.55)));
+    g.fillStyle = hexA(n.c, 0.72 * df);
+    g.beginPath(); g.arc(n.px, n.py, n.s * n.psc, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
+// ── Frame ──────────────────────────────────────────────────────────────────
+function nodeById(id) { return nodes.find(n => n.id === id); }
+
+function frame(now) {
+  raf = 0;
+  const dt = Math.min(48, now - t0); t0 = now;
+  clock += dt;
+
+  // ── Mode morph + camera ─────────────────────────────────────────────────
+  const liftTarget = state.mode3d ? 1 : 0;
+  const liftBefore = state.lift;
+  state.lift += (liftTarget - state.lift) * 0.09;
+  if (Math.abs(liftTarget - state.lift) < 0.002) state.lift = liftTarget;
+
+  if (state.mode3d && state.motion && !state.dragging) {
+    state.cam.tyaw += dt * 0.000075;               // slow drift, not a spinner
+  }
+  const camBefore = state.cam.yaw + state.cam.pitch + state.cam.zoom;
+  state.cam.yaw += (state.cam.tyaw - state.cam.yaw) * 0.10;
+  state.cam.pitch += (state.cam.tpitch - state.cam.pitch) * 0.10;
+  state.cam.zoom += (state.cam.tzoom - state.cam.zoom) * 0.10;
+  const camMoved = Math.abs(state.cam.yaw + state.cam.pitch + state.cam.zoom - camBefore) > 0.00012;
+  const liftMoved = Math.abs(state.lift - liftBefore) > 0.0005;
+
+  // Screen-space parallax only matters in the flat view; in 3D the camera
+  // does that job for real.
+  const pk = 1 - state.lift;
+  state.parallax.x += (state.parallax.tx - state.parallax.x) * 0.06;
+  state.parallax.y += (state.parallax.ty - state.parallax.y) * 0.06;
+
+  // ── Tween in WORLD space, then project ──────────────────────────────────
+  const nearD = BASE_DIST - DEPTH, farD = BASE_DIST + DEPTH;
+  let moving = false;
+  for (const nd of nodes) {
+    nd.wx += (nd.x3 - nd.wx) * 0.14;
+    nd.wy += (nd.y3 - nd.wy) * 0.14;
+    nd.wz += (nd.z3 - nd.wz) * 0.14;
+    if (Math.abs(nd.x3 - nd.wx) > 0.3 || Math.abs(nd.y3 - nd.wy) > 0.3 ||
+        Math.abs(nd.z3 - nd.wz) > 0.3) moving = true;
+
+    const p = project(nd.wx, nd.wy, nd.wz);
+    const pw = pk * (nd.kind === "focus" ? 0.25 : 0.85);
+    nd.cx = p.sx + state.parallax.x * pw;
+    nd.cy = p.sy + state.parallax.y * pw;
+    nd.sc = p.sc;
+    nd.depth = p.depth;
+    // Depth fade: far things recede. Zero effect at lift 0.
+    const t = Math.min(1, Math.max(0, (farD - p.depth) / (farD - nearD)));
+    nd.df = 1 - state.lift * 0.60 * (1 - t);
+
+    nd.alpha += (1 - nd.alpha) * 0.13;
+    if (nd.alpha < 0.99) moving = true;
+  }
+
+  const g = ctx2;
+  drawBackground(g);
+  if (typeof drawStrategyOverlay === "function") drawStrategyOverlay(g);
+
+  if (state.hairball) {
+    drawHairball(g);
+  } else {
+    drawEdges(g);
+    if (typeof drawConflictMarkers === "function") drawConflictMarkers(g);
+    if (typeof drawBundlePreview === "function") drawBundlePreview(g);
+    if (typeof drawRecallPulse === "function") drawRecallPulse(g);
+    // Depth-sorted paint: far first, near last. This is where 3D shows its
+    // real cost — near nodes occlude far ones and you must orbit to read.
+    const order = nodes.filter(n => n.kind !== "focus")
+                       .sort((a, b) => b.depth - a.depth);
+    const focusNd = nodeById("focus");
+    let focusDrawn = false;
+    for (const nd of order) {
+      if (focusNd && !focusDrawn && nd.depth < focusNd.depth) {
+        drawFocusNode(g, focusNd); drawFocusLabel(g, focusNd); focusDrawn = true;
+      }
+      if (nd.kind === "hub") drawHub(g, nd);
+      else if (nd.kind === "member") drawMember(g, nd);
+      else if (nd.kind === "more") drawMore(g, nd);
+    }
+    if (focusNd && !focusDrawn) { drawFocusNode(g, focusNd); drawFocusLabel(g, focusNd); }
+  }
+
+  // Freeze-on-idle: no perpetual simulation.
+  const idleFor = now - lastInteract;
+  const busy = moving || camMoved || liftMoved;
+  const needsMotion = state.motion || busy;
+  if (!needsMotion || (idleFor > 12000 && !busy)) {
+    frozen = true;
+    const el = document.getElementById("idle");
+    el.className = "frozen";
+    el.textContent = state.motion ? "frozen · idle 12s" : "still · motion off";
+    return;                                  // loop stops; nothing spins forever
+  }
+  document.getElementById("idle").textContent =
+    "live · " + Math.round(1000 / Math.max(1, dt)) + " fps" +
+    (state.mode3d ? " · 3D" : "");
+  raf = requestAnimationFrame(frame);
+}
+</script>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   PART 4 — interaction, reading list, keyboard, init
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const $ = id => document.getElementById(id);
+const app = $("app");
+const tip = $("tip");
+
+function ago(days) {
+  if (days === 0) return "today";
+  if (days < 7) return days + "d ago";
+  if (days < 60) return Math.round(days / 7) + "w ago";
+  return Math.round(days / 30) + "mo ago";
+}
+
+// ── Hit testing ────────────────────────────────────────────────────────────
+/** Nearest hit wins; ties broken by depth so the front node is picked. */
+function hitTest(mx, my) {
+  let best = null, bestKey = Infinity;
+  for (const nd of nodes) {
+    if (nd.kind === "focus") continue;
+    const d = Math.hypot(mx - nd.cx, my - nd.cy);
+    const pad = (nd.kind === "member" ? 13 : 8) * Math.max(0.7, nd.sc);
+    if (d >= nd.r * nd.sc + pad) continue;
+    const key = d + nd.depth * 0.02;         // prefer nearer-to-camera
+    if (key < bestKey) { best = nd; bestKey = key; }
+  }
+  return best;
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function openRing(catId) {
+  state.openCat = state.openCat === catId ? null : catId;
+  state.selectedId = null;
+  layout();
+}
+
+function reFocus(item) {
+  state.trail.push({ id: item.id, name: item.name, sub: "Focused memory", cat: item.cat, item });
+  state.openCat = null;
+  state.selectedId = null;
+  layout();
+}
+
+function goBack() {
+  if (state.openCat) { state.openCat = null; state.selectedId = null; layout(); return; }
+  if (state.trail.length > 1) { state.trail.pop(); layout(); }
+}
+
+function goToCrumb(i) {
+  state.trail = state.trail.slice(0, i + 1);
+  state.openCat = null; state.selectedId = null;
+  layout();
+}
+
+function resetAll() {
+  state.trail = state.trail.slice(0, 1);
+  state.openCat = null; state.selectedId = null;
+  layout();
+}
+
+// ── Pointer ────────────────────────────────────────────────────────────────
+// ── Orbit controls (3D only) ───────────────────────────────────────────────
+let dragFrom = null, dragMoved = 0;
+
+cv.addEventListener("mousedown", ev => {
+  if (!state.mode3d) return;
+  state.dragging = true; dragMoved = 0;
+  dragFrom = { x: ev.clientX, y: ev.clientY, yaw: state.cam.tyaw, pitch: state.cam.tpitch };
+  cv.style.cursor = "grabbing";
+  wake();
+});
+window.addEventListener("mouseup", () => {
+  if (!state.dragging) return;
+  state.dragging = false; dragFrom = null;
+  cv.style.cursor = "default";
+  wake();
+});
+cv.addEventListener("wheel", ev => {
+  if (!state.mode3d) return;
+  ev.preventDefault();
+  state.cam.tzoom = Math.min(2.1, Math.max(0.55, state.cam.tzoom * (ev.deltaY > 0 ? 0.92 : 1.09)));
+  wake();
+}, { passive: false });
+
+cv.addEventListener("mousemove", ev => {
+  const r = cv.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+
+  if (state.dragging && dragFrom) {
+    const dx = ev.clientX - dragFrom.x, dy = ev.clientY - dragFrom.y;
+    dragMoved = Math.max(dragMoved, Math.hypot(dx, dy));
+    state.cam.tyaw = dragFrom.yaw + dx * 0.0055;
+    state.cam.tpitch = Math.max(-1.15, Math.min(1.15, dragFrom.pitch + dy * 0.0045));
+    tip.style.opacity = "0";
+    wake();
+    return;
+  }
+
+  // Parallax target: max ±9px, three layers. Depth cue, not geometry.
+  state.parallax.tx = ((mx / W) - 0.5) * (state.motion && !state.mode3d ? -9 : 0);
+  state.parallax.ty = ((my / H) - 0.5) * (state.motion && !state.mode3d ? -9 : 0);
+
+  const hit = state.hairball ? null : hitTest(mx, my);
+  const id = hit ? hit.id : null;
+  if (id !== state.hoverId) { state.hoverId = id; }
+  cv.style.cursor = hit ? "pointer" : "default";
+
+  if (hit && hit.kind === "member" && hit.item) {
+    const it = hit.item;
+    tip.innerHTML =
+      '<div class="t-name">' + esc(it.name) + "</div>" +
+      '<div class="t-meta">' +
+      "<b>category</b><span>" + esc(it.cat) + "</span>" +
+      "<b>truth</b><span>" + esc(it.truth) + "</span>" +
+      "<b>source</b><span>" + esc(it.source) + "</span>" +
+      "<b>evidence</b><span>" + it.evidence + " item" + (it.evidence === 1 ? "" : "s") + "</span>" +
+      "<b>confidence</b><span>" + Math.round(it.confidence * 100) + "%</span>" +
+      "<b>last seen</b><span>" + ago(it.days) + "</span>" +
+      "<b>relevance</b><span>" + it.relevance.toFixed(2) + " → distance</span>" +
+      "</div>";
+    placeTip(mx, my);
+  } else if (hit && hit.kind === "hub") {
+    tip.innerHTML =
+      '<div class="t-name">' + esc(hit.label) + "</div>" +
+      '<div class="t-meta"><b>aggregate</b><span>' + hit.total + " memories</span>" +
+      "<b>action</b><span>" + (hit.open ? "click to collapse" : "click to open ring") + "</span></div>";
+    placeTip(mx, my);
+  } else if (hit && hit.kind === "more") {
+    tip.innerHTML = '<div class="t-name">' + esc(hit.label) + "</div>" +
+      '<div class="t-meta"><b>action</b><span>list the remainder, do not draw it</span></div>';
+    placeTip(mx, my);
+  } else {
+    tip.style.opacity = "0";
+  }
+  wake();
+});
+
+function placeTip(mx, my) {
+  tip.style.opacity = "1";
+  const w = tip.offsetWidth || 240, h = tip.offsetHeight || 90;
+  let x = mx + 16, y = my + 14;
+  if (x + w > W - 8) x = mx - w - 16;
+  if (y + h > H - 8) y = my - h - 14;
+  tip.style.left = Math.max(8, x) + "px";
+  tip.style.top = Math.max(8, y) + "px";
+}
+
+cv.addEventListener("mouseleave", () => {
+  state.hoverId = null;
+  state.parallax.tx = 0; state.parallax.ty = 0;
+  tip.style.opacity = "0";
+  wake();
+});
+
+cv.addEventListener("click", ev => {
+  if (state.hairball) return;
+  if (dragMoved > 4) { dragMoved = 0; return; }   // an orbit drag is not a click
+  const r = cv.getBoundingClientRect();
+  const hit = hitTest(ev.clientX - r.left, ev.clientY - r.top);
+  if (!hit) { if (state.openCat) openRing(state.openCat); return; }
+  cv.focus();
+  if (hit.kind === "hub") { kbSet(hit.id); openRing(hit.cat); }
+  else if (hit.kind === "member") { kbSet(hit.id); reFocus(hit.item); }
+  else if (hit.kind === "more") { state.selectedId = "more"; renderRail(); flashRail(); }
+});
+
+// ── Keyboard ───────────────────────────────────────────────────────────────
+let kbId = null;
+function navigable() {
+  const hubs = nodes.filter(n => n.kind === "hub");
+  const mem  = nodes.filter(n => n.kind === "member" || n.kind === "more");
+  return { hubs, mem };
+}
+function kbSet(id) { kbId = id; state.hoverId = id; wake(); }
+
+cv.addEventListener("keydown", ev => {
+  const { hubs, mem } = navigable();
+  const inMem = kbId && kbId.startsWith("m:") || kbId === "more";
+  const ring = inMem ? mem : hubs;
+  const i = ring.findIndex(n => n.id === kbId);
+
+  switch (ev.key) {
+    case "ArrowRight": case "ArrowDown": {
+      ev.preventDefault();
+      const nx = ring.length ? ring[(i + 1 + ring.length) % ring.length] : null;
+      if (nx) kbSet(nx.id);
+      break;
+    }
+    case "ArrowLeft": case "ArrowUp": {
+      ev.preventDefault();
+      const pv = ring.length ? ring[(i - 1 + ring.length) % ring.length] : null;
+      if (pv) kbSet(pv.id);
+      break;
+    }
+    case "Tab": {
+      if (mem.length) { ev.preventDefault(); kbSet(inMem ? hubs[0].id : mem[0].id); }
+      break;
+    }
+    case "Enter": case " ": {
+      ev.preventDefault();
+      const nd = nodes.find(n => n.id === kbId);
+      if (!nd) { if (hubs[0]) kbSet(hubs[0].id); break; }
+      if (nd.kind === "hub") openRing(nd.cat);
+      else if (nd.kind === "member") reFocus(nd.item);
+      else if (nd.kind === "more") { state.selectedId = "more"; renderRail(); flashRail(); }
+      break;
+    }
+    case "Escape": case "Backspace": ev.preventDefault(); goBack(); break;
+    case "Home": ev.preventDefault(); resetAll(); break;
+  }
+});
+
+document.addEventListener("keydown", ev => {
+  if (ev.target !== document.body) return;
+  if (ev.key === "Escape" || ev.key === "Backspace") { ev.preventDefault(); goBack(); }
+});
+
+// ── Toolbar ────────────────────────────────────────────────────────────────
+$("btn-back").onclick  = () => goBack();
+$("btn-reset").onclick = () => resetAll();
+$("btn-motion").onclick = e => {
+  if (state.still) {
+    state.motion = false;
+    e.currentTarget.setAttribute("aria-pressed", "false");
+    if (typeof announce === "function") announce("Still mode blocks decorative motion");
+    return;
+  }
+  state.motion = !state.motion;
+  e.currentTarget.setAttribute("aria-pressed", String(state.motion));
+  wake();
+};
+$("btn-3d").onclick = e => {
+  state.mode3d = !state.mode3d;
+  e.currentTarget.setAttribute("aria-pressed", String(state.mode3d));
+  app.classList.toggle("is3d", state.mode3d);
+  if (state.mode3d) resetView(); else { state.cam.tyaw = 0.42; state.cam.tpitch = 0.30; state.cam.tzoom = 1; }
+  tip.style.opacity = "0";
+  renderHud(); wake();
+};
+$("btn-view").onclick = () => { resetView(); wake(); };
+
+function resetView() {
+  state.cam.tyaw = 0.42;
+  state.cam.tpitch = 0.30;
+  state.cam.tzoom = 1;
+}
+$("btn-hair").onclick = e => {
+  state.hairball = !state.hairball;
+  e.currentTarget.setAttribute("aria-pressed", String(state.hairball));
+  app.classList.toggle("hairball", state.hairball);
+  tip.style.opacity = "0";
+  renderHud(); wake();
+};
+$("btn-rail").onclick = e => {
+  state.railOpen = !state.railOpen;
+  e.currentTarget.setAttribute("aria-pressed", String(state.railOpen));
+  app.classList.toggle("rail-hidden", !state.railOpen);
+  requestAnimationFrame(resize);
+};
+$("btn-motion").setAttribute("aria-pressed", String(state.motion));
+
+// ── Breadcrumbs ────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderCrumbs() {
+  const el = $("crumbs");
+  el.innerHTML = "";
+  state.trail.forEach((t, i) => {
+    if (i) {
+      const sep = document.createElement("span");
+      sep.className = "crumb-sep"; sep.textContent = "›";
+      el.appendChild(sep);
+    }
+    const b = document.createElement("button");
+    b.className = "crumb" + (i === state.trail.length - 1 ? " is-last" : "");
+    b.textContent = i === 0 ? "◎ " + t.name : t.name;
+    b.title = t.name;
+    if (i !== state.trail.length - 1) b.onclick = () => goToCrumb(i);
+    el.appendChild(b);
+  });
+  if (state.openCat) {
+    const sep = document.createElement("span");
+    sep.className = "crumb-sep"; sep.textContent = "›";
+    el.appendChild(sep);
+    const cat = activeCategories().find(c => c.id === state.openCat);
+    const b = document.createElement("button");
+    b.className = "crumb is-last";
+    b.style.color = cat.color;
+    b.textContent = cat.name;
+    el.appendChild(b);
+  }
+}
+
+// ── HUD ────────────────────────────────────────────────────────────────────
+function renderHud() {
+  const onScreen = state.hairball ? 1024 : nodes.filter(n => n.kind !== "more").length;
+  $("hud-nodes").innerHTML = onScreen + ' <small>/ ' + TOTAL_IN_DB + "</small>";
+  const dims = state.mode3d ? " · 3D" : " · 2D";
+  $("hud-strat-name").textContent = (state.hairball
+    ? "none — raw node-link"
+    : (isRoot()
+        ? (state.openCat ? "ego-radial-rings · ring open" : "ego-radial-rings · aggregate")
+        : (state.openCat ? "ego-radial-rings · re-centred + open" : "ego-radial-rings · re-centred"))
+    ) + dims;
+  $("hud-seed").textContent = "seed " + seedHex + (state.hairball ? "" : " · deterministic");
+}
+
+// ── Reading list ───────────────────────────────────────────────────────────
+let expandedRow = null;
+
+function flashRail() {
+  const el = $("rail");
+  el.animate(
+    [{ background: "#7c9cff22" }, { background: "var(--panel-solid)" }],
+    { duration: 480 }
+  );
+}
+
+function renderRail() {
+  const f = focus();
+  const cats = activeCategories();
+  const cat = state.openCat ? cats.find(c => c.id === state.openCat) : null;
+  const members = openMembers();
+
+  $("rail-sub").textContent = cat ? cat.name : f.name;
+  $("rail-count").textContent = cat
+    ? members.length + " shown · " + cat.total + " total in this category"
+    : cats.length + " categories · " + cats.reduce((s, c) => s + c.total, 0) + " memories in scope";
+
+  const list = $("rail-list");
+  list.innerHTML = "";
+
+  if (!cat) {
+    cats.forEach(c => {
+      const b = document.createElement("button");
+      b.className = "ritem"; b.setAttribute("role", "listitem");
+      b.style.borderLeftColor = c.color;
+      b.innerHTML =
+        '<div class="r-top"><i class="dot" style="background:' + c.color + '"></i>' +
+        '<span class="r-kind">category</span></div>' +
+        '<div class="r-name">' + esc(c.name) + "</div>" +
+        '<div class="r-meta"><span>' + c.total + " memories</span>" +
+        "<span>click to open ring</span></div>";
+      b.onclick = () => { openRing(c.id); flashRail(); };
+      list.appendChild(b);
+    });
+    return;
+  }
+
+  members.forEach(it => {
+    const b = document.createElement("button");
+    b.className = "ritem" + (state.selectedId === "m:" + it.id ? " sel" : "");
+    b.setAttribute("role", "listitem");
+    b.style.borderLeftColor = cat.color;
+    const open = expandedRow === it.id;
+    b.innerHTML =
+      '<div class="r-top"><i class="dot" style="background:' + cat.color + '"></i>' +
+      '<span class="r-kind">' + esc(it.truth) + " · " + esc(it.source) + "</span></div>" +
+      '<div class="r-name">' + esc(it.name) + "</div>" +
+      '<div class="r-meta">' +
+      '<span class="conf" style="color:' + cat.color + '">conf <i style="--w:' +
+      Math.round(it.confidence * 100) + '%"></i></span>' +
+      "<span>" + it.evidence + " ev</span>" +
+      "<span>" + ago(it.days) + "</span>" +
+      "<span>rel " + it.relevance.toFixed(2) + "</span>" +
+      "</div>" +
+      (open
+        ? '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--hair);' +
+          'font-size:11px;color:var(--txt-2);line-height:1.55">' +
+          "Distance from centre encodes relevance " + it.relevance.toFixed(2) +
+          ". Dot size encodes " + it.evidence + " evidence items. " +
+          (it.truth === "disputed" ? "Dashed outline marks a disputed claim. " : "") +
+          '<div style="margin-top:8px"><span style="color:' + cat.color +
+          ';font-weight:600">Focus on this →</span></div></div>'
+        : "");
+    b.onmouseenter = () => { state.hoverId = "m:" + it.id; wake(); };
+    b.onmouseleave = () => { state.hoverId = null; wake(); };
+    b.onclick = () => {
+      if (expandedRow === it.id) { reFocus(it); expandedRow = null; return; }
+      expandedRow = it.id;
+      state.selectedId = "m:" + it.id;
+      renderRail(); wake();
+    };
+    list.appendChild(b);
+  });
+
+  const remaining = cat.total - members.length;
+  if (remaining > 0) {
+    const more = document.createElement("button");
+    more.className = "rail-more";
+    more.innerHTML = "+ " + remaining + " further memories in <b>" + esc(cat.name) +
+      "</b><br><span style='color:var(--txt-3)'>listed on demand, never drawn — " +
+      "this is how the node count stays flat</span>";
+    more.onclick = () => {
+      more.innerHTML = "<span style='color:var(--txt-2)'>In production this pages the " +
+        "reading list from SQLite. The prototype ships " + members.length +
+        " sample titles per category, so there is nothing further to show here.</span>";
+    };
+    list.appendChild(more);
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.addEventListener("resize", () => requestAnimationFrame(resize));
+resize();
+$("rail-foot").textContent =
+  "The graph navigates. The list explains. Nothing is reachable only by pointing — " +
+  "every item here is keyboard and screen-reader navigable.";
+cv.focus();
+wake();
+</script>
+
+<!-- Decision-lab dialogs are simulated and never persist data. -->
+<div class="modal-backdrop" id="command-modal" aria-hidden="true">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="command-title">
+    <h2 id="command-title">Command palette <span class="sim-tag">Ctrl+K · STATIC</span></h2>
+    <input id="cmd-input" aria-label="Search commands and memories" placeholder="Search, jump, or change view…">
+    <div id="cmd-results"></div>
+  </div>
+</div>
+<div class="modal-backdrop" id="resolve-modal" aria-hidden="true">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="resolve-title">
+    <h2 id="resolve-title">Resolve contradiction <span class="sim-tag">MOCK FLOW</span></h2>
+    <div class="compare-grid"><div class="claim"><b>A · SQLite authority</b>Every durable write passes one governed boundary.</div><div class="claim"><b>B · Cached projection</b>Vector cache may accept direct writes for speed.</div></div>
+    <p class="lab-note">Resolution creates a review event in this prototype only.</p>
+    <div class="context-row"><button class="action-btn good" data-resolution="Keep A">Keep A</button><button class="action-btn" data-resolution="Keep B">Keep B</button><button class="action-btn" data-resolution="Merge">Merge</button><button class="action-btn" data-close-dialog>Cancel</button></div>
+  </div>
+</div>
+<div id="status-live" role="status" aria-live="polite"></div>
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   PART 5 — static UX decision lab (zero dependencies, no persistence)
+   ══════════════════════════════════════════════════════════════════════════ */
+const tokenValue = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const SEM = Object.freeze({
+  info: tokenValue("--sem-info"), recall: tokenValue("--sem-recall"),
+  success: tokenValue("--sem-success"), warning: tokenValue("--sem-warning"),
+  danger: tokenValue("--sem-danger"), conflict: tokenValue("--sem-conflict"),
+  muted: tokenValue("--sem-muted"), focus: tokenValue("--sem-focus")
+});
+
+Object.assign(state, {
+  strategy: "search", scaleTotal: 878, density: 12, decayDays: 210,
+  bundle: false, pathNoResult: false, recallStarted: 0, recallUntil: 0,
+  forgotten: new Set(), selectedMemory: CORPUS.knowledge[0], still: PREFERS_STILL,
+  synthetic: { status: "idle", summary: null, workerKind: null, progressMessages: 0 }
+});
+
+const STRATEGIES = {
+  search: { label: "search-treemap-grid", proof: "Search benefits from bounded grid scanning; category and result density can be compared without drawing the database." },
+  ego: { label: "ego-radial-rings", proof: "Ego rings preserve the polished Focus Orbit: direction is category, radius is relevance, and 2D / 3D remain available." },
+  path: { label: "path-layered-dag", proof: "Pinned endpoints turn an abstract graph into an explainable layered route, including an honest no-path outcome." },
+  temporal: { label: "temporal-lanes", proof: "Time lanes reveal age and recall strength without converting recency into decorative motion." },
+  grouped: { label: "grouped-source-lanes", proof: "Goal and source lanes make provenance comparison faster than following a dense fan of edges." }
+};
+
+const baseLayout = layout;
+const baseRenderRail = renderRail;
+const baseRenderHud = renderHud;
+const baseReFocus = reFocus;
+
+reFocus = function decisionReFocus(item) {
+  state.selectedMemory = item;
+  baseReFocus(item);
+  renderContext();
+  announce("Focused " + item.name);
+};
+
+layout = function decisionLayout() {
+  baseLayout();
+  applyDecisionLayout();
+  renderContext();
+  renderMirror();
+  renderHud();
+};
+
+renderHud = function decisionHud() {
+  baseRenderHud();
+  const visible = state.hairball ? 1024 : nodes.filter(n => n.kind !== "more").length;
+  const actual = state.synthetic?.summary?.nodeCount || 0;
+  const total = actual || state.scaleTotal;
+  $("hud-count-label").textContent = actual ? "Shown / actual generated" : "Shown / static sample";
+  $("hud-nodes").innerHTML = visible.toLocaleString() + " <small>/ " + total.toLocaleString() + (actual ? " actual generated" : " static sample") + "</small>";
+  $("trunc").textContent = "Hairball compare: 1,024 representative/downsampled visual points. " + (actual ? total.toLocaleString() + " actual compact records remain worker-held." : "No synthetic worker dataset is currently held.");
+  if (!state.hairball) $("hud-strat-name").textContent = STRATEGIES[state.strategy].label + (state.mode3d ? " · 3D" : " · 2D");
+};
+
+renderRail = function decisionRail() {
+  baseRenderRail();
+  if (state.strategy !== "path") return;
+  const noPath = state.pathNoResult;
+  $("rail-title").textContent = "Path explanation — simulated evidence";
+  $("rail-sub").textContent = noPath ? "No supported path" : "Pinned A → B";
+  $("rail-count").textContent = noPath ? "0 routes · endpoints remain pinned" : "4 hops · strongest supported route";
+  const steps = noPath ? [
+    ["A pinned", "SQLite authority"], ["Search exhausted", "No governed relation reaches B"], ["Next action", "Broaden relation types or change B"]
+  ] : [
+    ["A · Authority", "SQLite is transactional source"], ["1 · Governs", "durable write boundary"],
+    ["2 · Projects", "FTS5 + vectors are rebuildable"], ["3 · Supports", "hybrid memory retrieval"], ["B · Decision", "Focus Orbit uses bounded projections"]
+  ];
+  $("rail-list").innerHTML = steps.map((s, i) => '<div class="ritem" role="listitem" style="border-left-color:' + (noPath ? SEM.warning : SEM.recall) + '"><div class="r-top"><i class="dot" style="background:' + (noPath ? SEM.warning : SEM.recall) + '"></i><span class="r-kind">layer ' + i + '</span></div><div class="r-name">' + esc(s[0]) + '</div><div class="r-meta"><span>' + esc(s[1]) + '</span></div></div>').join("");
+  $("rail-foot").textContent = noPath ? "No-path is a valid answer. Recovery actions change the query, never invent an edge." : "Each hop shows the relation used. This is a static explanatory route, not a persisted graph query.";
+};
+
+function setWorld(nd, x, y, z) {
+  nd.x3 = x; nd.y3 = y; if (z != null) nd.z3 = z;
+  nd.x = W / 2 + x; nd.y = H / 2 + y;
+}
+
+function applyDecisionLayout() {
+  const mode = state.strategy, base = Math.min(W, H);
+  const members = nodes.filter(n => n.kind === "member");
+  const hubs = nodes.filter(n => n.kind === "hub");
+  for (const n of nodes) {
+    n.decayVisible = n.item ? (n.item.days <= state.decayDays ? .32 + .68 * (1 - n.item.days / 210) : .055) : 1;
+    if (n.item && state.forgotten.has(n.item.id)) n.decayVisible = .035;
+    n.pathNode = false;
+  }
+  if (mode === "ego") {
+    addContradictionEdge(members);
+    return;
+  }
+  if (mode === "search") {
+    const cols = Math.max(3, Math.min(4, Math.ceil(Math.sqrt(members.length))));
+    setWorld(nodeById("focus"), 0, -base * .34, 0);
+    hubs.forEach((n, i) => setWorld(n, -base * .38 + (i % 4) * base * .255, -base * .21 + Math.floor(i / 4) * 54, n.z3));
+    members.forEach((n, i) => setWorld(n, -base * .32 + (i % cols) * (base * .64 / Math.max(1, cols - 1)), -base * .02 + Math.floor(i / cols) * 88, n.z3));
+    addContradictionEdge(members);
+  } else if (mode === "path") {
+    const route = members.slice(0, 5);
+    setWorld(nodeById("focus"), -base * .4, 0, 0);
+    hubs.forEach((n, i) => { setWorld(n, -base * .36 + i * base * .1, -base * .31, n.z3); n.dim = true; });
+    members.forEach((n, i) => {
+      const onPath = i < route.length && !state.pathNoResult;
+      setWorld(n, -base * .28 + Math.min(i, 4) * base * .145, (i % 2 ? 42 : -34), n.z3);
+      n.pathNode = onPath; n.decayVisible *= onPath ? 1 : .12;
+    });
+    edges = [];
+    if (!state.pathNoResult && route.length) {
+      edges.push({ from: "focus", to: route[0].id, color: SEM.recall, strength: 1, dim: false, curve: 0, particles: 3 });
+      route.slice(1).forEach((n, i) => edges.push({ from: route[i].id, to: n.id, color: SEM.recall, strength: 1, dim: false, curve: (i % 2 ? -.08 : .08), particles: 3 }));
+    }
+  } else if (mode === "temporal") {
+    setWorld(nodeById("focus"), 0, -base * .35, 0);
+    hubs.forEach((n, i) => setWorld(n, -base * .39 + i * base * .11, -base * .25, n.z3));
+    const lanes = ["conversation", "document", "observation", "tool-result", "user-stated"];
+    members.forEach(n => {
+      const x = -base * .34 + (1 - Math.min(210, n.item.days) / 210) * base * .68;
+      const y = -base * .1 + lanes.indexOf(n.item.source) * base * .095;
+      setWorld(n, x, y, n.z3);
+    });
+  } else if (mode === "grouped") {
+    setWorld(nodeById("focus"), 0, -base * .35, 0);
+    hubs.forEach((n, i) => setWorld(n, -base * .39 + i * base * .11, -base * .25, n.z3));
+    const lanes = ["conversation", "document", "observation", "tool-result", "user-stated"];
+    members.forEach((n, i) => {
+      const col = Math.max(0, lanes.indexOf(n.item.source));
+      const inCol = members.slice(0, i).filter(x => x.item.source === n.item.source).length;
+      setWorld(n, -base * .34 + col * base * .17, -base * .06 + inCol * 64, n.z3);
+    });
+  }
+}
+
+function addContradictionEdge(members) {
+  if (members.length < 2) return;
+  const a = members.find(n => n.item.truth === "disputed") || members[1];
+  const b = members.find(n => n !== a) || members[0];
+  edges.push({ from: a.id, to: b.id, color: SEM.conflict, strength: 1, dim: false, curve: .22, particles: 0, conflict: true });
+}
+
+function drawStrategyOverlay(g) {
+  if (!state || !state.strategy || state.hairball) return;
+  g.save(); g.font = "700 10px " + getComputedStyle(document.body).fontFamily; g.textAlign = "left";
+  if (state.strategy === "search") {
+    const cells = nodes.filter(n => n.kind === "member");
+    g.strokeStyle = hexA(SEM.info, .16); g.fillStyle = hexA(SEM.info, .025); g.lineWidth = 1;
+    cells.forEach(n => { g.beginPath(); g.roundRect(n.cx - 72, n.cy - 29, 144, 58, 7); g.fill(); g.stroke(); });
+    g.fillStyle = SEM.muted; g.fillText("CATEGORY CELLS", W / 2 - Math.min(W,H) * .39, H / 2 - Math.min(W,H) * .25);
+    g.fillText("BOUNDED RESULTS · age fades opacity", W / 2 - Math.min(W,H) * .39, H / 2 - Math.min(W,H) * .07);
+  }
+  if (state.strategy === "temporal") {
+    const labels = ["CONVERSATION", "DOCUMENT", "OBSERVATION", "TOOL RESULT", "USER STATED"];
+    labels.forEach((x, i) => { const y = H / 2 - Math.min(W,H) * .1 + i * Math.min(W,H) * .095; g.fillStyle = SEM.muted; g.fillText(x, W / 2 - Math.min(W,H) * .47, y); g.strokeStyle = hexA(SEM.info,.12); g.beginPath(); g.moveTo(W/2-Math.min(W,H)*.35,y); g.lineTo(W/2+Math.min(W,H)*.35,y); g.stroke(); });
+    g.fillStyle = SEM.warning; g.fillText("~7 MONTHS AGO", W/2-Math.min(W,H)*.35, H/2-Math.min(W,H)*.16); g.fillStyle=SEM.success; g.fillText("TODAY", W/2+Math.min(W,H)*.3,H/2-Math.min(W,H)*.16);
+  }
+  if (state.strategy === "grouped") {
+    ["CONVO", "DOC", "OBSERVE", "TOOL", "USER"].forEach((x,i) => { g.fillStyle=SEM.muted; g.fillText(x,W/2-Math.min(W,H)*.36+i*Math.min(W,H)*.17,H/2-Math.min(W,H)*.14); });
+  }
+  if (state.strategy === "path") {
+    g.fillStyle = state.pathNoResult ? SEM.warning : SEM.recall;
+    g.fillText(state.pathNoResult ? "NO SUPPORTED ROUTE — CHANGE ENDPOINT OR RELATION FILTER" : "PIN A  ·  EXPLAINABLE LAYERS  ·  PIN B", W/2-Math.min(W,H)*.35,H/2-Math.min(W,H)*.16);
+  }
+  g.restore();
+}
+
+function drawRecallPulse(g) {
+  if (!state.recallUntil || performance.now() >= state.recallUntil || state.still) return;
+  const t = (performance.now() - state.recallStarted) / (state.recallUntil - state.recallStarted);
+  g.save(); g.globalCompositeOperation = "lighter";
+  edges.forEach((e, i) => { const p = edgePath(e); if (!p) return; const q = bez(p, (t + i * .13) % 1); halo(g, q.x, q.y, 18, SEM.recall, 1); g.fillStyle=SEM.focus; g.beginPath(); g.arc(q.x,q.y,3,0,Math.PI*2); g.fill(); });
+  g.restore(); wake();
+}
+
+function drawConflictMarkers(g) {
+  const conflicts = edges.filter(e => e.conflict);
+  if (!conflicts.length) return;
+  g.save(); g.textAlign="center"; g.textBaseline="middle"; g.font="800 11px " + getComputedStyle(document.body).fontFamily;
+  conflicts.forEach(e => { const p=edgePath(e); if(!p)return; const q=bez(p,.5); halo(g,q.x,q.y,22,SEM.conflict,.8); g.fillStyle=SEM.conflict; g.beginPath(); g.arc(q.x,q.y,9,0,Math.PI*2); g.fill(); g.fillStyle=tokenValue("--txt"); g.fillText("!",q.x,q.y+.5); });
+  g.restore();
+}
+
+function drawBundlePreview(g) {
+  if (!state.bundle || state.hairball) return;
+  const hub = nodes.find(n => n.kind === "hub" && n.open), mem = nodes.filter(n => n.kind === "member");
+  if (!hub || !mem.length) return;
+  const tx = hub.cx + (W/2-hub.cx)*.23, ty = hub.cy + (H/2-hub.cy)*.23;
+  g.save(); g.strokeStyle=hexA(SEM.recall,.65); g.lineWidth=5; g.lineCap="round"; g.beginPath(); g.moveTo(hub.cx,hub.cy); g.lineTo(tx,ty); g.stroke();
+  g.fillStyle=SEM.recall; g.font="700 9px " + getComputedStyle(document.body).fontFamily; g.fillText("BUNDLED TRUNK",tx+7,ty-7); g.restore();
+}
+
+function switchStrategy(mode, announceChange = true) {
+  state.strategy = mode; state.pathNoResult = false;
+  if (mode === "search") state.openCat = "knowledge";
+  else if (mode === "path") state.openCat = "knowledge";
+  else if (mode === "temporal") state.openCat = "events";
+  else if (mode === "grouped") state.openCat = "goals";
+  else state.openCat = null;
+  document.querySelectorAll(".mode-btn").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  $("strategy-context").textContent = mode === "grouped" ? "goal / source" : mode;
+  $("path-controls").hidden = mode !== "path";
+  $("proof-text").textContent = STRATEGIES[mode].proof;
+  layout();
+  if (announceChange) announce(STRATEGIES[mode].label + " view selected");
+}
+
+function renderContext() {
+  const box = $("context-panel");
+  if (!box) return;
+  if (state.strategy === "path") {
+    const pinA = $("pin-a").selectedOptions[0]?.textContent.replace(/^A: |^B: /, "") || "A";
+    const pinB = $("pin-b").selectedOptions[0]?.textContent.replace(/^A: |^B: /, "") || "B";
+    box.className = "show";
+    box.innerHTML = '<div class="lab-label"><span>Why this route</span><span class="sim-tag">EXPLAINER</span></div><h3>' + (state.pathNoResult ? "No path found" : esc(pinA + " → " + pinB)) + '</h3><p>' + (state.pathNoResult ? "A and B stay pinned. The traversal exhausted supported relations without fabricating a connection." : "The highlighted route prefers governed and corroborated relations. The right reading list enumerates every hop.") + '</p><div class="context-row"><button class="action-btn" data-context="swap">Swap A / B</button><button class="action-btn" data-context="no-path">' + (state.pathNoResult ? "Restore route" : "Test no-path") + '</button></div>';
+    return;
+  }
+  const item = state.selectedMemory || CORPUS.knowledge[0];
+  const forgotten = state.forgotten.has(item.id);
+  box.className = "show";
+  box.innerHTML = '<div class="lab-label"><span>Memory detail</span><span class="sim-tag">PREVIEW ONLY</span></div><h3>' + esc(item.name) + '</h3><p>Strength <b style="color:' + (item.days < 90 ? SEM.success : SEM.warning) + '">' + Math.round((1-item.days/240)*100) + '%</b> · ' + ago(item.days) + ' · ' + esc(item.truth) + '. Opacity combines age and current decay horizon.</p><div class="context-row"><button class="action-btn danger" data-context="forget">' + (forgotten ? "Forgotten" : "Forget") + '</button><button class="action-btn good" data-context="restore">Restore</button></div><div class="lab-section" style="margin-top:11px"><div class="lab-label"><span>Contradiction detected</span><span style="color:' + SEM.conflict + '">● CONFLICT</span></div><div class="compare-grid"><div class="claim"><b>A</b>SQLite is authority.</div><div class="claim"><b>B</b>Cache accepts direct writes.</div></div><div class="context-row"><button class="action-btn" data-context="compare">Compare & resolve</button></div></div>';
+}
+
+function renderMirror() {
+  const current = nodes.filter(n => n.kind !== "more").slice(0, 24);
+  const html = current.map(n => '<li><button data-node="' + esc(n.id) + '">' + esc(n.kind + ": " + n.label) + '</button>' + (n.item ? ' — ' + ago(n.item.days) + ', ' + esc(n.item.truth) : '') + '</li>').join("");
+  if ($("mirror-list")) $("mirror-list").innerHTML = html;
+  if ($("sr-list")) $("sr-list").innerHTML = html;
+}
+
+function announce(message) {
+  const el = $("status-live"); el.textContent = message; el.classList.add("pop");
+  clearTimeout(announce.timer); announce.timer = setTimeout(() => el.classList.remove("pop"), 1500);
+}
+
+let previewReturnFocus = null;
+function showPreview(kind) {
+  previewReturnFocus = document.activeElement;
+  const content = {
+    empty: ["◎", "No memories yet", "Start with a source or seed a small local demo corpus.", "Seed demo memories", "Connect a source"],
+    none: ["⌕", "No results", "No memory matches the current query and decay horizon. The database is healthy.", "Clear filters", "Search ‘memory’"],
+    degraded: ["⚠", "Memory index degraded", "SQLite authority is available, but a rebuildable search projection is stale. Reads can continue in limited mode.", "Retry projection", "Rebuild index"]
+  }[kind];
+  const el = $("state-preview"); el.className="show"; el.dataset.kind=kind;
+  el.innerHTML='<div><div class="state-icon">'+content[0]+'</div><h2>'+content[1]+'</h2><p>'+content[2]+'</p><div class="context-row" style="justify-content:center"><button class="action-btn good" data-recovery>'+content[3]+'</button><button class="action-btn" data-recovery>'+content[4]+'</button><button class="action-btn" data-close-preview>Close</button></div><span class="sim-tag">SIMULATED STATE · NO DATA CHANGES</span></div>';
+  el.querySelector("button").focus(); announce(content[1] + " preview opened");
+}
+
+let dialogReturnFocus = null;
+function openDialog(id) {
+  dialogReturnFocus = document.activeElement; const el=$(id); el.classList.add("show"); el.setAttribute("aria-hidden","false");
+  requestAnimationFrame(() => el.querySelector("input,button").focus());
+}
+function closeDialogs() {
+  document.querySelectorAll(".modal-backdrop.show").forEach(x => { x.classList.remove("show"); x.setAttribute("aria-hidden","true"); });
+  if (dialogReturnFocus && dialogReturnFocus.focus) dialogReturnFocus.focus();
+  announce("Dialog closed; focus returned");
+}
+
+const paletteCommands = [
+  ["Open overview search grid", () => switchStrategy("search")], ["Open ego radial rings", () => switchStrategy("ego")],
+  ["Find path A to B", () => switchStrategy("path")], ["Open temporal lanes", () => switchStrategy("temporal")],
+  ["Group by goal and source", () => switchStrategy("grouped")], ["Simulate recall pulse", () => $("recall-pulse").click()],
+  ["Preview degraded database", () => showPreview("degraded")], ["Jump to SQLite authority memory", () => reFocus(CORPUS.knowledge[0])]
+];
+function renderCommands(query="") {
+  const q=query.toLowerCase(); const rows=paletteCommands.filter(x=>x[0].toLowerCase().includes(q));
+  $("cmd-results").innerHTML=rows.map((x,i)=>'<button class="cmd-item'+(i===0?' active':'')+'" data-command="'+paletteCommands.indexOf(x)+'">'+esc(x[0])+'</button>').join("") || '<p class="lab-note">No command. Try “path”, “temporal”, or “SQLite”.</p>';
+}
+
+// Real compact synthetic dataset lifecycle. The worker owns all million-scale arrays.
+const SYNTHETIC_SEED = 0x4b524941;
+const BASE_CATEGORY_TOTALS = Object.fromEntries(CATEGORIES.map(cat => [cat.id, cat.total]));
+const BASE_CORPUS = Object.fromEntries(CATEGORIES.map(cat => [cat.id, CORPUS[cat.id].slice()]));
+let syntheticWorker = null;
+let syntheticBlobUrl = null;
+let syntheticGeneration = 0;
+
+function stopSyntheticWorker() {
+  if (syntheticWorker) { syntheticWorker.onerror = null; syntheticWorker.terminate(); syntheticWorker = null; }
+  if (syntheticBlobUrl) { URL.revokeObjectURL(syntheticBlobUrl); syntheticBlobUrl = null; }
+}
+
+function restoreStaticCorpus() {
+  CATEGORIES.forEach(cat => { cat.total = BASE_CATEGORY_TOTALS[cat.id]; CORPUS[cat.id] = BASE_CORPUS[cat.id].slice(); });
+  state.selectedMemory = CORPUS.knowledge[0];
+}
+
+function setSyntheticStatus(status, text, percent) {
+  state.synthetic.status = status;
+  const el = $("synthetic-status");
+  el.dataset.state = status; el.textContent = text;
+  if (percent != null) $("synthetic-progress").value = percent;
+}
+
+function renderSyntheticMetrics(summary) {
+  const metrics = $("synthetic-metrics");
+  if (!summary) {
+    metrics.innerHTML = "<span>nodes <b>—</b></span><span>relations <b>—</b></span><span>clusters <b>—</b></span><span>worker bytes <b>—</b></span><span>duration <b>—</b></span><span>checksum <b>—</b></span>";
+    return;
+  }
+  const categoryText = CATEGORIES.map(cat => cat.name.slice(0, 4) + " " + summary.categoryTotals[cat.id].toLocaleString()).join(" · ");
+  metrics.innerHTML =
+    "<span>nodes <b>" + summary.nodeCount.toLocaleString() + "</b></span>" +
+    "<span>relations <b>" + summary.edgeCount.toLocaleString() + "</b></span>" +
+    "<span>clusters <b>" + summary.clusterCount.toLocaleString() + "</b></span>" +
+    "<span>worker bytes <b>" + summary.mib.toFixed(2) + " MiB</b></span>" +
+    "<span>duration <b>" + summary.durationMs.toLocaleString() + " ms</b></span>" +
+    "<span>checksum <b>" + esc(summary.checksum) + "</b></span>" +
+    "<span>seed <b>" + esc(summary.seed) + "</b></span><span class=\"worker-held\">status <b>worker-held</b></span>" +
+    "<span style=\"grid-column:1/-1\">categories <b>" + esc(categoryText) + "</b></span>";
+}
+
+function refreshPathPins() {
+  const items = CORPUS.knowledge.slice(0, 7);
+  $("pin-a").innerHTML = items.map((x,i)=>'<option value="'+i+'">A: '+esc(x.name.slice(0,28))+'</option>').join("");
+  $("pin-b").innerHTML = items.map((x,i)=>'<option value="'+i+'">B: '+esc(x.name.slice(0,28))+'</option>').join("");
+  $("pin-b").selectedIndex = Math.min(4, Math.max(0, items.length - 1));
+}
+
+function acceptSyntheticDataset(message, workerKind) {
+  const { summary, samples } = message;
+  CATEGORIES.forEach(cat => { cat.total = summary.categoryTotals[cat.id]; CORPUS[cat.id] = samples[cat.id]; });
+  state.synthetic = { status: "complete", summary, workerKind, progressMessages: state.synthetic.progressMessages || 0 };
+  state.scaleTotal = summary.nodeCount;
+  state.selectedMemory = CORPUS.knowledge[0];
+  state.trail = [state.trail[0]];
+  state.openCat = "knowledge";
+  refreshPathPins();
+  renderSyntheticMetrics(summary);
+  setSyntheticStatus("complete", "Complete · actual compact graph is worker-held · " + workerKind + " worker", 100);
+  buildStarfield(); layout();
+  announce(summary.nodeCount.toLocaleString() + " actual records and " + summary.edgeCount.toLocaleString() + " relations generated");
+}
+
+function spawnSyntheticWorker(count, inlineFallback, generation) {
+  let worker;
+  try {
+    if (inlineFallback) {
+      if (typeof syntheticWorkerRuntime !== "function") throw new Error("Inline worker runtime was not loaded from synthetic.worker.js");
+      const source = "(" + syntheticWorkerRuntime.toString() + ")(self);";
+      syntheticBlobUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      worker = new Worker(syntheticBlobUrl);
+    } else {
+      worker = new Worker("synthetic.worker.js");
+    }
+  } catch (error) {
+    if (!inlineFallback) { spawnSyntheticWorker(count, true, generation); return; }
+    setSyntheticStatus("error", "Worker unavailable: " + error.message + ". Local-file generation did not run.", 0);
+    return;
+  }
+  syntheticWorker = worker;
+  const kind = inlineFallback ? "inline Blob fallback" : "dedicated file";
+  state.synthetic.workerKind = kind;
+  let receivedMessage = false;
+  worker.onmessage = event => {
+    if (generation !== syntheticGeneration) return;
+    receivedMessage = true;
+    const message = event.data || {};
+    if (message.type === "progress") {
+      state.synthetic.progressMessages = (state.synthetic.progressMessages || 0) + 1;
+      setSyntheticStatus("generating", message.phase + " · " + message.detail, message.percent);
+    } else if (message.type === "complete") {
+      acceptSyntheticDataset(message, kind);
+    } else if (message.type === "error") {
+      setSyntheticStatus("error", "Generation failed: " + message.message + ". No simulated success was substituted.", 0);
+    }
+  };
+  worker.onerror = event => {
+    if (generation !== syntheticGeneration) return;
+    event.preventDefault();
+    worker.onerror = null; worker.terminate();
+    if (syntheticWorker === worker) syntheticWorker = null;
+    if (!inlineFallback && !receivedMessage) {
+      setSyntheticStatus("generating", "Dedicated local-file worker blocked; starting inline Blob fallback…", 1);
+      spawnSyntheticWorker(count, true, generation);
+    } else {
+      setSyntheticStatus("error", "Worker failed to load or execute. Local-file generation did not run.", 0);
+    }
+  };
+  worker.postMessage({ type: "generate", count, seed: SYNTHETIC_SEED });
+}
+
+function generateSynthetic(count) {
+  syntheticGeneration++;
+  stopSyntheticWorker();
+  restoreStaticCorpus();
+  state.synthetic = { status: "generating", summary: null, workerKind: null, progressMessages: 0 };
+  state.scaleTotal = BASE_CATEGORY_TOTALS.knowledge + BASE_CATEGORY_TOTALS.goals + BASE_CATEGORY_TOTALS.skills + BASE_CATEGORY_TOTALS.events + BASE_CATEGORY_TOTALS.ideas + BASE_CATEGORY_TOTALS.people + BASE_CATEGORY_TOTALS.conversations + BASE_CATEGORY_TOTALS.projects;
+  renderSyntheticMetrics(null);
+  setSyntheticStatus("generating", "Starting " + count.toLocaleString() + " actual records · fixed seed 0x4b524941…", 1);
+  layout();
+  spawnSyntheticWorker(count, false, syntheticGeneration);
+}
+
+function resetSynthetic() {
+  syntheticGeneration++;
+  stopSyntheticWorker();
+  restoreStaticCorpus();
+  state.synthetic = { status: "idle", summary: null, workerKind: null, progressMessages: 0 };
+  state.scaleTotal = 878; state.trail = [state.trail[0]]; state.openCat = "knowledge";
+  renderSyntheticMetrics(null); refreshPathPins();
+  setSyntheticStatus("idle", "Released · no generated records are worker-held · fixed seed 0x4b524941", 0);
+  buildStarfield(); layout(); announce("Synthetic worker terminated and compact dataset released");
+}
+
+window.syntheticController = { generate: generateSynthetic, reset: resetSynthetic, state: () => state.synthetic, workerActive: () => !!syntheticWorker };
+
+// Lab controls
+$("dock-collapse").onclick = () => { const d=$("lab-dock"); d.classList.toggle("collapsed"); $("dock-collapse").textContent=d.classList.contains("collapsed")?"›":"‹"; };
+$("lab-toggle").onclick = e => { const hidden=$("lab-dock").toggleAttribute("hidden"); e.currentTarget.setAttribute("aria-pressed",String(!hidden)); };
+$("btn-command").onclick = () => { renderCommands(); openDialog("command-modal"); };
+document.querySelectorAll(".mode-btn").forEach(b => b.onclick=()=>switchStrategy(b.dataset.mode));
+$("query-go").onclick = () => { const q=$("query-input").value.trim(); if (!q || /no result/i.test(q)) { showPreview("none"); return; } $("query-summary").textContent='8 bounded matches for “'+q+'” · simulated'; switchStrategy("search"); };
+$("query-input").onkeydown = e => { if(e.key==="Enter") $("query-go").click(); };
+document.querySelectorAll("[data-generate]").forEach(button => button.onclick = () => generateSynthetic(+button.dataset.generate));
+$("synthetic-reset").onclick = resetSynthetic;
+document.querySelectorAll("[data-density]").forEach(b => b.onclick=()=>{ R2_CAP=state.density=+b.dataset.density; document.querySelectorAll("[data-density]").forEach(x=>x.classList.toggle("active",x===b)); $("bounded-label").textContent=state.density+" sampled records max"; layout(); });
+$("bundle-toggle").onclick=e=>{ state.bundle=!state.bundle; e.currentTarget.setAttribute("aria-pressed",String(state.bundle)); wake(); announce(state.bundle?"Bundled member fan preview on":"Bundled member fan preview off"); };
+$("decay-range").oninput=e=>{ state.decayDays=+e.target.value; $("decay-value").textContent="≤ "+(state.decayDays<60?state.decayDays+" days":Math.round(state.decayDays/30)+" months"); applyDecisionLayout(); renderContext(); wake(); };
+$("recall-pulse").onclick=()=>{ if(state.still){announce("Still mode: recall announced without motion"); return;} state.recallStarted=performance.now(); state.recallUntil=state.recallStarted+1900; $("event-feed").innerHTML="recall.requested → ranked 12<br>projection.pulse → current edges"; announce("Recall event traveling through current projection"); wake(); };
+document.querySelectorAll("[data-preview]").forEach(b=>b.onclick=()=>showPreview(b.dataset.preview));
+$("mirror-toggle").onclick=e=>{ const on=$("graph-mirror").classList.toggle("preview"); e.currentTarget.setAttribute("aria-pressed",String(on)); if(on) $("graph-mirror").focus(); };
+$("still-toggle").onclick=e=>{ state.still=!state.still; document.body.classList.toggle("still-mode",state.still); e.currentTarget.setAttribute("aria-pressed",String(state.still)); if(state.still) state.motion=false; $("btn-motion").setAttribute("aria-pressed",String(state.motion)); announce(state.still?"Still mode enabled":"Still mode disabled"); wake(); };
+$("path-find").onclick=()=>{state.pathNoResult=false; layout(); announce("Supported route found")};
+$("path-none").onclick=e=>{state.pathNoResult=!state.pathNoResult; e.currentTarget.setAttribute("aria-pressed",String(state.pathNoResult)); layout();};
+
+refreshPathPins();
+[$("pin-a"), $("pin-b")].forEach(x => x.onchange=()=>{ state.pathNoResult=false; layout(); announce("Path endpoint pinned: " + x.selectedOptions[0].textContent); });
+if (state.still) { document.body.classList.add("still-mode"); $("still-toggle").setAttribute("aria-pressed","true"); }
+
+$("context-panel").onclick=e=>{ const action=e.target.dataset.context; if(!action)return;
+  if(action==="forget"){state.forgotten.add(state.selectedMemory.id); announce("Forget preview applied — Undo available via Restore"); applyDecisionLayout(); renderContext(); wake();}
+  if(action==="restore"){state.forgotten.delete(state.selectedMemory.id); announce("Memory restored in preview"); applyDecisionLayout(); renderContext(); wake();}
+  if(action==="compare") openDialog("resolve-modal");
+  if(action==="no-path"){state.pathNoResult=!state.pathNoResult; layout();}
+  if(action==="swap"){const a=$("pin-a").selectedIndex; $("pin-a").selectedIndex=$("pin-b").selectedIndex; $("pin-b").selectedIndex=a; announce("Path pins swapped");}
+};
+$("state-preview").onclick=e=>{
+  if(e.target.hasAttribute("data-close-preview") || e.target.hasAttribute("data-recovery")) {
+    const message = e.target.hasAttribute("data-recovery")
+      ? e.target.textContent + " simulated successfully"
+      : "Preview closed";
+    $("state-preview").className="";
+    if (previewReturnFocus && previewReturnFocus.focus) previewReturnFocus.focus();
+    announce(message + "; focus returned");
+  }
+};
+$("cmd-input").oninput=e=>renderCommands(e.target.value);
+$("cmd-results").onclick=e=>{const i=e.target.dataset.command;if(i==null)return;closeDialogs();paletteCommands[+i][1]();};
+document.querySelectorAll("[data-close-dialog]").forEach(b=>b.onclick=closeDialogs);
+document.querySelectorAll("[data-resolution]").forEach(b=>b.onclick=()=>{announce("Resolution preview: "+b.dataset.resolution);closeDialogs();});
+document.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();renderCommands();openDialog("command-modal");return;} if(e.key==="Escape"&&document.querySelector(".modal-backdrop.show")){e.preventDefault();closeDialogs();} });
+$("rail-list").addEventListener("click",()=>setTimeout(()=>{const id=state.selectedId&&state.selectedId.replace("m:",""); const all=Object.values(CORPUS).flat(); const found=all.find(x=>x.id===id); if(found)state.selectedMemory=found;renderContext();},0));
+[$("mirror-list"),$("sr-list")].forEach(list=>list.onclick=e=>{const n=nodeById(e.target.dataset.node);if(!n)return;if(n.kind==="hub")openRing(n.cat);else if(n.item){state.selectedMemory=n.item;renderContext();announce("Selected "+n.label);}});
+
+renderCommands();
+switchStrategy("search", false);
+announce("Decision Lab ready. Ctrl+K opens commands.");
+</script>
+</body>
+</html>

@@ -1,0 +1,246 @@
+{
+  "schemaVersion": "evidence-report/v1",
+  "reportId": "crypto-truth-review",
+  "suiteId": "V-CRYPTO-01",
+  "gate": "F5",
+  "runId": "run-001",
+  "requirement": "MGR-041",
+  "designRef": "design §5.4 — Lifecycle and erasure truth",
+  "utcTimestamp": "2026-07-29T18:03:38Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "actor": "owner-self-review",
+  "reviewType": "crypto-truth-threat-review",
+  "status": "Pass",
+
+  "verdict": "consistent-pending-crypto",
+  "verdictDetail": "The system consistently labels post-shred state as Hard Delete pending cryptographic erasure. No surface claims Crypto-Shredded. One overclaim in MemoryInspector.tsx was found and fixed. All test assertions pass.",
+
+  "cryptoArchitectureAssessment": {
+    "payloadEncryption": {
+      "implemented": false,
+      "evidence": "memories.content column stores raw UTF-8 plaintext. No encrypt/decrypt code paths exist anywhere in kria-core. Confirmed by reading lifecycle.rs module header comment: 'Memory content is stored as plaintext in the memories.content column. There is no payload encryption.'",
+      "storagePath": "SQLite memories.content column — plaintext UTF-8"
+    },
+    "externalKeyStorage": {
+      "implemented": false,
+      "evidence": "shred_keys.key_ref is a catalog reference string (e.g. 'keyfile:local', 'keyring://local/subject'). No actual key bytes are stored. No external keyring/HSM/KMS integration exists. The key_ref is a locator placeholder only.",
+      "note": "The is_shredded_checks_status_flag_only_not_cryptographic_erasure test explicitly asserts key_ref must contain 'keyring://' and must not look like raw base64 key material. This test PASSES."
+    },
+    "keyDestruction": {
+      "implemented": false,
+      "evidence": "shred_subject() only runs: UPDATE shred_keys SET status = 'destroyed', destroyed_at = ?2 WHERE subject_id = ?1. No external key destruction, no proof_hash, no HMAC. Purely a status flag update."
+    },
+    "zeroplaintextDenialAllPaths": {
+      "implemented": false,
+      "pathsVerified": [
+        {
+          "path": "memories.content (current-state read)",
+          "verdict": "PLAINTEXT READABLE after shred_subject",
+          "test": "shredded_key_does_not_prevent_plaintext_read_honest_state",
+          "testStatus": "PASS — test correctly documents the gap"
+        },
+        {
+          "path": "shred_keys status flag",
+          "verdict": "status='destroyed' set correctly; is_shredded() returns true",
+          "test": "is_shredded_checks_status_flag_only_not_cryptographic_erasure",
+          "testStatus": "PASS"
+        },
+        {
+          "path": "HealthReport.crypto_shred_capability (API surface)",
+          "verdict": "Returns CRYPTO_SHRED_CAPABILITY constant: 'unavailable — payload encryption not yet implemented; reliance on host OS disk encryption only'",
+          "test": "health_crypto_shred_capability_is_unavailable (api/mod.rs)",
+          "testStatus": "PASS"
+        },
+        {
+          "path": "MemoryHealthReport.crypto_shred_capability (observability)",
+          "verdict": "Returns same CRYPTO_SHRED_CAPABILITY constant",
+          "test": "health_report_crypto_shred_capability_is_unavailable (observability.rs)",
+          "testStatus": "PASS"
+        },
+        {
+          "path": "Tauri command memory_health_report (kria-desktop)",
+          "verdict": "Passes health.crypto_shred_capability field directly from HealthReport — no restatement, no override. Field value is the same CRYPTO_SHRED_CAPABILITY constant.",
+          "codeRef": "crates/kria-desktop/src/commands/memory.rs:1071"
+        },
+        {
+          "path": "Contract health JSON (kria-core/memory/contract.rs)",
+          "verdict": "Serializes health.crypto_shred_capability verbatim into JSON. Never modifies or overrides the value.",
+          "codeRef": "crates/kria-core/src/memory/contract.rs:107"
+        },
+        {
+          "path": "UI LifecycleActions.tsx",
+          "verdict": "PASS — hasCryptoCapability driven by cryptoState prop. When false (current state), shows 'Cryptographic erasure not available' and 'Hard Delete (content marked for removal)'. Never shows 'Crypto-shredded' or 'Cryptographically erased' when cryptoProof=null.",
+          "test": "LifecycleActions.test.tsx: 3 CRITICAL crypto invariant tests",
+          "testStatus": "PASS — 56/56 tests pass including all 3 CRITICAL invariants"
+        },
+        {
+          "path": "UI MemoryInspector.tsx dialog message",
+          "verdict": "FIXED — previous text 'This crypto-shreds the memory and cannot be undone' was an overclaim. Updated to: 'This permanently deletes the memory (Hard Delete — content marked for removal). No cryptographic erasure is available yet; data remains on disk until OS-level disk encryption or physical media destruction. Use Forget instead if you might want it back.'",
+          "overclaim": true,
+          "overclaimSeverity": "medium",
+          "overclaimFixed": true,
+          "fixedInFile": "ui/src/shell/spaces/memory/MemoryInspector.tsx",
+          "fixedAtLine": 352
+        }
+      ]
+    }
+  },
+
+  "threatsConsidered": [
+    {
+      "threat": "T1: UI claims Crypto-Shredded when content is still plaintext",
+      "surfaces": ["MemoryInspector.tsx dialog", "LifecycleActions.tsx capability/proof display"],
+      "finding": "OVERCLAIM FOUND AND FIXED in MemoryInspector.tsx. LifecycleActions.tsx correctly gates the 'Crypto-shredded' / 'Cryptographically erased' text behind cryptoProof !== null, and cryptoProof is never populated today because hasCryptoCapability=false.",
+      "mitigation": "Fixed dialog message. UI tests assert these invariants. 56/56 tests pass.",
+      "residualRisk": "None — dialog corrected, UI invariant tests enforced."
+    },
+    {
+      "threat": "T2: API/health endpoint claims crypto-erasure is complete",
+      "surfaces": ["HealthReport.crypto_shred_capability", "MemoryHealthReport.crypto_shred_capability", "Tauri command", "contract.rs health JSON"],
+      "finding": "CLEAN — all surfaces return the CRYPTO_SHRED_CAPABILITY constant which explicitly says 'unavailable — payload encryption not yet implemented'. Two automated tests (api/mod.rs + observability.rs) assert this.",
+      "mitigation": "Constant-driven; no ad-hoc string can diverge. Tests enforce the exact constant.",
+      "residualRisk": "None."
+    },
+    {
+      "threat": "T3: is_shredded() presents status flag as proof of unreadability",
+      "surfaces": ["Lifecycle::is_shredded() return value and callers"],
+      "finding": "CLEAN — method is documented 'checks the status flag only — it does NOT prove cryptographic unreadability'. The is_shredded_checks_status_flag_only_not_cryptographic_erasure test explicitly validates this. The honest-state test confirms plaintext is still readable after the flag is set.",
+      "mitigation": "Documentation in code, honest-state test in lifecycle.rs.",
+      "residualRisk": "None while encryption is not implemented — the flag cannot cause false belief as long as callers check HealthReport.crypto_shred_capability."
+    },
+    {
+      "threat": "T4: shred_subject() deletes the key externally (false belief of actual erasure)",
+      "surfaces": ["Lifecycle::shred_subject() implementation"],
+      "finding": "CLEAN — implementation only runs a SQL UPDATE on shred_keys.status. No external store is contacted, no key material is destroyed. key_ref is a locator-only string, not actual key bytes. The test confirms key_ref contains 'keyring://' (a placeholder locator) and asserts it must not look like raw base64 key material.",
+      "mitigation": "Code review + key_ref format test.",
+      "residualRisk": "None until actual encryption is implemented."
+    },
+    {
+      "threat": "T5: Plaintext accessible via FTS5, vectors, graph, cache, export paths after hard_delete",
+      "surfaces": ["FTS5 search_documents", "mem_vectors", "graph traversal", "snapshot cache", "export"],
+      "finding": "COVERED SEPARATELY by task 5.3.3 deletion-residue suite (10/10 tests pass). After hard_delete + reconciliation, zero plaintext is returned through all 9 paths. The crypto-truth review confirms this is 'deleted content absent', not 'cryptographically unreadable content'. The distinction is accurately maintained: hard_delete removes rows; it does not encrypt them.",
+      "mitigation": "Deletion residue tests. No path returns encrypted/unreadable ciphertext; all paths return no content (row deleted).",
+      "residualRisk": "Physical media: content may be recoverable from SQLite journal/WAL or raw disk until overwritten. This is honestly disclosed: 'reliance on host OS disk encryption only'."
+    },
+    {
+      "threat": "T6: Hard-delete dialog/confirmation UI says pending crypto without actually implementing it",
+      "surfaces": ["LifecycleActions.tsx crypto-unavailable slot"],
+      "finding": "CLEAN — the 'crypto-unavailable' data-testid slot says 'Hard Delete (content marked for removal)', not 'pending crypto in progress'. The wording correctly represents the state: content is logically removed but no crypto operation has occurred or is scheduled.",
+      "mitigation": "UI test asserts text does not contain 'Crypto-shredded' or 'Cryptographically erased' in this branch.",
+      "residualRisk": "None."
+    }
+  ],
+
+  "testsExecuted": [
+    {
+      "testId": "lifecycle::tests::is_shredded_checks_status_flag_only_not_cryptographic_erasure",
+      "file": "crates/kria-core/src/memory/lifecycle.rs",
+      "validates": "MGR-041 — is_shredded() checks status flag only, not crypto unreadability",
+      "result": "PASS",
+      "command": "cargo test -p kria-core --lib memory::lifecycle::tests::is_shredded_checks_status_flag_only_not_cryptographic_erasure"
+    },
+    {
+      "testId": "lifecycle::tests::shredded_key_does_not_prevent_plaintext_read_honest_state",
+      "file": "crates/kria-core/src/memory/lifecycle.rs",
+      "validates": "MGR-041 — content is still readable as plaintext after shred_subject; no encryption exists",
+      "result": "PASS",
+      "command": "cargo test -p kria-core --lib memory::lifecycle::tests::shredded_key_does_not_prevent_plaintext_read_honest_state"
+    },
+    {
+      "testId": "api::tests::health_crypto_shred_capability_is_unavailable",
+      "file": "crates/kria-core/src/memory/api/mod.rs",
+      "validates": "MGR-041 — HealthReport.crypto_shred_capability reports 'unavailable'",
+      "result": "PASS",
+      "command": "cargo test -p kria-core --lib memory::api::tests::health_crypto_shred_capability_is_unavailable"
+    },
+    {
+      "testId": "observability::tests::health_report_crypto_shred_capability_is_unavailable",
+      "file": "crates/kria-core/src/memory/observability.rs",
+      "validates": "MGR-041 — MemoryHealthReport.crypto_shred_capability reports 'unavailable'",
+      "result": "PASS",
+      "command": "cargo test -p kria-core --lib memory::observability::tests::health_report_crypto_shred_capability_is_unavailable"
+    },
+    {
+      "testId": "lifecycle::tests::forget_is_reversible_then_hard_delete_shreds",
+      "file": "crates/kria-core/src/memory/lifecycle.rs",
+      "validates": "hard_delete cascade + shred key status mark; is_shredded returns true after subject delete",
+      "result": "PASS",
+      "command": "cargo test -p kria-core --lib memory::lifecycle::tests::forget_is_reversible_then_hard_delete_shreds"
+    },
+    {
+      "testId": "LifecycleActions.test.tsx — CRITICAL: text 'Crypto-shredded' never appears when cryptoProof=null",
+      "file": "ui/src/shell/spaces/memory/knowledge/LifecycleActions.test.tsx",
+      "validates": "UI invariant: no 'Crypto-shredded' claim when proof absent",
+      "result": "PASS",
+      "command": "npm run test:run -- src/shell/spaces/memory/knowledge/LifecycleActions.test.tsx",
+      "totalTests": 56
+    },
+    {
+      "testId": "LifecycleActions.test.tsx — CRITICAL: text 'Cryptographically erased' never appears when cryptoProof=null",
+      "file": "ui/src/shell/spaces/memory/knowledge/LifecycleActions.test.tsx",
+      "validates": "UI invariant: no 'Cryptographically erased' claim when proof absent",
+      "result": "PASS"
+    },
+    {
+      "testId": "LifecycleActions.test.tsx — CRITICAL: crypto-unavailable text never says 'Crypto-shredded'",
+      "file": "ui/src/shell/spaces/memory/knowledge/LifecycleActions.test.tsx",
+      "validates": "UI invariant: unavailable state never claims erasure",
+      "result": "PASS"
+    }
+  ],
+
+  "overclaimsFound": [
+    {
+      "surface": "UI — MemoryInspector.tsx",
+      "file": "ui/src/shell/spaces/memory/MemoryInspector.tsx",
+      "line": 352,
+      "originalText": "This crypto-shreds the memory and cannot be undone. Use Forget instead if you might want it back.",
+      "violation": "Claims 'crypto-shreds' when no encryption exists. This violates MGR-041 / design §5.4 / V-CRYPTO-01.",
+      "severity": "medium — confirmation dialog text only; no data pathway affected; backend is clean",
+      "fixedText": "This permanently deletes the memory (Hard Delete — content marked for removal). No cryptographic erasure is available yet; data remains on disk until OS-level disk encryption or physical media destruction. Use Forget instead if you might want it back.",
+      "fixed": true
+    }
+  ],
+
+  "overclaimsNotFound": [
+    "lifecycle::shred_subject() — SQL UPDATE only, no false claim",
+    "lifecycle::is_shredded() — documented as status flag, not crypto proof",
+    "HealthReport.crypto_shred_capability — CRYPTO_SHRED_CAPABILITY constant, explicitly 'unavailable'",
+    "MemoryHealthReport.crypto_shred_capability — same constant",
+    "Tauri memory_health_report command — passes field verbatim",
+    "contract.rs health JSON — serializes field verbatim",
+    "LifecycleActions.tsx — cryptoProof guard prevents false claim",
+    "ForgetScope::Subject variant documentation — 'Hard Delete pending cryptographic erasure; not actual cryptographic unreadability'",
+    "lifecycle.rs module header — explicitly documents honest state"
+  ],
+
+  "honestStateConclusion": {
+    "currentState": "Hard Delete pending cryptographic erasure",
+    "cryptoShredCapability": "unavailable",
+    "capabilityPassConditions": [
+      "1. Payload encryption: memories.content encrypted under subject-bound versioned data keys before DB commit",
+      "2. External key storage: keys held outside SQLite (OS keyring, HSM, or KMS); shred_keys.key_ref is a locator, not raw bytes",
+      "3. Key destruction: shred_subject() destroys key in external store AND records cryptographically-verifiable proof_hash",
+      "4. Zero-plaintext denial verification across ALL read paths: current-state, history, snapshots, FTS5, vectors, caches, graph edges, trace items, export",
+      "5. No hardcoded/fallback key: CI verifies no copy of data key survives destruction in process memory, logs, backup tables, or enrichment queues"
+    ],
+    "currentHostOSReliance": "Host OS disk encryption (if configured by owner). No application-level guarantee.",
+    "attestation": "All current code and UI surfaces are consistent with this honest state. No surface claims Crypto-Shredded capability is implemented. The one overclaim in MemoryInspector.tsx was found and corrected."
+  },
+
+  "reviewerVerdict": {
+    "reviewer": "owner",
+    "role": "owner-self-review",
+    "reviewAcceptable": true,
+    "basis": "dev-context.md — owner self-review accepted for single-developer pre-production repository",
+    "verdict": "Pass",
+    "findings": [
+      "One overclaim found and fixed in MemoryInspector.tsx dialog text",
+      "All Rust-side surfaces (lifecycle, API, observability, Tauri, contract) consistently say 'unavailable'",
+      "5 crypto-truth unit tests confirmed passing",
+      "56 UI unit tests confirmed passing including 3 CRITICAL crypto invariant tests",
+      "Implementation honestly represents the pre-encryption state"
+    ],
+    "signature": "owner-self-review-2026-07-29"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "caseId": "renderer-failure__standard__1.25x__dark__ltr__chromium",
+  "capturedAt": "2026-07-29T06:56:36.707Z",
+  "targetState": "renderer-failure",
+  "items": [],
+  "itemCount": 0,
+  "degradation": {
+    "present": false
+  },
+  "recovery": {
+    "present": false
+  },
+  "focus": {
+    "focusedTag": "button",
+    "focusedVisible": true
+  },
+  "legend": [],
+  "graph": {
+    "canvasPresent": false,
+    "fallbackPresent": false,
+    "fallbackLabel": null
+  },
+  "spacePresent": true,
+  "violations": []
+}

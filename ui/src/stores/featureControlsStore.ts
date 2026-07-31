@@ -28,6 +28,7 @@ const [error, setError] = createSignal<string | null>(null);
 const [mutatingIds, setMutatingIds] = createSignal<readonly string[]>([]);
 
 let active = false;
+let lifecycleGeneration = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollAttempts = 0;
 let requestGeneration = 0;
@@ -91,7 +92,7 @@ async function loadControls(showLoading: boolean): Promise<boolean> {
   const generation = ++requestGeneration;
   if (showLoading) setLoading(true);
   const result = await bridgeInvoke<unknown>("list_feature_controls");
-  if (generation !== requestGeneration) return false;
+  if (!active || generation !== requestGeneration) return false;
 
   if (result.ok) {
     setControls(result.data);
@@ -117,17 +118,29 @@ async function refresh(): Promise<void> {
 }
 
 async function initialize(): Promise<void> {
+  lifecycleGeneration += 1;
   active = true;
+  setMutatingIds([]);
   await refresh();
 }
 
 function dispose(): void {
   active = false;
+  lifecycleGeneration += 1;
   clearPollTimer();
   pollAttempts = 0;
   requestGeneration += 1;
-  setLoading(false);
-  setMutatingIds([]);
+
+  // Solid may dispose this store-owning section while reconciling a category
+  // switch. Reactive writes during that cleanup can re-enter DOM disposal in a
+  // browser, so cancellation stays synchronous while presentation-only resets
+  // wait until the owner has gone. A remount makes this reset stale and skips it.
+  const disposedLifecycle = lifecycleGeneration;
+  queueMicrotask(() => {
+    if (active || lifecycleGeneration !== disposedLifecycle) return;
+    setLoading(false);
+    setMutatingIds([]);
+  });
 }
 function isMutating(id: string): boolean {
   return mutatingIds().includes(id);
@@ -135,8 +148,9 @@ function isMutating(id: string): boolean {
 
 async function setEnabled(featureId: string, enabled: boolean): Promise<boolean> {
   const current = controls().find((item) => item.id === featureId);
-  if (!current || isMutating(featureId) || isFeatureTransitioning(current)) return false;
+  if (!active || !current || isMutating(featureId) || isFeatureTransitioning(current)) return false;
 
+  const lifecycle = lifecycleGeneration;
   setMutatingIds((ids) => [...ids, featureId]);
   setError(null);
   const result = await bridgeInvoke<unknown>(
@@ -144,11 +158,13 @@ async function setEnabled(featureId: string, enabled: boolean): Promise<boolean>
     { featureId, enabled },
     { timeoutMs: 35_000 },
   );
+  if (!active || lifecycleGeneration !== lifecycle) return false;
   if (result.ok) replaceControl(result.data);
 
   pollAttempts = 0;
   clearPollTimer();
   await loadControls(false);
+  if (!active || lifecycleGeneration !== lifecycle) return false;
   if (!result.ok) setError(result.message);
   setMutatingIds((ids) => ids.filter((id) => id !== featureId));
   return result.ok;

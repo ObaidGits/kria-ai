@@ -1,0 +1,25 @@
+{
+  "caseId": "partial__standard__1.5x__forced-colors__rtl__chromium",
+  "capturedAt": "2026-07-29T06:54:51.669Z",
+  "targetState": "partial",
+  "items": [],
+  "itemCount": 0,
+  "degradation": {
+    "present": false
+  },
+  "recovery": {
+    "present": false
+  },
+  "focus": {
+    "focusedTag": "button",
+    "focusedVisible": true
+  },
+  "legend": [],
+  "graph": {
+    "canvasPresent": false,
+    "fallbackPresent": false,
+    "fallbackLabel": null
+  },
+  "spacePresent": true,
+  "violations": []
+}

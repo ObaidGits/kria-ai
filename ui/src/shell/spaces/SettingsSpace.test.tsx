@@ -5,6 +5,7 @@ const bridgeInvoke = vi.hoisted(() => vi.fn());
 vi.mock("../../bridge/invoke", () => ({ bridgeInvoke, bridgeInvokeOptional: vi.fn(async () => null) }));
 import { settingsStore, type SettingMeta } from "../../stores/settingsStore";
 import { currentRoute, navigate } from "../router";
+import { currentSurface } from "../../app/surface";
 import SettingsSpace from "./SettingsSpace";
 
 const rows: SettingMeta[] = [
@@ -54,8 +55,8 @@ describe("SettingsSpace — task 11.1, Requirements 10.1/10.2", () => {
   it("renders all eight searchable groups and selected backend-backed settings", () => {
     render(() => <SettingsSpace />);
     for (const label of [
-      "You", "Voice", "Intelligence", "Memory & Privacy", "Safety & Approvals",
-      "Connections", "System", "Developer",
+      "General & Appearance", "Voice", "AI & Models", "Memory & Awareness",
+      "Safety & Approvals", "Connections", "System & Features", "Advanced",
     ]) expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
     expect(screen.getByText("ui.theme")).toBeInTheDocument();
     expect(screen.queryByText("voice.mode")).not.toBeInTheDocument();
@@ -77,7 +78,7 @@ describe("SettingsSpace — task 11.1, Requirements 10.1/10.2", () => {
     navigate("settings", "developer", "browser_agent.readiness_bypass");
     render(() => <SettingsSpace />);
     expect(settingsStore.activeGroup()).toBe("developer");
-    expect(screen.getByRole("heading", { name: "Developer settings are quarantined" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Advanced settings are guarded" })).toBeInTheDocument();
     expect(screen.queryByText("browser_agent.readiness_bypass")).not.toBeInTheDocument();
   });
 
@@ -97,31 +98,31 @@ describe("SettingsSpace — task 11.2, Requirements 10.3/10.4", () => {
     expect(screen.getByText("Risk: Low")).toBeInTheDocument();
     expect(screen.queryByText("Restart required")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Developer/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Review developer access" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reveal Developer settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Advanced/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Review advanced access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal Advanced settings" }));
 
     expect(screen.getByText("Risk: High")).toBeInTheDocument();
     expect(screen.getByText("Restart required")).toBeInTheDocument();
-    expect(screen.getByText("Environment lock: KRIA_READINESS_BYPASS")).toBeInTheDocument();
+    expect(screen.getByText("Environment: KRIA_READINESS_BYPASS")).toBeInTheDocument();
   });
 
-  it("quarantines Developer settings behind a deliberate two-step guard", () => {
+  it("quarantines Advanced settings behind a deliberate two-step guard", () => {
     render(() => <SettingsSpace />);
-    const developerGroup = screen.getByRole("button", { name: /^Developer/ });
-    expect(developerGroup).toHaveAttribute("data-guarded", "true");
+    const advancedGroup = screen.getByRole("button", { name: /^Advanced/ });
+    expect(advancedGroup).toHaveAttribute("data-guarded", "true");
 
-    fireEvent.click(developerGroup);
-    expect(screen.getByRole("heading", { name: "Developer settings are quarantined" })).toBeInTheDocument();
+    fireEvent.click(advancedGroup);
+    expect(screen.getByRole("heading", { name: "Advanced settings are guarded" })).toBeInTheDocument();
     expect(screen.queryByText("browser_agent.readiness_bypass")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Review developer access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review advanced access" }));
     expect(screen.queryByText("browser_agent.readiness_bypass")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Reveal Developer settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reveal Advanced settings" }));
     expect(screen.getByText("browser_agent.readiness_bypass")).toBeInTheDocument();
-    expect(developerGroup).toHaveAttribute("data-guarded", "false");
+    expect(advancedGroup).toHaveAttribute("data-guarded", "false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Lock Developer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lock Advanced" }));
     expect(screen.queryByText("browser_agent.readiness_bypass")).not.toBeInTheDocument();
   });
 
@@ -130,48 +131,49 @@ describe("SettingsSpace — task 11.2, Requirements 10.3/10.4", () => {
     fireEvent.input(screen.getByRole("searchbox", { name: "Search settings" }), {
       target: { value: "readiness_bypass" },
     });
-    expect(screen.getByRole("heading", { name: "Developer settings are quarantined" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Advanced settings are guarded" })).toBeInTheDocument();
     expect(screen.queryByText("browser_agent.readiness_bypass")).not.toBeInTheDocument();
   });
 });
 
-describe("SettingsSpace — feature-control recovery preservation", () => {
-  it("preserves draft, selected group, route, and retry focus across recovery", async () => {
+describe("SettingsSpace — feature-control lifecycle preservation", () => {
+  it("keeps Settings mounted when Advanced is selected during a pending feature retry", async () => {
     const recovery = deferred<{ ok: true; data: [] }>();
     bridgeInvoke
       .mockResolvedValueOnce({ ok: false, message: "Local runtime did not respond." })
       .mockImplementationOnce(() => recovery.promise);
-    navigate("settings", "voice");
+    navigate("settings", "system");
 
     render(() => <SettingsSpace />);
 
     const retryAction = await screen.findByRole("button", { name: "Retry feature controls" });
+    fireEvent.click(screen.getByRole("button", { name: "Ask KRIA" }));
     const draft = screen.getByRole("textbox", { name: "Change a setting with KRIA" });
     fireEvent.input(draft, { target: { value: "Keep this unfinished request" } });
-    retryAction.focus();
     fireEvent.click(retryAction);
-
     expect(await screen.findByText("Retrying feature controls…")).toBeInTheDocument();
-    expect(settingsStore.nlDraft()).toBe("Keep this unfinished request");
-    expect(settingsStore.activeGroup()).toBe("voice");
-    expect(screen.getByRole("button", { name: /^Voice/ })).toHaveAttribute("aria-current", "page");
-    expect(currentRoute()).toMatchObject({ space: "settings", segment: "voice" });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Advanced/ }));
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Settings categories" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Advanced settings are guarded" })).toBeInTheDocument();
+    expect(settingsStore.activeGroup()).toBe("developer");
+    expect(currentRoute()).toMatchObject({ space: "settings", segment: "developer" });
+    expect(currentSurface()).toBe("workspace");
+    expect(window.location.hash).toBe("#/settings/developer");
+    expect(draft).toHaveValue("Keep this unfinished request");
 
     recovery.resolve({ ok: true, data: [] });
-
-    expect(await screen.findByText("Feature controls recovered")).toBeInTheDocument();
-    expect(draft).toHaveValue("Keep this unfinished request");
-    expect(settingsStore.activeGroup()).toBe("voice");
-    expect(currentRoute()).toMatchObject({ space: "settings", segment: "voice" });
-
-    const featureSection = screen.getByRole("region", { name: "Features & Services" });
-    const stableAction = within(featureSection).getByRole("button", { name: "Refresh" });
-    await vi.waitFor(() => expect(document.activeElement).toBe(stableAction));
+    await vi.waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Advanced settings are guarded" })).toBeInTheDocument();
+      expect(screen.queryByText("Feature controls recovered")).not.toBeInTheDocument();
+    });
   });
 });
 
 describe("SettingsSpace — task 1.9 regression proof", () => {
-  it("keeps successful feature controls, search, groups, and history working together", async () => {
+  it("keeps category-contained controls, search, navigation, and history working together", async () => {
     bridgeInvoke.mockResolvedValue({
       ok: true,
       data: [{
@@ -193,8 +195,11 @@ describe("SettingsSpace — task 1.9 regression proof", () => {
 
     render(() => <SettingsSpace />);
 
+    fireEvent.click(screen.getByRole("button", { name: /^System & Features/ }));
     expect(await screen.findByRole("switch", { name: "Indexing: On" })).toBeEnabled();
     expect(screen.getByText("Local index ready")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Change history" }));
     const history = screen.getByRole("complementary", { name: "Change history" });
     expect(within(history).getByText("ui.theme")).toBeInTheDocument();
     expect(within(history).getByText("light")).toBeInTheDocument();
@@ -207,11 +212,12 @@ describe("SettingsSpace — task 1.9 regression proof", () => {
     expect(settingsRows).not.toBeNull();
     expect(within(settingsRows!).getByText("voice.mode")).toBeInTheDocument();
     expect(within(settingsRows!).queryByText("ui.theme")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Indexing: On" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^You/ }));
-    expect(screen.getByRole("button", { name: /^You/ })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: /^General & Appearance/ }));
+    expect(screen.getByRole("button", { name: /^General & Appearance/ })).toHaveAttribute("aria-current", "page");
     expect(within(settingsRows!).getByText("ui.theme")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Indexing: On" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Indexing: On" })).not.toBeInTheDocument();
     expect(within(history).getByText("ui.theme")).toBeInTheDocument();
   });
 });

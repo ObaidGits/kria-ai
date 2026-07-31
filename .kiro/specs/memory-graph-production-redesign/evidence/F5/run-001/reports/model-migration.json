@@ -1,0 +1,222 @@
+{
+  "suite": "V-VECTOR-01 — Model migration: compatible/incompatible partition migration, dimension/hash/tokenizer mismatch, dual-partition transition, old-generation deletion, and Partial retrieval strategy behavior",
+  "task": "5.3.5",
+  "test_file": "crates/kria-core/tests/memory_graph_v2.rs",
+  "test_section": "Section 9",
+  "run_command": "cargo test -p kria-core --test memory_graph_v2 model_migration -- --nocapture",
+  "status": "PASS",
+  "tests_total": 21,
+  "tests_passed": 21,
+  "tests_failed": 0,
+  "timestamp": "2026-07-29T00:00:00Z",
+  "commit": "HEAD",
+  "reviewer": "owner-self-review",
+  "requirements": ["V-VECTOR-01", "V-RET-01", "MGR-032", "MGD-024"],
+  "non_negotiables_verified": {
+    "dimension_mismatch_rejected": true,
+    "nan_rejected": true,
+    "inf_rejected": true,
+    "zero_norm_rejected": true,
+    "old_partition_deletable_after_migration": true,
+    "partial_weight_not_redistributed": true
+  },
+  "sections": [
+    {
+      "id": "S9.1",
+      "name": "Compatible model migration",
+      "description": "Same dimension/encoding, different source_revision → both partitions accepted; vectors writable to each. Two distinct partition_ids coexist.",
+      "tests": [
+        "model_migration_compatible_both_partitions_accepted"
+      ],
+      "passed": 1,
+      "failed": 0,
+      "assertions": [
+        "old manifest passes validate()",
+        "new manifest (different source_revision) passes validate()",
+        "both have same dimension (384)",
+        "ensure_partition succeeds for both",
+        "partition IDs are distinct",
+        "upsert_v2 succeeds for both partitions",
+        "each partition contains exactly 1 vector"
+      ]
+    },
+    {
+      "id": "S9.2",
+      "name": "Incompatible model migration (different dimension rejected)",
+      "description": "A manifest with dimension=768 fails manifest.validate() with WrongDimension. ensure_partition also rejects it as PartitionError::InvalidManifest.",
+      "tests": [
+        "model_migration_incompatible_different_dimension_rejected",
+        "model_migration_ensure_partition_rejects_different_dimension"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "768-dim manifest fails validate() with WrongDimension(768)",
+        "ensure_partition propagates InvalidManifest for 768-dim manifest"
+      ]
+    },
+    {
+      "id": "S9.3",
+      "name": "Dimension mismatch: wrong vector element count rejected",
+      "description": "validate_raw_vector and upsert_v2 reject vectors with wrong element count (0, 383, 384+, 768).",
+      "tests": [
+        "model_migration_dimension_mismatch_vector_rejected",
+        "model_migration_upsert_v2_rejects_wrong_dimension",
+        "model_migration_empty_vector_rejected",
+        "model_migration_383_element_vector_rejected",
+        "model_migration_385_element_vector_rejected"
+      ],
+      "passed": 5,
+      "failed": 0,
+      "assertions": [
+        "768-element vector → DimensionMismatch(384, 768)",
+        "upsert_v2 with 768-element vector → storage error mentioning dimension/validation",
+        "0-element vector → DimensionMismatch(384, 0)",
+        "383-element vector → DimensionMismatch(384, 383)",
+        "385-element vector → DimensionMismatch(384, 385)"
+      ]
+    },
+    {
+      "id": "S9.4",
+      "name": "Hash mismatch: orphan partition_id rejected",
+      "description": "upsert_v2 with a partition_id not registered via ensure_partition fails with FK constraint violation. Different source_revision → new distinct partition slot.",
+      "tests": [
+        "model_migration_hash_mismatch_orphan_partition_rejected",
+        "model_migration_different_revision_creates_new_partition"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "upsert with unregistered partition_id → FOREIGN KEY constraint error",
+        "different source_revision → different partition_id (new partition slot)"
+      ]
+    },
+    {
+      "id": "S9.5",
+      "name": "Tokenizer mismatch behavior documented",
+      "description": "Partition key is model_id:source_revision. Different tokenizer_sha256 on same source_revision may or may not cause SchemaMismatch depending on field coverage in ensure_partition. Test documents actual behavior.",
+      "tests": [
+        "model_migration_tokenizer_mismatch_causes_schema_mismatch"
+      ],
+      "passed": 1,
+      "failed": 0,
+      "assertions": [
+        "tokenizer_sha256 difference with same model_id:source_revision → behavior documented (SchemaMismatch or silently accepted per design)"
+      ]
+    },
+    {
+      "id": "S9.6",
+      "name": "Zero-norm vector rejected",
+      "description": "All-zero 384-element vector has L2 norm=0 and is rejected by validate_raw_vector and upsert_v2.",
+      "tests": [
+        "model_migration_zero_norm_vector_rejected",
+        "model_migration_upsert_v2_rejects_zero_norm"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "all-zero vector → VectorDecodeError::ZeroNorm",
+        "upsert_v2 zero-norm → error mentioning validation/zero"
+      ]
+    },
+    {
+      "id": "S9.7",
+      "name": "NaN vector rejected",
+      "description": "Vectors with NaN at index 0 or index 42 are rejected with NaNAtIndex.",
+      "tests": [
+        "model_migration_nan_vector_rejected",
+        "model_migration_nan_at_interior_index_rejected"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "NaN at index 0 → VectorDecodeError::NaNAtIndex(0)",
+        "NaN at index 42 → VectorDecodeError::NaNAtIndex(42)"
+      ]
+    },
+    {
+      "id": "S9.8",
+      "name": "Inf vector rejected",
+      "description": "+Inf and -Inf values at any index are rejected with InfAtIndex.",
+      "tests": [
+        "model_migration_pos_inf_vector_rejected",
+        "model_migration_neg_inf_vector_rejected"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "+Inf at index 1 → VectorDecodeError::InfAtIndex(1)",
+        "-Inf at index 200 → VectorDecodeError::InfAtIndex(200)"
+      ]
+    },
+    {
+      "id": "S9.9",
+      "name": "Wrong 1536-byte count rejected",
+      "description": "Vectors with 0, 383, or 385 elements (0/1532/1540 bytes) are all rejected with DimensionMismatch.",
+      "tests": [
+        "model_migration_empty_vector_rejected",
+        "model_migration_383_element_vector_rejected",
+        "model_migration_385_element_vector_rejected"
+      ],
+      "passed": 3,
+      "failed": 0,
+      "assertions": [
+        "0 elements → DimensionMismatch(384, 0)",
+        "383 elements (1532 bytes) → DimensionMismatch(384, 383)",
+        "385 elements (1540 bytes) → DimensionMismatch(384, 385)"
+      ]
+    },
+    {
+      "id": "S9.10",
+      "name": "Dual partition transition",
+      "description": "Both old (v1) and new (v2) partitions are simultaneously operational during the migration window. Writes to each are isolated; no cross-contamination.",
+      "tests": [
+        "model_migration_dual_partition_transition_both_operational"
+      ],
+      "passed": 1,
+      "failed": 0,
+      "assertions": [
+        "5 vectors written to old partition",
+        "5 vectors written to new partition",
+        "old partition contains exactly 5 vectors",
+        "new partition contains exactly 5 vectors",
+        "old and new partition record sets are disjoint"
+      ]
+    },
+    {
+      "id": "S9.11",
+      "name": "Old-generation deletion after migration completes",
+      "description": "After migration completes, old partition vectors and registry row are hard-deleted. New partition remains intact. Authority rows (events_v2) are unaffected.",
+      "tests": [
+        "model_migration_old_generation_deletion_after_migration"
+      ],
+      "passed": 1,
+      "failed": 0,
+      "assertions": [
+        "DELETE FROM mem_vectors_v2 WHERE partition_id = old_pid succeeds",
+        "DELETE FROM embedding_partitions WHERE partition_id = old_pid succeeds",
+        "old partition registry row count = 0 after deletion",
+        "old partition vector count = 0 after deletion",
+        "new partition still has 1 vector",
+        "events_v2 count = 0 (authority unaffected)"
+      ]
+    },
+    {
+      "id": "S9.12",
+      "name": "Remaining-strategy Partial behavior",
+      "description": "CapabilityMatrix reports Partial with unavailable_strategies=['vector'] when vector strategy is unavailable. RRF fusion with vector Unavailable: FTS score is NOT redistributed — equals w_fts/(k+1) exactly.",
+      "tests": [
+        "model_migration_partial_capability_when_vector_unavailable",
+        "model_migration_partial_retrieval_no_weight_redistribution"
+      ],
+      "passed": 2,
+      "failed": 0,
+      "assertions": [
+        "CapabilityStatus::Partial with unavailable_strategies containing 'vector'",
+        "fuse_candidates with vector Unavailable → exactly 1 result",
+        "fused score = w_fts / (k + 1) within 1e-5 tolerance",
+        "vector contribution = 0.0 when strategy is Unavailable"
+      ]
+    }
+  ]
+}

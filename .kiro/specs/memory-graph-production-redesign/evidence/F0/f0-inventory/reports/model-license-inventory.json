@@ -1,0 +1,217 @@
+{
+  "schema": "memory-graph.model-license-inventory/v1",
+  "task": "0.3.5 Pin observed embedding labels, files, source revisions, artifact/tokenizer hashes, dimensions, runtime, normalization, and license disposition as Known or Unknown without downloading during F0.",
+  "gate": "F0",
+  "run_id": "f0-inventory",
+  "generated_at_utc": "2026-07-22T18:37:21Z",
+  "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+  "working_tree": "dirty",
+  "scope_note": "THIS artifact pins the EMBEDDING MODEL / tokenizer facts for the LIVE memory vector path ONLY, as OBSERVABLE in the repository WITHOUT downloading any model. Broader Cargo/npm/Python/asset/project license reconciliation is DEFERRED to task 0.3.6 (see deferred_to_0_3_6). No models were downloaded; no secrets copied.",
+  "requirements_in_scope": ["MGR-042", "MGR-047"],
+  "design_refs": [
+    "design.md §6.1 (embedding contract: FastEmbed all-MiniLM-L6-v2, 384-dim, little-endian f32 (1536 bytes), L2-normalized, models/manifest pins model ID/source URL/repo revision/artifact+tokenizer checksums/license disposition/FastEmbed+runtime versions/max tokenization/pooling)",
+    "design.md §1 (Current vs Target: 'Pinned all-MiniLM-L6-v2, exact cosine, manifest-verified 384d partitions'; 'model/license/SBOM facts are incomplete')",
+    "design.md §4.4 (embedding_partitions: model identity/revision/hash/license-disposition/dim=384/dtype=f32le/normalized=1/runtime/tokenizer hashes/manifest checksum)"
+  ],
+  "predecessor_artifacts": [
+    "evidence/F0/f0-inventory/reports/read-paths.json (0.3.2 — AnnVectorStore is the LIVE VectorStore at api.rs:274; SqliteVectorStore dormant)",
+    "evidence/F0/f0-inventory/reports/schema-inventory.json (0.3.3 — mem_vectors PK(model_version,id), no CHECK(length(vector)=1536), no embedding_partitions manifest table; embedding_outbox.index_target stores literal 'lancedb'/IndexTarget::LanceDb though live backend is AnnVectorStore — misnaming flagged)"
+  ],
+  "method": "Static source inventory of the embedding subsystem reachable from the LIVE vector path (AnnVectorStore + Retriever, api.rs assemble). Read crates/kria-core/src/memory/embedding.rs (OnnxEmbedder port) and embeddings.rs (EmbeddingModel ONNX loader), the live composition roots that construct them (desktop commands/runtime.rs, agent/headless_runtime.rs), Cargo.toml workspace + crate manifests, and Cargo.lock for resolved runtime versions. Verified presence/absence of model artifacts under models/ and ~/.kria/models via filesystem listing (no download). Each fact marked Known (with a file/code/config evidence locator) or Unknown (would require a model download/verification step deferred to F1/F5). Test-fixture hashes are recorded but classified Non-authoritative per the 0.3 invariant (tests are not capability proof).",
+  "invariants_applied": [
+    "Dormant code/comments/tests are NOT capability proof — the 'Apache-2.0' claim in embedding.rs doc-comment and the model/tokenizer hashes under tests/fixtures/memory-graph/generated/* are NOT accepted as observed artifact facts.",
+    "No license is inferred from package name, upstream reputation, or repository comment — model license disposition is Known ONLY with an in-repo license file/metadata; otherwise Unknown.",
+    "Do NOT download any model during F0 — artifact and tokenizer checksums that require reading the binary are Unknown (no file present in repo; no fetch performed).",
+    "MGR-042.5/.6: explicit model versions and dim/model-hash partition rejection are release requirements; observed state is inventoried against them.",
+    "MGR-047.11: every shipped model/runtime must have an exact lock/checksum and a reviewed FOSS license disposition — gaps are recorded as release blockers."
+  ],
+
+  "live_vector_path_binding": {
+    "vector_store": "crates/kria-core/src/memory/stores/ann_vectors.rs AnnVectorStore — wired LIVE at crates/kria-core/src/memory/api.rs:274 (per read-paths.json 0.3.2).",
+    "embedder_port": "crates/kria-core/src/memory/stores/ports.rs Embedder trait, implemented by crates/kria-core/src/memory/embedding.rs OnnxEmbedder.",
+    "embedder_impl": "crates/kria-core/src/memory/embeddings.rs EmbeddingModel (ONNX Runtime via `ort` + real WordPiece tokenizer via `tokenizers`; deterministic hash fallback that reports Unavailable rather than emitting vectors).",
+    "live_construction": [
+      "Desktop: crates/kria-desktop/src/commands/runtime.rs:955 EmbeddingModel::load(384) -> memory::embedding::OnnxEmbedder::from_model(embeddings) threaded into MemorySystem (runtime.rs:994).",
+      "Server/headless: crates/kria-core/src/agent/headless_runtime.rs:73 OnnxEmbedder::new_minilm() -> MemorySystem::open_with_db(...) ; on load failure degrades to no-memory registry (headless_runtime.rs:106)."
+    ],
+    "partition_label_written": "mem_vectors.model_version (PK component) is written from OnnxEmbedder::model_version() == ModelVersion(\"minilm_v1\") (embedding.rs:24,44,53). The OBSERVED live partition label is `minilm_v1`, NOT the design target `all-MiniLM-L6-v2`."
+  },
+
+  "models": [
+    {
+      "id": "M-memory-minilm",
+      "role": "LIVE memory vector path embedder (mem_vectors partitions, Retriever vector strategy). THIS is the model task 0.3.5 pins.",
+      "is_live": true,
+      "facts": {
+        "code_label": {
+          "status": "Known",
+          "value": "minilm_v1",
+          "evidence": "crates/kria-core/src/memory/embedding.rs:24 `const MINILM_VERSION: &str = \"minilm_v1\";` used as ModelVersion at :44 and :53; written to mem_vectors.model_version (PK) per schema-inventory.json 0002_vectors.sql."
+        },
+        "canonical_model_filename_referenced": {
+          "status": "Known",
+          "value": "all-MiniLM-L6-v2.onnx",
+          "evidence": "crates/kria-core/src/memory/embeddings.rs:load() searches `~/.kria/models/embeddings/all-MiniLM-L6-v2.onnx` and `models/embeddings/all-MiniLM-L6-v2.onnx`; doc-comment names `all-MiniLM-L6-v2`."
+        },
+        "local_model_file_paths": {
+          "status": "Known (paths) / Unknown (artifact present)",
+          "value": [
+            "~/.kria/models/embeddings/all-MiniLM-L6-v2.onnx (expected primary)",
+            "models/embeddings/all-MiniLM-L6-v2.onnx (expected repo-relative)"
+          ],
+          "artifact_present_in_repo": false,
+          "evidence": "embeddings.rs:load() model_paths[]; filesystem listing confirms NO models/embeddings/ directory exists (models/ contains only classifier, llm, omniparser, piper, stt, vad, wake). The MiniLM ONNX artifact is fetched/placed out-of-band at runtime and is NOT vendored — so its bytes cannot be inspected in F0 without a download."
+        },
+        "tokenizer_file": {
+          "status": "Known (path/loader) / Unknown (artifact present)",
+          "value": "tokenizer.json located next to the .onnx file; loaded via `tokenizers` crate (WordPiece).",
+          "artifact_present_in_repo": false,
+          "evidence": "embeddings.rs:load() derives tok_path = <model_dir>/tokenizer.json, `tokenizers::Tokenizer::from_file`; requires BOTH model AND tokenizer or falls back. No models/embeddings/tokenizer.json present in repo."
+        },
+        "source_url": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "No models/manifest, no download manifest, no config entry pins a source URL for the MiniLM artifact. No `models/manifest` directory exists. (No download performed to resolve.)"
+        },
+        "repository_revision": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "No pinned upstream repository revision / commit / HF ref for the model in-repo (design §6.1 requires `models/manifest` to pin it; the manifest does not yet exist)."
+        },
+        "artifact_checksum": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "Model .onnx is not present in repo and no checksum manifest pins it. Test fixtures under tests/fixtures/memory-graph/generated/* carry `model_hash` values (e.g. 0ab1af17…, ec0644226…, differing across fixtures) but these are SYNTHETIC oracle values for schema/rebuild tests, NOT the real shipped artifact hash — rejected as capability proof per the 0.3 invariant. Resolving the true hash requires a download → deferred to F1/F5."
+        },
+        "tokenizer_checksum": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "tokenizer.json not present in repo; fixture `tokenizer_hash` (a705a35b…) is synthetic oracle data, not the real tokenizer. No download performed."
+        },
+        "embedding_dimension": {
+          "status": "Known",
+          "value": 384,
+          "evidence": "embedding.rs:25 `const MINILM_DIM: usize = 384;` -> OnnxEmbedder::dim()==384; embed() rejects DimMismatch if output != 384. Design target 384-dim == 1536 bytes little-endian f32 (design §6.1). NOTE: schema-inventory.json flags mem_vectors has NO CHECK(length(vector)=1536) — dimension is enforced only in code, not in DDL (MGR-042 partition-integrity gap)."
+        },
+        "runtime": {
+          "status": "Known",
+          "value": "ONNX Runtime via `ort` crate (raw Session inference) + `tokenizers` crate + `ndarray`.",
+          "resolved_versions": {
+            "ort": "2.0.0-rc.12",
+            "tokenizers": "0.20.4 (workspace pin `tokenizers = \"0.20\"`; a transitive 0.22.2 also resolves via fastembed but is NOT the memory path)",
+            "ndarray": "0.17.2"
+          },
+          "evidence": "embeddings.rs `use ort::session::Session; use ort::value::Tensor;`, `Session::builder()?.commit_from_file`, `session.run(ort::inputs![...])`; Cargo.toml workspace pins ort=\"2.0.0-rc.12\", tokenizers=\"0.20\", ndarray=\"0.17\"; Cargo.lock resolved versions above.",
+          "mismatch_note": "Design §6.1/§1 and tasks.md 3.1 call this 'FastEmbed all-MiniLM-L6-v2'. The LIVE memory vector path does NOT use the `fastembed` crate — it uses raw ONNX Runtime (`ort`) + `tokenizers` directly. The `fastembed` crate IS in the dependency tree but is bound to a DIFFERENT model on a DIFFERENT path (see M-routing-e5). 'FastEmbed' in the design is therefore an inaccurate label for the observed memory embedder runtime."
+        },
+        "normalization": {
+          "status": "Known",
+          "value": "L2-normalized (unit vector).",
+          "evidence": "embeddings.rs embed_onnx(): after mean pooling, `norm = sqrt(sum(x^2)); v /= norm`. Fallback path also L2-normalizes. Matches design §6.1 L2 normalization contract."
+        },
+        "pooling": {
+          "status": "Known",
+          "value": "Attention-mask-weighted mean pooling over the sequence dimension (standard sentence-transformers pooling for all-MiniLM-L6-v2).",
+          "evidence": "embeddings.rs embed_onnx(): accumulates last_hidden_state * attention_mask, divides by mask_sum."
+        },
+        "max_tokenization": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "No explicit max_length / truncation cap is configured in embeddings.rs (tokenizer.encode(text, true) with no truncation policy set); seq_len is taken directly from the encoding. The design-required maximum tokenization contract is neither pinned in a manifest nor enforced in code."
+        },
+        "license_disposition": {
+          "status": "Unknown",
+          "value": null,
+          "evidence": "Per the 0.3 invariant, license is NOT inferred from comment/name. The ONLY in-repo license signal is a doc-comment in embedding.rs ('MiniLM-L6-v2 ... Apache-2.0') — a comment, not a license file/metadata. There is NO in-repo LICENSE/manifest for the MiniLM artifact or its tokenizer (no models/embeddings/, no models/manifest/). Reviewed FOSS license disposition is therefore Unknown and must be resolved with an artifact + upstream license review (MGR-047.11).",
+          "comment_claim_only": "embedding.rs doc-comment asserts Apache-2.0 (NOT accepted as evidence)."
+        }
+      }
+    },
+    {
+      "id": "M-routing-e5",
+      "role": "SEPARATE intent-routing semantic embedder — NOT the memory vector path. Documented here only to disambiguate the design's 'FastEmbed' wording and prevent conflation.",
+      "is_live": true,
+      "not_memory_vector_path": true,
+      "facts": {
+        "code_label": {
+          "status": "Known",
+          "value": "MultilingualE5Small (fastembed EmbeddingModel enum)",
+          "evidence": "crates/kria-core/src/routing/embed.rs:58 `InitOptions::new(EmbeddingModel::MultilingualE5Small)`; consumed by IntentSource::FastEmbedSemanticRouter (turn_gate.rs)."
+        },
+        "runtime": {
+          "status": "Known",
+          "value": "`fastembed` crate (TextEmbedding), which downloads model artifacts at runtime via hf-hub into a cache_dir.",
+          "resolved_versions": {"fastembed": "5.13.3", "hf-hub": "0.5.0"},
+          "evidence": "routing/embed.rs `use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};`, `TextEmbedding::try_new(InitOptions::new(...).with_cache_dir(...).with_show_download_progress(false))`; Cargo.toml fastembed=\"5\"; Cargo.lock fastembed 5.13.3, hf-hub 0.5.0."
+        },
+        "normalization": {"status": "Known", "value": "L2-normalized (routing/embed.rs l2_normalise).", "evidence": "embed_batch maps l2_normalise over raw vectors."},
+        "artifact_checksum": {"status": "Unknown", "value": null, "evidence": "fastembed downloads MultilingualE5Small on demand via hf-hub; no in-repo checksum/lock for the downloaded model artifact. No download performed here."},
+        "license_disposition": {"status": "Unknown", "value": null, "evidence": "No in-repo license file/metadata for the downloaded E5-small artifact; disposition unresolved (MGR-047.11)."}
+      },
+      "disambiguation_note": "Two distinct embedding subsystems coexist: (1) memory vectors use raw `ort` + all-MiniLM-L6-v2 ONNX under label `minilm_v1`; (2) intent routing uses the `fastembed` crate with MultilingualE5Small. The design's phrase 'FastEmbed all-MiniLM-L6-v2' matches NEITHER exactly (wrong runtime for the memory path; wrong model for the fastembed path)."
+    }
+  ],
+
+  "observed_vs_target_mismatches": [
+    {
+      "id": "MM-1",
+      "field": "partition/model label",
+      "observed": "minilm_v1 (written to mem_vectors.model_version PK)",
+      "target": "all-MiniLM-L6-v2 (design §6.1; fixtures use partition_id `all-MiniLM-L6-v2@rN`)",
+      "impact": "Live vector partitions are keyed by an opaque `minilm_v1` label that does not encode canonical model identity or revision; blocks manifest-verified partition identity (MGR-042.5) and model-hash rejection (MGR-042.6).",
+      "target_gate": "F3 (3.1 vector contract) — align label to canonical model identity + revision; F1 for embedding_partitions manifest."
+    },
+    {
+      "id": "MM-2",
+      "field": "runtime label ('FastEmbed')",
+      "observed": "raw ONNX Runtime (`ort` 2.0.0-rc.12) + `tokenizers` 0.20.4 for the memory path; `fastembed` 5.13.3 used only for a different (routing) model",
+      "target": "design §6.1 says 'The model target is FastEmbed all-MiniLM-L6-v2'",
+      "impact": "Design wording implies the fastembed crate provides the memory embeddings; it does not. Runtime/version pinning and license review must target `ort`+`tokenizers` (memory) vs `fastembed`+`hf-hub` (routing) separately.",
+      "target_gate": "F1/F3 (correct the contract wording + manifest runtime pin)."
+    },
+    {
+      "id": "MM-3",
+      "field": "dimension integrity enforcement",
+      "observed": "384 enforced only in Rust (OnnxEmbedder::embed DimMismatch); mem_vectors DDL has NO CHECK(length(vector)=1536) and there is NO embedding_partitions manifest table",
+      "target": "design §4.4 embedding_partitions (dim=384/dtype=f32le/normalized=1) + mem_vectors CHECK(length(vector)=1536) and model-hash rejection (MGR-042.6)",
+      "impact": "A wrong-dimension or wrong-model vector cannot be rejected at the storage boundary; only in-process code guards it.",
+      "target_gate": "F1 (schema) / F3 (vector contract)."
+    },
+    {
+      "id": "MM-4",
+      "field": "outbox index_target label (cross-referenced from 0.3.3)",
+      "observed": "embedding_outbox.index_target stores literal 'lancedb' (IndexTarget::LanceDb) though the live backend is AnnVectorStore over mem_vectors",
+      "target": "design §6.1 excludes LanceDB/Qdrant/HNSW/ANN; SQLite exact vector store",
+      "impact": "Misleading derived-index target label; reinforced here because it compounds the model-label confusion.",
+      "target_gate": "F1/F3 (rename target; see schema-inventory.json)."
+    }
+  ],
+
+  "unknowns_requiring_resolution": [
+    {"id": "U-1", "fact": "MiniLM artifact checksum (all-MiniLM-L6-v2.onnx)", "why_unknown": "artifact not vendored in repo; no checksum manifest; F0 forbids download", "resolver_gate": "F1 (vendor + pin via models/manifest) / F5 (SBOM + release checksum)", "requirement": "MGR-042.6, MGR-047.11"},
+    {"id": "U-2", "fact": "Tokenizer (tokenizer.json) checksum", "why_unknown": "tokenizer not vendored in repo; no manifest", "resolver_gate": "F1/F5", "requirement": "MGR-042.6, MGR-047.11"},
+    {"id": "U-3", "fact": "Source URL", "why_unknown": "no models/manifest pins a download source", "resolver_gate": "F1", "requirement": "MGR-047.1/.11"},
+    {"id": "U-4", "fact": "Upstream repository revision / model version pin", "why_unknown": "no manifest; label `minilm_v1` encodes no revision", "resolver_gate": "F1", "requirement": "MGR-042.5, MGR-047.1"},
+    {"id": "U-5", "fact": "Reviewed FOSS license disposition for the model AND tokenizer", "why_unknown": "no in-repo license file/metadata; only a code comment (not accepted); no download", "resolver_gate": "F1 (disposition) / F5 (release block if unresolved)", "requirement": "MGR-047.4/.8/.11"},
+    {"id": "U-6", "fact": "Maximum tokenization contract (max sequence length/truncation)", "why_unknown": "not configured in code, not pinned in a manifest", "resolver_gate": "F1/F3", "requirement": "design §6.1 tokenization contract"},
+    {"id": "U-7", "fact": "M-routing-e5 (MultilingualE5Small) artifact checksum + license disposition", "why_unknown": "fastembed downloads via hf-hub at runtime; no in-repo lock/checksum/license", "resolver_gate": "F1/F5 (may be handled in 0.3.6 dependency reconciliation)", "requirement": "MGR-047.11"}
+  ],
+
+  "known_facts_summary": {
+    "memory_model_label": "minilm_v1 (code) / references all-MiniLM-L6-v2.onnx",
+    "dimension": 384,
+    "vector_serialization_target": "little-endian f32, 384 values = 1536 bytes (design §6.1; not DDL-enforced)",
+    "normalization": "L2 (unit) — Known",
+    "pooling": "attention-mask-weighted mean pooling — Known",
+    "runtime": "ort 2.0.0-rc.12 + tokenizers 0.20.4 + ndarray 0.17.2 (ONNX Runtime, NOT fastembed) — Known",
+    "fallback_behavior": "hash fallback reports Unavailable (Availability::Down) and refuses to emit vectors into the index — Known (embedding.rs / embeddings.rs)"
+  },
+
+  "deferred_to_0_3_6": "Broader dependency/license reconciliation — full Cargo/npm/Python crate & package license matrix, the repo-root LICENSE (Apache-2.0 text) vs Cargo `license = MIT` mismatch (design §1 Licensing row), non-model asset licenses (piper voices, fonts, icons), and SBOM lock/checksum coverage — is the subject of task 0.3.6 and is NOT resolved in this artifact.",
+
+  "notes": [
+    "No model was downloaded and no binary artifact was read to produce this inventory (F0 constraint honored).",
+    "Test-fixture model/tokenizer hashes under tests/fixtures/memory-graph/generated/* are synthetic oracle values and are explicitly NOT treated as the observed real artifact checksums (0.3 invariant: tests are not capability proof).",
+    "The observed live memory embedding label is `minilm_v1`; the design target is `all-MiniLM-L6-v2` — recorded as mismatch MM-1."
+  ]
+}

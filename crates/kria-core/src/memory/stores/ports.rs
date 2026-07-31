@@ -16,9 +16,8 @@ use crate::memory::db::AuthorityTx;
 use crate::memory::error::MemoryResult;
 use crate::memory::ids::Hlc;
 use crate::memory::types::{
-    AuditRecord, Availability, Entity, Event, GraphHit, IndexTarget, Memory, MemoryState,
-    ModelVersion, OutboxEntry, OutboxStatus, Relationship, ScopeFilter, SearchHit, VectorHit,
-    VectorPayload,
+    AuditRecord, Availability, Entity, Event, IndexTarget, Memory, MemoryState, ModelVersion,
+    OutboxEntry, OutboxStatus, ScopeFilter, SearchHit, VectorHit, VectorPayload,
 };
 
 /// Immutable append-only event log (L1). Writes join the authority transaction;
@@ -65,31 +64,52 @@ pub trait RelationalStore: Send + Sync {
     ) -> MemoryResult<Option<Memory>>;
 
     fn enqueue_outbox(&self, tx: &mut AuthorityTx<'_>, entry: &OutboxEntry) -> MemoryResult<()>;
+    /// Pending entries for `target` whose backoff window has elapsed (i.e.
+    /// `next_attempt_at IS NULL OR next_attempt_at <= now`), ordered oldest
+    /// first, capped at `limit`.  This is the enhanced relay fetch (task 1.8.4).
     fn pending_outbox(&self, target: IndexTarget, limit: usize) -> MemoryResult<Vec<OutboxEntry>>;
+    /// Mark an outbox entry's lifecycle state.
+    ///
+    /// - `status`          — new lifecycle value (`Done`, `Pending`, `DeadLetter`)
+    /// - `attempts`        — updated attempt count
+    /// - `next_attempt_at` — when `Some`, set the backoff gate (task 1.8.4);
+    ///                       when `None`, clear it (entry is immediately eligible)
+    /// - `error_code`      — when `Some`, record the failure reason; when `None`,
+    ///                       clear any previously recorded code
     fn mark_outbox(
         &self,
         tx: &mut AuthorityTx<'_>,
         id: i64,
         status: OutboxStatus,
         attempts: u32,
+        next_attempt_at: Option<chrono::DateTime<chrono::Utc>>,
+        error_code: Option<&str>,
     ) -> MemoryResult<()>;
 
     /// Record a Write Policy decision to the memory-audit log (design §28).
     fn record_audit(&self, tx: &mut AuthorityTx<'_>, record: &AuditRecord) -> MemoryResult<()>;
 }
 
-/// Graph entities + relationships with cycle-safe, depth-capped traversal
-/// (ADR-004). Writes join the authority transaction; reads use the pool.
+/// Graph entities with cycle-safe, depth-capped traversal
+/// (ADR-004). Entity writes join the authority transaction; reads use the pool.
+///
+/// The legacy `add_relationship` / `relationships_for` methods were deleted in
+/// task F2.2.7. Relationship writes now go through the v2 governed path
+/// (`RelationshipCommandBus`). Graph traversal over `relationships_v2` is
+/// implemented in F3.3.
 pub trait GraphStore: Send + Sync {
     fn add_entity(&self, tx: &mut AuthorityTx<'_>, entity: &Entity) -> MemoryResult<()>;
-    fn add_relationship(&self, tx: &mut AuthorityTx<'_>, rel: &Relationship) -> MemoryResult<()>;
-    /// Cycle-safe, visited-set, depth-capped (`max_hops <= 3`) traversal.
-    fn neighbors(&self, root: Uuid, max_hops: u8) -> MemoryResult<Vec<GraphHit>>;
-    fn relationships_for(&self, entity: Uuid) -> MemoryResult<Vec<Relationship>>;
+    /// Cycle-safe, visited-set, depth-capped (`max_hops <= 3`) traversal
+    /// over `relationships_v2` (entity endpoints only). Returns `(entity_id, distance)` pairs.
+    fn neighbors(&self, root: Uuid, max_hops: u8) -> MemoryResult<Vec<(Uuid, u8)>>;
     fn search_entities(&self, query: &str) -> MemoryResult<Vec<Entity>>;
 }
 
-/// Vector index (LanceDB v1; Qdrant escape hatch). Async — real I/O.
+/// Vector index. `SqliteVectorStore` is the **durable authority** for vectors —
+/// an exact cosine search over `mem_vectors_v2` with f64 accumulation and
+/// SQL-prefiltered partitions. The trait keeps backends caller-transparent so a
+/// future scale-out backend can be swapped in without touching callers. No
+/// ANN/LanceDB/Qdrant/HNSW backend is part of the current release. Async — real I/O.
 #[async_trait]
 pub trait VectorStore: Send + Sync {
     async fn create_partition(&self, model: &ModelVersion, dim: usize) -> MemoryResult<()>;

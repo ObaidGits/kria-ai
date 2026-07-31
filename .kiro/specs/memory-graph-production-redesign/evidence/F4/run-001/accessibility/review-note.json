@@ -1,0 +1,10 @@
+{
+  "task": "4.9.4",
+  "description": "axe, complete keyboard, Orca transcripts/videos, 200% zoom, target-size, focus return, map/list semantics/action parity, and human accessibility review",
+  "timestamp": "2025-07-28T00:00:00Z",
+  "status": "deferred-nbw",
+  "disposition": "NBW-F4-03",
+  "note": "Full axe/keyboard/Orca review session requires a running WebKitGTK/Tauri window with screen reader, assistive technology, and human review. Deferred to F5 per NBW deferral pattern. Pre-production single-developer project; self-review accepted per dev-context steering. All components use semantic HTML, ARIA roles, and data-testid attributes verified in the unit test suite.",
+  "deferredTo": "F5",
+  "nbrId": "NBW-F4-03"
+}

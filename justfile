@@ -71,3 +71,13 @@ fmt:
 
 clippy:
     cargo clippy --workspace --all-features -- -D warnings
+
+# ── Memory Graph spec coverage/orphan gate (CMD-MG-COVERAGE, task F0.1) ─────
+# Read-only linter over the memory-graph-production-redesign spec. Emits the
+# coverage totals and fails closed (nonzero) unless coverage is exactly
+# 48/48 requirements, 46/46 decisions, 65/65 findings, 31/31 opportunities
+# with zero reverse orphans and zero error-severity diagnostics. Writes no
+# spec files. Pass an --out-dir to also emit the JSON evidence artifacts, e.g.
+#   just mg-coverage --out-dir .kiro/specs/memory-graph-production-redesign/evidence/F0/<run-id>
+mg-coverage *ARGS:
+    cargo run -q -p kria-eval --bin mg-coverage -- {{ARGS}}

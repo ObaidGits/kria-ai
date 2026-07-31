@@ -974,11 +974,17 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
         mode => mode,
     };
-    let memory_system = kria_core::memory::api::MemorySystem::open_with_db(
+    // Wire the desktop to the ONE memory composition root (`MemorySystem::compose`,
+    // design §19.1 / F1.2.4). The authority `Database` handle is INJECTED from
+    // the already-open backend, so the composition root — not the adapter — owns
+    // every store/policy/retriever/scheduler over that single handle. Because the
+    // handle is injected, `MemoryConfig.db_path` is unused here (it only applies
+    // to the standalone self-opening path); we let it default rather than
+    // duplicating the path ownership (retires the dual config/path smell).
+    let memory_system = kria_core::memory::api::MemorySystem::compose(
         memory_backend.database(),
         kria_core::memory::api::MemoryConfig {
             enabled: config.memory.enabled,
-            db_path: paths.data_dir.join("kria_memory.db").display().to_string(),
             device_id: "local-desktop".to_string(),
             default_mode: default_memory_mode,
             admission_debounce: std::time::Duration::from_millis(
@@ -990,6 +996,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
                 config.memory.enrichment_catchup_secs.max(1),
             ),
             change_channel_capacity: config.memory.change_channel_capacity.max(1),
+            ..Default::default()
         },
         Arc::new(kria_core::memory::embedding::OnnxEmbedder::from_model(
             embeddings.clone(),
@@ -997,9 +1004,25 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         true,
     )?;
     memory_system.set_enabled(config.memory.enabled);
+
+    // Distinct authenticated caller construction at the desktop adapter boundary
+    // (F1.2.4). The desktop is an in-process, single-user laptop, so its caller
+    // is the locally-trusted device. The server adapter constructs its own
+    // `AuthenticatedRemote` caller at its own boundary — both share the SAME core
+    // composition root wired above, but each authenticates its own caller. Full
+    // per-operation caller threading through the governed write/read path lands
+    // with the caller/policy model (F1.4).
+    let caller = kria_core::memory::model::CallerContext::local_desktop(
+        "local-desktop",
+        kria_core::memory::model::PolicyPartition::new("user", "chat", 0)
+            .expect("static desktop caller partition is valid"),
+    )
+    .expect("static desktop caller identity is valid");
     tracing::info!(
         enabled = config.memory.enabled,
-        "[INIT] Memory System authority ready"
+        caller_origin = %caller.origin(),
+        caller_partition = %caller.partition_key(),
+        "[INIT] Memory System authority ready (one composition root; desktop caller at boundary)"
     );
 
     // Build the full tool registry (60+ tools + 6 precognitive) with the memory
@@ -2266,12 +2289,12 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
             workflow_continuation_runtime.clone(),
         ),
     );
-    // Conversation store shares the SAME authority DB handle as the runtime
-    // backend (one `Arc<Database>`), so chat/session/preference/media writes and
-    // cognitive-memory writes hit a single database.
-    let conversation = std::sync::Arc::new(
-        kria_core::memory::conversation::ConversationStore::new(memory_backend.database()),
-    );
+    // Conversation store is vended by the single memory composition root
+    // (`MemorySystem`), so chat/session/preference/media writes and
+    // cognitive-memory writes flow through one authority handle instead of the
+    // adapter constructing a store independently (F1.2.4 — one authority per
+    // process, all memory access derived from the core root).
+    let conversation = std::sync::Arc::new(memory_system.conversation());
 
     // ── Event-driven cognition loop + live UI bridge (design §20/§25, P8) ─────
     // The Cognitive Scheduler owns consolidation/reflection/dreaming. It is
@@ -2325,6 +2348,7 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         memory_store,
         conversation,
         memory_system,
+        caller,
         memory_cognition_task: tokio::sync::Mutex::new(memory_cognition_task),
         cold_start_cancel: Arc::new(std::sync::Mutex::new(None)),
         hitl: hitl.clone(),

@@ -23,7 +23,6 @@ use crate::memory::error::{MemoryResult, StorageError};
 use crate::memory::ids::new_id;
 use crate::memory::stores::ports::GraphStore;
 use crate::memory::stores::SqliteGraphStore;
-use crate::memory::types::Relationship;
 
 /// Max entities linked per memory (bounds co-mention edge explosion).
 const MAX_ENTITIES_PER_MEMORY: usize = 6;
@@ -136,15 +135,13 @@ impl EntityExtractor {
 pub struct EntityExtractionPipeline {
     db: Arc<Database>,
     resolver: EntityResolver,
-    graph: Arc<dyn GraphStore>,
 }
 
 impl EntityExtractionPipeline {
     pub fn new(db: Arc<Database>) -> Self {
         let graph: Arc<dyn GraphStore> = Arc::new(SqliteGraphStore::new(db.clone()));
         Self {
-            resolver: EntityResolver::new(db.clone(), graph.clone()),
-            graph,
+            resolver: EntityResolver::new(db.clone(), graph),
             db,
         }
     }
@@ -194,25 +191,32 @@ impl EntityExtractionPipeline {
         if entity_ids.len() < 2 {
             return Ok(());
         }
-        let now = chrono::Utc::now();
-        let mut tx = self.db.begin()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let tx = self.db.begin()?;
         for i in 0..entity_ids.len() {
             for j in (i + 1)..entity_ids.len() {
                 let (a, b) = (entity_ids[i], entity_ids[j]);
                 if a == b {
                     continue;
                 }
-                let rel = Relationship {
-                    id: new_id(),
-                    source_id: a,
-                    target_id: b,
-                    rel_type: "co_mentioned_with".into(),
-                    strength: 0.5,
-                    valid_from: now,
-                    valid_until: None,
-                    evidence_event_id: None,
-                };
-                self.graph.add_relationship(&mut tx, &rel)?;
+                // Co-mention edge written directly to relationships_v2.
+                // `identity_hash` = "<source>-<target>-co_mentioned_with" keeps
+                // this idempotent on re-extraction of the same memory pair.
+                let id = new_id();
+                let identity = format!("{a}-{b}-co_mentioned_with");
+                tx.conn()
+                    .execute(
+                        "INSERT OR IGNORE INTO relationships_v2(
+                             id, source_kind, source_id, target_kind, target_id,
+                             relation_name, relation_version, direction_class,
+                             valid_from, valid_until, truth_state,
+                             namespace, owner_id, scope, sensitivity,
+                             policy_source_id, policy_version, identity_hash)
+                         VALUES (?1,'entity',?2,'entity',?3,'co_mentioned_with',1,'symmetric',
+                                 ?4,NULL,NULL,'core','','global',0,'core','pending-f1.4',?5)",
+                        params![id.to_string(), a.to_string(), b.to_string(), now, identity,],
+                    )
+                    .map_err(StorageError::Sqlite)?;
             }
         }
         tx.commit()

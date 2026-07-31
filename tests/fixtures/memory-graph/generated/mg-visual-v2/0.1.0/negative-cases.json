@@ -1,0 +1,193 @@
+[
+  {
+    "case_id": "neg-unknown-required-field",
+    "kind": "unknown_required_field",
+    "reason_code": "UnsupportedSchema",
+    "raw": {
+      "scene_id": "scene-1000-search_overview-ultrawide-ready",
+      "query_class": "search_overview",
+      "revision": 1000,
+      "query_hash": "402407131876ddfdef267737f836255b4c612ccab1f3e252bd73108cebb9622d",
+      "layout_seed": 1993698550566131200,
+      "viewport_label": "ultrawide",
+      "viewport_width": 3440,
+      "viewport_height": 1440,
+      "dpr_x100": 100,
+      "composition": "three_pane",
+      "ui_state": "ready",
+      "node_count": 5,
+      "edge_count": 4,
+      "visible_label_count": 5,
+      "camera": {
+        "x": -18800,
+        "y": -47669,
+        "zoom_x1000": 1614
+      },
+      "nodes": [
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n0",
+          "label": "node 0",
+          "label_style": "ascii",
+          "x": -52027,
+          "y": 8581,
+          "truth_token": "current"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "label": "ذاكرة 1",
+          "label_style": "rtl",
+          "x": 86801,
+          "y": -89198,
+          "truth_token": "confirmed"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "label": "记忆图谱2",
+          "label_style": "cjk",
+          "x": -4807,
+          "y": 76892,
+          "truth_token": "inferred"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "label": "node 3",
+          "label_style": "ascii",
+          "x": -1017,
+          "y": 53102,
+          "truth_token": "current"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n4",
+          "label": "ذاكرة 4",
+          "label_style": "rtl",
+          "x": 99,
+          "y": -49506,
+          "truth_token": "confirmed"
+        }
+      ],
+      "edges": [
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e0",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n0",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "relation": "derived_from"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e1",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "relation": "supports"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e2",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "relation": "mentions_entity"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e3",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n4",
+          "relation": "derived_from"
+        }
+      ],
+      "scene_hash": "3b910c5e3ad98809e99322b06f52dfbe875a440b2eca2e8604ca462af7cc36bc",
+      "required_unsupported_field": "must_reject"
+    }
+  },
+  {
+    "case_id": "neg-scene-hash-mismatch",
+    "kind": "scene_hash_mismatch",
+    "reason_code": "ChecksumMismatch",
+    "raw": {
+      "scene_id": "scene-1000-search_overview-ultrawide-ready",
+      "query_class": "search_overview",
+      "revision": 1000,
+      "query_hash": "402407131876ddfdef267737f836255b4c612ccab1f3e252bd73108cebb9622d",
+      "layout_seed": 1993698550566131200,
+      "viewport_label": "ultrawide",
+      "viewport_width": 3440,
+      "viewport_height": 1440,
+      "dpr_x100": 100,
+      "composition": "three_pane",
+      "ui_state": "ready",
+      "node_count": 5,
+      "edge_count": 4,
+      "visible_label_count": 5,
+      "camera": {
+        "x": -18800,
+        "y": -47669,
+        "zoom_x1000": 1614
+      },
+      "nodes": [
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n0",
+          "label": "node 0",
+          "label_style": "ascii",
+          "x": -52027,
+          "y": 8581,
+          "truth_token": "current"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "label": "ذاكرة 1",
+          "label_style": "rtl",
+          "x": 86801,
+          "y": -89198,
+          "truth_token": "confirmed"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "label": "记忆图谱2",
+          "label_style": "cjk",
+          "x": -4807,
+          "y": 76892,
+          "truth_token": "inferred"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "label": "node 3",
+          "label_style": "ascii",
+          "x": -1017,
+          "y": 53102,
+          "truth_token": "current"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-n4",
+          "label": "ذاكرة 4",
+          "label_style": "rtl",
+          "x": 99,
+          "y": -49506,
+          "truth_token": "confirmed"
+        }
+      ],
+      "edges": [
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e0",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n0",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "relation": "derived_from"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e1",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n1",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "relation": "supports"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e2",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n2",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "relation": "mentions_entity"
+        },
+        {
+          "id": "scene-1000-search_overview-ultrawide-ready-e3",
+          "source_id": "scene-1000-search_overview-ultrawide-ready-n3",
+          "target_id": "scene-1000-search_overview-ultrawide-ready-n4",
+          "relation": "derived_from"
+        }
+      ],
+      "scene_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+]

@@ -1,0 +1,30 @@
+{
+  "command_id": "CMD-MG-COVERAGE",
+  "schema_version": "memory-graph-coverage/v1",
+  "run_id": "f0-gate-prefix",
+  "spec_dir": "/media/obaid/SSD/KRIA/crates/kria-eval/../../.kiro/specs/memory-graph-production-redesign",
+  "exit_code": 1,
+  "passed": false,
+  "outcome": {
+    "thresholds": {
+      "requirements": 48,
+      "decisions": 46,
+      "findings": 65,
+      "opportunities": 31
+    },
+    "totals": {
+      "requirements": 48,
+      "decisions": 46,
+      "findings": 65,
+      "opportunities": 31
+    },
+    "thresholds_met": true,
+    "reverse_orphans": 0,
+    "error_diagnostics": 1,
+    "passed": false,
+    "exit_code": 1,
+    "failures": [
+      "1 other error-severity diagnostic(s) present (fail-closed; expected zero)"
+    ]
+  }
+}

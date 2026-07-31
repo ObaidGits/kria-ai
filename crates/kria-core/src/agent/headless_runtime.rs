@@ -19,6 +19,7 @@ use crate::agent::AgentLoop;
 use crate::config::KriaConfig;
 use crate::llm::ModelRouter;
 use crate::memory::api::{MemoryConfig, MemorySystem};
+use crate::memory::conversation::ConversationStore;
 use crate::memory::embedding::OnnxEmbedder;
 use crate::memory::stores::ports::Embedder;
 use crate::memory::{KriaMemoryRuntime, MemoryRuntime};
@@ -46,6 +47,13 @@ pub struct HeadlessRuntime {
     /// MiniLM model is unavailable, in which case the loop degrades to no-memory
     /// rather than failing to boot.
     pub memory_system: Option<Arc<MemorySystem>>,
+    /// Conversation/session store over the SAME single authority `Database`
+    /// handle opened for this runtime (F1.2.4 — one authority per process).
+    /// Vended here so the host adapter (server) reuses this handle for session
+    /// history instead of independently re-opening the authority — even in the
+    /// degraded no-embedder path where `memory_system` is `None`. `None` only if
+    /// the authority DB itself could not be opened.
+    pub session_store: Option<Arc<ConversationStore>>,
 }
 
 /// Build a minimal but functional agent loop from configuration.
@@ -65,54 +73,75 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
     // unavailable we degrade to the no-memory core registry so the server still
     // boots. There is NO separate server database or retrieval pipeline.
     let memory_db_path = paths.data_dir.join("kria_memory.db");
-    let (tool_registry, memory_system): (Arc<ToolRegistry>, Option<Arc<MemorySystem>>) =
-        match KriaMemoryRuntime::open(&memory_db_path) {
-            Ok(backend) => {
-                let backend = Arc::new(backend);
-                let store: Arc<dyn MemoryRuntime> = backend.clone();
-                match OnnxEmbedder::new_minilm() {
-                    Ok(embedder) => {
-                        let embedder: Arc<dyn Embedder> = Arc::new(embedder);
-                        match MemorySystem::open_with_db(
-                            backend.database(),
-                            MemoryConfig {
-                                db_path: memory_db_path.display().to_string(),
-                                device_id: "local-server".to_string(),
-                                ..Default::default()
-                            },
-                            embedder,
-                            true,
-                        ) {
-                            Ok(ms) => {
-                                let reg = build_registry_full_with_memory(
-                                    Some(store),
-                                    None,
-                                    None,
-                                    None,
-                                    Some(ms.clone()),
-                                );
-                                tracing::info!(
-                                    "[headless] MemorySystem online — server is memory-driven"
-                                );
-                                (Arc::new(reg), Some(ms))
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "[headless] MemorySystem unavailable; no-memory registry");
-                                (Arc::new(build_registry_with_store(Some(store))), None)
-                            }
+    #[allow(clippy::type_complexity)]
+    let (tool_registry, memory_system, session_store): (
+        Arc<ToolRegistry>,
+        Option<Arc<MemorySystem>>,
+        Option<Arc<ConversationStore>>,
+    ) = match KriaMemoryRuntime::open(&memory_db_path) {
+        Ok(backend) => {
+            let backend = Arc::new(backend);
+            let store: Arc<dyn MemoryRuntime> = backend.clone();
+            // Conversation store over the SINGLE authority handle this
+            // backend opened — reused by the server for session history so
+            // the process never opens a second `Database` (F1.2.4).
+            let session_store = Some(Arc::new(backend.conversation()));
+            match OnnxEmbedder::new_minilm() {
+                Ok(embedder) => {
+                    let embedder: Arc<dyn Embedder> = Arc::new(embedder);
+                    // Wire to the ONE memory composition root
+                    // (`MemorySystem::compose`, design §19.1 / F1.2.4) over the
+                    // SAME injected authority handle the backend opened. Because
+                    // the handle is injected, `MemoryConfig.db_path` is unused
+                    // (it only applies to the standalone self-opening path), so
+                    // we let it default instead of duplicating the path.
+                    match MemorySystem::compose(
+                        backend.database(),
+                        MemoryConfig {
+                            device_id: "local-server".to_string(),
+                            ..Default::default()
+                        },
+                        embedder,
+                        true,
+                    ) {
+                        Ok(ms) => {
+                            let reg = build_registry_full_with_memory(
+                                Some(store),
+                                None,
+                                None,
+                                None,
+                                Some(ms.clone()),
+                            );
+                            tracing::info!(
+                                "[headless] MemorySystem online — server is memory-driven"
+                            );
+                            (Arc::new(reg), Some(ms), session_store)
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "[headless] MemorySystem unavailable; no-memory registry");
+                            (
+                                Arc::new(build_registry_with_store(Some(store))),
+                                None,
+                                session_store,
+                            )
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "[headless] embedder unavailable; no-memory registry");
-                        (Arc::new(build_registry_with_store(Some(store))), None)
-                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "[headless] embedder unavailable; no-memory registry");
+                    (
+                        Arc::new(build_registry_with_store(Some(store))),
+                        None,
+                        session_store,
+                    )
                 }
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "[headless] memory backend unavailable; core registry only");
-                (Arc::new(build_registry_with_store(None)), None)
-            }
-        };
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "[headless] memory backend unavailable; core registry only");
+            (Arc::new(build_registry_with_store(None)), None, None)
+        }
+    };
 
     let mount_manager = Arc::new(RwLock::new(ToolMountManager::new()));
     let policy_engine = Arc::new(PolicyEngine::new());
@@ -161,5 +190,6 @@ pub fn build_minimal(config: &KriaConfig) -> anyhow::Result<HeadlessRuntime> {
         tool_registry,
         model_router,
         memory_system,
+        session_store,
     })
 }

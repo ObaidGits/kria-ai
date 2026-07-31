@@ -1,0 +1,31 @@
+{
+  "schema": "memory-graph.review/v1",
+  "gate": "F0",
+  "role": "Spec owner",
+  "review": {
+    "role": "Spec owner",
+    "reviewerId": "Obaidullah Zeeshan",
+    "timestamp": "2026-07-22T20:21:05Z",
+    "manifestHash": "b851b1586d70a88a22e2cbffed3d0054983a875d937136f130fe54dfdc3b0279",
+    "reviewedArtifactHashes": [
+      "e01ebbea72c22a844c37688e07a10996aa1f86f30fb0fd7c6286ea892b378394",
+      "42e62ca5f44302507fd9d519dd7763477ee72c13c171d3cff8dd3dcc8d3edde9",
+      "f71763679aa9567995b9069fe3f175756f581c22301e45731c68aede9f668b98",
+      "ee35b7e2c8b797b3387c3c28cdbfff371c7b66461b51e6789e6af4a7b9fbd931",
+      "5b84d43d050c569d2806f7a39d158f25fa9e0272ed06a4a230c5744d811dc18b",
+      "be6822fc878fc315fb004649f2f8be3da4eac94b4bfd72f1ddaf67853dce6a78",
+      "1c192750ae20cddf481138a6b5ac81bda326b9f38caf43a8849197b92181121a",
+      "b731f26a832647d9d5d9c8f7164260a3b896bd66ef3e5912d2322a588b576dbf",
+      "b50fb87f2cf5b3f330ddb456a5cb1f9e095a4c6acd922c33426f45ab65f6f36f",
+      "0777cef2d02ee3b784835d5af9f4ca1e965b1a9da39ea7896b6a98b338728a25",
+      "6d0eebaec245c3f544a903482911c6a6364cc90f86df4f604c51c18ad7f7cb60",
+      "a71023a2ea1bef0a2f358eb71ccd821773f5fa3f6989a56525bcbe03a8a8231e"
+    ],
+    "verdict": "Approved. F0 evidence-reset gate: coverage/orphan linter clean (48/48 MGR, 46/46 MGD, 65/65 findings, 31/31 opportunities, 0 reverse orphans), deterministic fixtures frozen, F0.3 inventories and current-state baseline recorded with explicit limitations. This manifest makes NO Verified implementation claim; verified-implementation count remains zero. Single-developer pre-production repo (steering dev-context): recorded as the owner's self-attestation, not an independent third-party signature.",
+    "independent": false,
+    "signatureMethod": "ssh"
+  },
+  "signed_manifest_hash": "b851b1586d70a88a22e2cbffed3d0054983a875d937136f130fe54dfdc3b0279",
+  "final_manifest_hash": "b71adeae1ba30b37e3d2a9f93ad193e316aba1dcbfceb162829bc092069226b3",
+  "note": "Single-developer pre-production repo (steering dev-context): owner self-attestation. F0 roles ('Spec owner'/'QA/evidence owner') are not in the independence-required set, so one owner signing both is accepted by enforce_governance. No Verified implementation claim is made."
+}

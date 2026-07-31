@@ -26,13 +26,12 @@ import { CorePresence } from "../components/CorePresence";
 import { CurrentWorkSummary } from "./CurrentWorkSummary";
 import { OverflowControl } from "./OverflowControl";
 import { navigate } from "./router";
-import { setFeatureFlag } from "../featureFlags";
+import { setSurface } from "../app/surface";
 import { claimAttention, releaseAttention, attentionGranted } from "./attention";
 
-/** Return to the Command Center homepage (re-enable the home surface + reload). */
+/** Return to the Command Center without reloading or disturbing workspace state. */
 function goHome() {
-  setFeatureFlag("home.command-center", true);
-  if (typeof window !== "undefined") window.location.reload();
+  setSurface("home");
 }
 import { requestWindowMode } from "../windowing/modeTransitionCoordinator";
 import { WindowModeSwitch } from "./WindowModeSwitch";
@@ -109,7 +108,7 @@ export function PresenceBar(props: PresenceBarProps) {
   ];
 
   return (
-    <header class="kria-presencebar" role="banner">
+    <header class="kria-presencebar" role="banner" aria-label="Global controls">
       <div class="kria-presencebar__core">
         <CorePresence size="md" />
         <button

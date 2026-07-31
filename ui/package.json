@@ -14,7 +14,7 @@
     "e2e:list": "playwright test --list",
     "e2e:flows": "playwright test e2e/smoke.spec.ts e2e/flow-map.spec.ts",
     "e2e:a11y": "playwright test e2e/accessibility.spec.ts",
-    "e2e:performance": "playwright test e2e/performance.spec.ts",
+    "e2e:performance": "playwright test e2e/performance.spec.ts e2e/memory-control-center-perf.spec.ts",
     "e2e:report": "playwright show-report",
     "story:dev": "storybook dev -p 6006 --no-open",
     "story:build": "storybook build",

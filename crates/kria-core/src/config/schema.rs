@@ -16,6 +16,9 @@
 //! set; if it is not annotated it is **fail-closed** (RED, not prompt-changeable,
 //! restart-required) — Requirement 5.3.
 
+use crate::config::settings_presentation::{
+    field_dependency, field_options, field_presentation, field_sentinels,
+};
 use crate::config::KriaConfig;
 use crate::safety::RiskLevel;
 
@@ -102,15 +105,38 @@ pub fn field_bounds(section: &str, field: &str) -> Option<(Option<f64>, Option<f
         ("agent", "min_confidence_to_act") | ("agent", "clarify_threshold") => {
             Some((Some(0.0), Some(1.0)))
         }
+        ("voice", "energy_threshold") | ("voice", "confidence_threshold") => {
+            Some((Some(0.0), Some(1.0)))
+        }
+        ("voice", "vad_silence_ms") => Some((Some(100.0), Some(10_000.0))),
+        ("voice", "partial_update_ms") => Some((Some(100.0), Some(30_000.0))),
         ("agent", "max_tool_rounds") => Some((Some(1.0), Some(100.0))),
         ("memory", "decay_threshold") => Some((Some(0.0), Some(1.0))),
         ("memory", "max_context_turns") => Some((Some(1.0), Some(500.0))),
         ("memory", "max_facts") => Some((Some(1.0), Some(1_000_000.0))),
         ("memory", "retrieval_top_k") => Some((Some(1.0), Some(200.0))),
+        ("memory", "token_budget") => Some((Some(1.0), Some(1_000_000.0))),
         ("safety", "hitl_timeout_secs") => Some((Some(5.0), Some(3600.0))),
+        ("safety", "tool_timeout_secs") => Some((Some(1.0), Some(3600.0))),
+        ("safety", "max_concurrent_tools") => Some((Some(1.0), Some(64.0))),
+        ("safety", "rollback_retention_hours") => Some((Some(0.0), Some(8760.0))),
         ("llm", "temperature") => Some((Some(0.0), Some(2.0))),
+        ("llm", "max_iterations") => Some((Some(1.0), Some(100.0))),
         ("llm", "context_window") => Some((Some(512.0), Some(1_048_576.0))),
         ("llm", "max_tokens") => Some((Some(1.0), Some(1_048_576.0))),
+        ("hardware", "max_context_tokens") => Some((Some(0.0), Some(1_048_576.0))),
+        ("hardware", "gpu_layers") => Some((Some(-1.0), Some(999.0))),
+        ("hardware", "threads") => Some((Some(0.0), Some(512.0))),
+        ("image_generation", "max_concurrent_jobs") => Some((Some(1.0), Some(16.0))),
+        ("remote_desktop", "idle_timeout_secs") => Some((Some(30.0), Some(86_400.0))),
+        ("remote_desktop", "max_fps") => Some((Some(1.0), Some(60.0))),
+        ("remote_desktop", "max_dimension") => Some((Some(320.0), Some(7680.0))),
+        // MGR-003 / F1.6.3 — bounded so a prompt/config edit cannot set an
+        // effectively-unbounded limit (defeating the purpose of the cap).
+        ("server", "max_body_bytes") => Some((Some(1024.0), Some(16.0 * 1024.0 * 1024.0))),
+        ("server", "request_timeout_secs") => Some((Some(1.0), Some(300.0))),
+        ("server", "max_concurrent_requests") => Some((Some(1.0), Some(4096.0))),
+        ("server", "remote_rate_limit_per_minute") => Some((Some(1.0), Some(100_000.0))),
         _ => None,
     }
 }
@@ -255,6 +281,28 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
             requires_backend: None,
         },
 
+        // ── Runtime profiles (YELLOW, restart-bound) ───────────────────────
+        ("llm", "routing_mode") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: Some(&["local", "gemini", "external"]),
+            synonyms: &["ai routing", "local model", "cloud model"],
+            requires_backend: None,
+        },
+        ("hardware", "tier") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: Some(&["", "lite", "standard", "performance", "high"]),
+            synonyms: &["hardware profile", "performance profile", "hardware tier"],
+            requires_backend: None,
+        },
+
         // ── Voice (YELLOW, per-session) ────────────────────────────────────
         ("voice", "enabled") => FieldMeta {
             risk: RiskLevel::Yellow,
@@ -358,6 +406,101 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
             temp_overridable: false,
             valid_values: Some(&["true", "false"]),
             synonyms: &["authentication", "auth", "login required", "server auth"],
+            requires_backend: None,
+        },
+        // MGR-003 / F1.6.1: explicit opt-in to bind kria-server to a
+        // non-loopback address. Restart-required (checked once at process
+        // startup by `kria_server::bind_security::validate_bind_security`
+        // before the listener opens) — flipping it live would not itself
+        // rebind the socket, so it is intentionally not hot-reloadable.
+        ("server", "remote_enabled") => FieldMeta {
+            risk: RiskLevel::Black,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true, // allowed but HITL-gated at BLACK in config_patch
+            temp_overridable: false,
+            valid_values: Some(&["true", "false"]),
+            synonyms: &[
+                "remote server",
+                "expose server",
+                "bind remote",
+                "non-loopback server",
+                "remote access to server",
+            ],
+            requires_backend: None,
+        },
+        // MGR-003 / F1.6.3 — remote-mode origin allowlist, transport
+        // attestation, and request/rate/concurrency limits. Restart-required
+        // like `remote_enabled`/`enable_auth` (checked once at process
+        // startup / router build, not re-evaluated live).
+        ("server", "allowed_origins") => FieldMeta {
+            risk: RiskLevel::Black,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true, // allowed but HITL-gated at BLACK in config_patch
+            temp_overridable: false,
+            valid_values: None,
+            synonyms: &[
+                "allowed origins",
+                "cors allowlist",
+                "cors origins",
+                "restrict origins",
+            ],
+            requires_backend: None,
+        },
+        ("server", "require_protected_transport") => FieldMeta {
+            risk: RiskLevel::Black,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: Some(&["true", "false"]),
+            synonyms: &[
+                "protected transport",
+                "tls required",
+                "require tls",
+                "reverse proxy tls",
+            ],
+            requires_backend: None,
+        },
+        ("server", "max_body_bytes") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: None,
+            synonyms: &["max body size", "request body limit", "max payload size"],
+            requires_backend: None,
+        },
+        ("server", "request_timeout_secs") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: None,
+            synonyms: &["request timeout", "request deadline"],
+            requires_backend: None,
+        },
+        ("server", "max_concurrent_requests") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: None,
+            synonyms: &["max concurrent requests", "concurrency limit"],
+            requires_backend: None,
+        },
+        ("server", "remote_rate_limit_per_minute") => FieldMeta {
+            risk: RiskLevel::Yellow,
+            hot_reload: false,
+            effect_kind: EffectKind::None,
+            prompt_changeable: true,
+            temp_overridable: false,
+            valid_values: None,
+            synonyms: &["rate limit", "requests per minute", "remote rate limit"],
             requires_backend: None,
         },
         ("safety", "emergency_mode") => FieldMeta {
@@ -630,9 +773,14 @@ pub fn all_fields() -> Vec<(String, String)> {
 /// restart badges + env-lock chips without hardcoding field knowledge.
 pub fn full_schema_json() -> serde_json::Value {
     let mut sections = serde_json::Map::new();
+    let mut baseline = KriaConfig::load_baseline_no_env();
+    baseline.redact_secrets();
+    let baseline_json = serde_json::to_value(baseline).unwrap_or(serde_json::Value::Null);
+
     for (section, field) in all_fields() {
         let secret = crate::config::is_secret_field(&section, &field);
         let meta = field_meta(&section, &field);
+        let presentation = field_presentation(&section, &field);
         let effect = match meta.effect_kind {
             EffectKind::None => "none",
             EffectKind::Infallible => "infallible",
@@ -642,6 +790,11 @@ pub fn full_schema_json() -> serde_json::Value {
         // (not hot-reloadable and no effect) can only take effect after restart.
         let restart_required = !meta.hot_reload && meta.effect_kind == EffectKind::None;
         let env_var = env_lock_var(&section, &field);
+        let (minimum, maximum) = field_bounds(&section, &field).unwrap_or((None, None));
+        let default_value = baseline_json
+            .get(&section)
+            .and_then(|value| value.get(&field))
+            .cloned();
         let entry = serde_json::json!({
             "risk": format!("{:?}", meta.risk).to_lowercase(),
             "hot_reload": meta.hot_reload,
@@ -653,7 +806,16 @@ pub fn full_schema_json() -> serde_json::Value {
             "env_lock_var": env_var,
             "requires_backend": meta.requires_backend,
             "valid_values": meta.valid_values,
+            "options": field_options(&section, &field, meta.valid_values),
+            "synonyms": meta.synonyms,
+            "minimum": minimum,
+            "maximum": maximum,
+            "default_value": default_value,
+            "sentinels": field_sentinels(&section, &field),
+            "dependency": field_dependency(&section, &field),
+            "presentation": presentation,
             "secret": secret,
+            "secret_action": if secret { "external" } else { "none" },
             "non_functional": is_non_functional(&section, &field),
         });
         sections

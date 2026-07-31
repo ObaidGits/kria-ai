@@ -149,6 +149,19 @@ impl DreamEngine {
     /// of active memories not accessed since `stale_cutoff_rfc3339`, so
     /// long-unused memories gradually lose retrieval priority (never deleted —
     /// D-8). Returns the number of memories recalibrated.
+    ///
+    /// F1.5.5: this is a lifecycle-maintenance authority mutation (it rewrites
+    /// `memories.decay_score`), so it records a `memory_audit` row in the same
+    /// transaction (MGR-033 AC3), matching [`Cognition::record_run`]'s pattern
+    /// for the other background-maintenance direct-SQL write. It is not routed
+    /// through [`AuthorityCommandBus`] because there is no `Correct` semantic
+    /// builder for a bulk decay sweep yet (F2 scope); the UPDATE predicate
+    /// itself is naturally idempotent (re-running with the same cutoff only
+    /// re-applies decay to rows still stale, converging toward the 0.1 floor
+    /// rather than duplicating any row or effect).
+    ///
+    /// [`Cognition::record_run`]: crate::memory::cognition::Cognition
+    /// [`AuthorityCommandBus`]: crate::memory::authority::AuthorityCommandBus
     pub fn recalibrate_worth(&self, stale_cutoff_rfc3339: &str) -> MemoryResult<usize> {
         let tx = self.db.begin()?;
         let n = tx
@@ -160,6 +173,19 @@ impl DreamEngine {
                 rusqlite::params![stale_cutoff_rfc3339],
             )
             .map_err(crate::memory::error::StorageError::Sqlite)?;
+        if n > 0 {
+            tx.conn()
+                .execute(
+                    "INSERT INTO memory_audit(id, ts, decision, reason, namespace) \
+                     VALUES(?1,?2,'stored',?3,'core')",
+                    rusqlite::params![
+                        crate::memory::ids::new_id().to_string(),
+                        chrono::Utc::now().to_rfc3339(),
+                        format!("dream.recalibrate_worth:recalibrated={n}"),
+                    ],
+                )
+                .map_err(crate::memory::error::StorageError::Sqlite)?;
+        }
         tx.commit()?;
         Ok(n)
     }
@@ -334,6 +360,47 @@ mod tests {
         let n = de.recalibrate_worth(&future).unwrap();
         assert_eq!(n, 1, "the stale active memory is recalibrated");
         assert!(rel.get_memory(m.id).unwrap().unwrap().decay_score < 1.0);
+
+        // F1.5.5: the authority mutation must leave an audit trail.
+        let (audit_count, reason): (i64, String) = db
+            .with_read(|c| {
+                Ok((
+                    c.query_row("SELECT COUNT(*) FROM memory_audit", [], |r| r.get(0))
+                        .map_err(crate::memory::error::StorageError::Sqlite)?,
+                    c.query_row("SELECT reason FROM memory_audit LIMIT 1", [], |r| r.get(0))
+                        .map_err(crate::memory::error::StorageError::Sqlite)?,
+                ))
+            })
+            .unwrap();
+        assert_eq!(audit_count, 1, "decay recalibration must be audited");
+        assert!(
+            reason.contains("recalibrated=1"),
+            "audit reason must record the count, got {reason:?}"
+        );
+
+        // A further call once the memory is no longer stale (touched since a
+        // past cutoff) repairs/audits nothing — no spurious audit growth.
+        db.write()
+            .execute(
+                "UPDATE memories SET last_accessed = ?2 WHERE id = ?1",
+                rusqlite::params![m.id.to_string(), chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let past = (chrono::Utc::now() - chrono::Duration::days(365)).to_rfc3339();
+        let n2 = de.recalibrate_worth(&past).unwrap();
+        assert_eq!(n2, 0, "no memory is stale relative to a past cutoff");
+        let audit_count_after: i64 = db
+            .with_read(|c| {
+                Ok(
+                    c.query_row("SELECT COUNT(*) FROM memory_audit", [], |r| r.get(0))
+                        .map_err(crate::memory::error::StorageError::Sqlite)?,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            audit_count_after, 1,
+            "a no-op recalibration must not add a spurious audit row"
+        );
     }
 
     #[test]

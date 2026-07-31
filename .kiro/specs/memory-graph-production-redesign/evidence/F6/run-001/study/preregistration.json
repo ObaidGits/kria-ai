@@ -1,0 +1,1190 @@
+{
+  "gate": "F6",
+  "runId": "run-001",
+  "status": "IN_PROGRESS",
+  "prerequisite": "F5 signed manifest with real release data",
+  "timestamp": "2025-07-29T00:00:00Z",
+  "note": "F6 preregistration is being built incrementally. Task 6.1.1 (selected task + depth rationale) is complete. Remaining protocol items (6.1.2–6.1.7: cohort, measures, thresholds, deletion rule) are deferred until F5 heavy-run evidence is available. The preregistration is NOT frozen until all 6.1.x sub-tasks are complete and F5 is signed.",
+
+  "task_6_1_2": {
+    "_comment": "Subtask 6.1.2 — Define one z-axis derived only from authority-backed semantics; reject decorative depth, centrality/confidence inference, or generated topology as meaning.",
+
+    "z_axis_formula": {
+      "definition": "z(node) = (1 − cosine_similarity(v_origin, v_node)) / 2",
+      "plain_english": "z is semantic distance from the query-origin entity, normalized to [0,1]. The origin sits at z=0 (identical to itself). A node whose embedding is maximally dissimilar to the origin sits at z=1. Intermediate path nodes are positioned proportionally to their cosine distance from the origin.",
+      "formula_inputs": {
+        "v_origin": "The 384-dimensional f32 L2-normalized embedding of the query-origin entity, retrieved from mem_vectors for the origin record_id under the pinned all-MiniLM-L6-v2 partition.",
+        "v_node": "The 384-dimensional f32 L2-normalized embedding of the path node, retrieved from mem_vectors for that node's record_id under the same partition.",
+        "cosine_similarity": "dot(v_origin, v_node) computed in f64 accumulation, equivalent to cosine similarity because both vectors are L2-normalized (manifest-required). Range: [−1, 1]. This is the same value SQLiteVectorStore.exact_search returns as strategy_score."
+      },
+      "range": "[0.0, 1.0] inclusive",
+      "monotonicity": "z=0 means semantically identical to origin; z=1 means maximally dissimilar. Higher z = semantically farther from origin."
+    },
+
+    "authority_source": {
+      "primary_table": "retrieval_trace_items",
+      "primary_column": "strategy_score",
+      "filter_condition": "strategy = 'vector'",
+      "join_path": "retrieval_trace_items.record_id → mem_vectors.(partition_id, record_id) where partition_id matches the active all-MiniLM-L6-v2 partition from embedding_partitions",
+      "backing_store": "mem_vectors — (partition_id, record_id) PK, vector BLOB 1536 bytes (384 × f32le), content_hash, policy columns, truth_state, revision",
+      "model_identity": "all-MiniLM-L6-v2, 384 dimensions, served via ONNX Runtime (ort crate) with WordPiece tokenizers pipeline, L2-normalized at index time, pinned by manifest checksum in embedding_partitions",
+      "computation_site": "SQLiteVectorStore.exact_search — prefilters partition + policy + truth state, decodes BLOB safely, computes dot(q,v) in f64 accumulation, returns Vec<VectorHitV2> sorted descending by score",
+      "score_semantics": "strategy_score in retrieval_trace_items is the raw cosine similarity value ∈ [−1,1] for that record against the query vector. This is the sole authority-backed numerical signal used to derive z.",
+      "non_authoritative_note": "mem_vectors and retrieval traces are derived, rebuildable projections (design §2 A1, A8). They are non-authoritative as records but are the only permitted source of vector similarity scores. No other signal may be substituted."
+    },
+
+    "rejected_approaches": [
+      {
+        "name": "Decorative depth",
+        "description": "Assigning z-values based on visual aesthetics, layout symmetry, readability heuristics, or any criterion not derived from stored semantic data.",
+        "rejection_reason": "Violates A4 (epistemic truth): no visible claim may be invented. A z-position that exists only to look good carries no semantic meaning and misleads the user about the path's structure.",
+        "examples": ["fixed z per hop index without cosine weighting", "jitter/noise added for visual separation", "z chosen to minimize edge crossings"]
+      },
+      {
+        "name": "Centrality metrics (betweenness, closeness, degree, PageRank)",
+        "description": "Deriving z from graph-topology centrality scores such as betweenness centrality, closeness centrality, degree centrality, or eigenvector/PageRank variants.",
+        "rejection_reason": "Centrality is a property of the graph as a whole, not a property of a node's semantic relationship to the query-origin entity. It is topology-derived, changes as nodes are added/removed, and has no grounding in the stored vector authority. Mapping a structural role to a spatial position creates a false semantic impression. Furthermore, computing centrality at query time introduces unbounded computation over the full authorized graph, violating A6 (boundedness).",
+        "examples": ["betweenness centrality rank as z", "closeness centrality as z", "degree / max_degree as z"]
+      },
+      {
+        "name": "Confidence inference / model-generated probability",
+        "description": "Deriving z from a language model's confidence or probability output, a reranker score, an inferred relevance estimate, or any score that was not computed deterministically from stored authority data.",
+        "rejection_reason": "Confidence scores from generative or probabilistic models are not stored in the authority schema, are not reproducible from a fixed revision, and cannot be audited against a specific graph_revision. Using them would violate A1 (SQLite sole authority), A4 (no invented claims), and A8 (rebuildability). The retrieval pipeline's RRF fusion score is also excluded: rrf_contribution in retrieval_trace_items reflects fusion rank, not semantic distance from origin.",
+        "examples": ["LLM token probability as z", "reranker confidence as z", "rrf_contribution or injected_order as z", "strategy_rank (ordinal) as z without cosine backing"]
+      },
+      {
+        "name": "Generated topology / force-directed layout position",
+        "description": "Deriving z from the output of a force-directed layout algorithm, a spring simulation, a dimensionality-reduction projection (t-SNE, UMAP, PCA), or any position that emerges from the renderer's layout pass.",
+        "rejection_reason": "Layout positions are renderer artifacts: they depend on viewport size, iteration count, seed, other nodes present, and algorithm parameters. They carry no semantic authority and change across renders. Treating a layout coordinate as a semantic depth value would couple the semantic model to a rendering implementation, violating A10 (representation parity) and A4. The scene/layout layer is a disposable projection (design §3); it must consume the z-axis value, not produce it.",
+        "examples": ["force-directed y-coordinate repurposed as z", "UMAP third dimension as z", "spring-simulation equilibrium depth as z"]
+      }
+    ],
+
+    "normalization_contract": {
+      "input_range": "cosine_similarity ∈ [−1.0, 1.0]; guaranteed by L2-normalized vectors and f64 dot product in SQLiteVectorStore.exact_search",
+      "formula": "z = (1.0 − cosine_similarity) / 2.0",
+      "output_range": "[0.0, 1.0]",
+      "anchor_points": {
+        "cosine_1.0": "z = 0.0 — identical direction (origin node or exact duplicate)",
+        "cosine_0.0": "z = 0.5 — orthogonal / uncorrelated",
+        "cosine_-1.0": "z = 1.0 — maximally opposite direction"
+      },
+      "division_constant": 2.0,
+      "arithmetic_precision": "Computed in f64; stored as f32 in the scene DTO; display precision ≤ 4 decimal places",
+      "no_per-path_rescaling": "z-values are absolute distances from origin, not rescaled per path. Two paths sharing an intermediate node must assign it the same z regardless of which path surface it is displayed on. Rescaling to fill [0,1] per path would invent relative meaning that does not exist in the authority data.",
+      "no_global_normalization": "z is not normalized against the maximum cosine score observed in the current path set. The formula is fixed and closed-form. There is no min-max normalization step that depends on runtime data."
+    },
+
+    "edge_cases": {
+      "origin_node": {
+        "z_value": 0.0,
+        "rationale": "cosine_similarity(v_origin, v_origin) = 1.0 (L2-normalized vector dotted with itself). Formula gives (1−1)/2 = 0.0. This is exact, not approximate."
+      },
+      "node_with_no_vector_score": {
+        "z_value": null,
+        "display": "Unavailable",
+        "rationale": "If retrieval_trace_items contains no row for this record_id with strategy='vector', or if mem_vectors has no entry for this record under the active partition, z is Unavailable. No z-value may be inferred, estimated, or defaulted to a non-null placeholder. The node is rendered at z=Unavailable; the renderer must handle this gracefully (e.g., place at a visually distinct Unavailable tier or omit from the depth channel without hiding the node).",
+        "forbidden": "Setting z=0.5 (orthogonal) or any numeric default as a substitute for a missing score is a protocol violation."
+      },
+      "cycle_placeholder_node": {
+        "z_value": null,
+        "display": "Unavailable",
+        "rationale": "pathScene.ts emits navigation-container placeholders for repeated semantic IDs (cycle detection). A placeholder is not a real node; it has no record_id resolvable in mem_vectors. Assigning it a z-value from the originating node's score would conflate two different path positions. z=null/Unavailable is the only honest representation.",
+        "forbidden": "Copying the z-value of the originating node to its cycle placeholder."
+      },
+      "duplicate_embeddings": {
+        "z_value": "computed normally",
+        "rationale": "If two distinct records happen to share an identical or near-identical embedding (cosine ≈ 1.0), each receives its own z computed from its own strategy_score. Deduplication is a retrieval concern (design §6.4 step 4); the z-axis formula does not deduplicate."
+      },
+      "path_destination_node": {
+        "z_value": "computed normally from its strategy_score",
+        "rationale": "The destination entity's z is its true cosine distance from the origin. It is not forced to z=1.0. If the destination happens to be semantically close to the origin (e.g., two nodes about the same topic connected via an indirect path), its z will be low. This is correct and expected."
+      }
+    },
+
+    "immutability_statement": {
+      "status": "FROZEN — this definition is preregistered before any F6 implementation work begins",
+      "frozen_at_task": "6.1.2",
+      "what_is_frozen": [
+        "The formula: z = (1 − cosine_similarity(v_origin, v_node)) / 2",
+        "The authority source: retrieval_trace_items.strategy_score where strategy='vector', backed by mem_vectors and the pinned all-MiniLM-L6-v2 partition",
+        "The normalization contract: closed-form, no per-path or global rescaling",
+        "The edge-case assignments: origin=0.0, no-vector=null, cycle-placeholder=null",
+        "The set of rejected approaches: decorative depth, centrality metrics, confidence inference, generated topology"
+      ],
+      "protocol_violation_conditions": [
+        "Using any column other than strategy_score from retrieval_trace_items for z computation",
+        "Using rrf_contribution, strategy_rank, injected_order, or any RRF-derived field as a z proxy",
+        "Applying per-path min-max normalization or any runtime rescaling",
+        "Substituting a numeric default (including 0.5 or hop_index/max_hop) when strategy_score is absent",
+        "Deriving z from layout coordinates, centrality, or model-generated confidence at any point",
+        "Changing the formula constant (÷2 → ÷1 or any other divisor) without a new preregistration revision"
+      ],
+      "deviation_consequence": "Any runtime deviation from this frozen definition is a study protocol violation and triggers an automatic NO-GO for F6 gate advancement. The F6 GO/NO-GO decision recorded in preregistration.json becomes invalid and must be re-preregistered with a new run-id before any study data is collected.",
+      "amendment_process": "A change to this definition requires: (1) a new task_6_1_2_rev entry in this file, (2) an explicit reason stating why the original definition was wrong or incomplete, (3) confirmation that no study data has yet been collected under the prior definition, and (4) a new preregistration timestamp before data collection resumes."
+    }
+  },
+
+  "task_6_1_3": {
+    "_comment": "Subtask 6.1.3 — Freeze participants/cohort, fixtures, training, counterbalancing, exclusions, task-time/error measures, analysis, and context-loss/a11y observation protocol. SINGLE-DEVELOPER CONTEXT: the owner/developer is the sole study participant. This is a significant methodological limitation acknowledged explicitly below.",
+
+    "participants": {
+      "cohort_description": "Single participant: the owner and developer of the KRIA system. This person has intimate knowledge of the codebase, fixtures, and design rationale. This is NOT a naive user study. The results are scoped to self-assessment by the single developer and cannot be generalized to other users.",
+      "participant_id": "owner-developer-001",
+      "n_participants": 1,
+      "acknowledged_limitations": [
+        "Familiarity bias: the participant knows the system intimately, which may reduce task time for both conditions relative to a naive user.",
+        "No between-subject variance: all measurements are within-subject across repeated sessions. There is no independent replication.",
+        "Social desirability / confirmation bias: the participant may unconsciously favour the condition they prefer (3D). This is partially mitigated by counterbalancing and blinded trial-level analysis.",
+        "Single-laptop hardware: results are bound to the reference hardware environment (RHW-001 as defined in the F0/F5 baseline protocol). GPU/CPU profile influences 3D frame budget directly.",
+        "No sample size justification for population inference: the study does not claim to represent any population. The 10% threshold is a self-imposed quality bar for this one developer's workflow."
+      ],
+      "minimum_trial_repetitions": {
+        "trials_per_condition": 30,
+        "rationale": "Wilcoxon signed-rank test requires ≥6 pairs for a non-trivial p-value; 30 paired trials per condition provides adequate power for detecting a ≥10% median shift given expected within-session variance. 30 is the minimum; more trials are preferred. Fewer than 30 usable trials in either condition requires re-running that condition before analysis.",
+        "total_path_query_budget": 60,
+        "trials_per_session": 10,
+        "minimum_sessions_per_condition": 3
+      },
+      "immutability_statement": "Cohort frozen at task 6.1.3. No additional participants may be added post-hoc to improve significance. The single-participant limitation must be disclosed in any report of results."
+    },
+
+    "fixtures": {
+      "study_fixture": {
+        "fixture_id": "mg-medium-v2",
+        "version": "0.1.0",
+        "seed_hex": "0x4D475203",
+        "seed": 1296519683,
+        "total_records": 10000,
+        "entity_count": 907,
+        "schema_version": 2,
+        "model": "all-MiniLM-L6-v2",
+        "path_dir": "tests/fixtures/memory-graph/generated/mg-medium-v2/0.1.0/",
+        "rationale": "mg-medium-v2 (10,000 records, 907 entity-kind records) provides sufficient graph density for multi-hop path exploration to be non-trivial. It is the smallest fixture with enough entity nodes that 1/2/3-hop paths are meaningfully distinct in z-depth."
+      },
+      "training_fixture": {
+        "fixture_id": "mg-small-v2",
+        "version": "0.1.0",
+        "seed_hex": "0x4D475202",
+        "seed": 1296519682,
+        "total_records": 1000,
+        "entity_count": 90,
+        "schema_version": 2,
+        "model": "all-MiniLM-L6-v2",
+        "path_dir": "tests/fixtures/memory-graph/generated/mg-small-v2/0.1.0/",
+        "rationale": "mg-small-v2 is used exclusively for training trials. It is deliberately distinct from the study fixture so that the participant does not memorize specific paths before the study begins."
+      },
+      "preregistered_path_queries": {
+        "count": 30,
+        "hop_distribution": {
+          "1_hop": 10,
+          "2_hop": 10,
+          "3_hop": 10
+        },
+        "selection_method": "Path queries are selected from mg-medium-v2 by the study protocol generator using seed 0x4D475203 slice offset 0x100 (distinct from the fixture generator main seed region). The generator must enumerate all graph paths in the authority-backed mg-medium-v2 relationship graph, group them by hop count, and draw 10 from each group using deterministic splitmix64 sampling. The resulting 30 (origin_entity_id, destination_entity_id) pairs are recorded below in the immutable_path_pairs field.",
+        "immutable_path_pairs": "TO BE GENERATED: Before any study session begins, run CMD-MG-STUDY-PATHS to enumerate and record exactly 30 (origin, destination) pairs from mg-medium-v2. These pairs are appended here and frozen. Any addition or removal of pairs after this point is a protocol violation.",
+        "immutable_path_pairs_status": "PENDING — must be generated and appended before the first study session",
+        "path_pair_generation_command": "CMD-MG-STUDY-PATHS",
+        "mutation_prohibition": "Once path pairs are recorded, they are immutable. If a path is unreachable in a given session (e.g., due to a schema migration), that trial is excluded per the exclusion criteria below — the path pair list is NOT modified."
+      },
+      "fixture_immutability": {
+        "status": "FROZEN at task 6.1.3",
+        "what_is_frozen": [
+          "The fixture IDs and versions: mg-medium-v2/0.1.0 for study, mg-small-v2/0.1.0 for training.",
+          "The fixture generator seeds and schema versions.",
+          "The path query selection method and seed offset.",
+          "The rule that study and training fixtures are always distinct."
+        ],
+        "protocol_violation_conditions": [
+          "Using a different fixture for study trials after this preregistration is frozen.",
+          "Using mg-medium-v2 for training (train-study overlap is forbidden).",
+          "Regenerating mg-medium-v2 with a different seed or version bump after preregistration.",
+          "Adding or removing path pairs from immutable_path_pairs after their initial generation."
+        ]
+      }
+    },
+
+    "training": {
+      "purpose": "Familiarise the participant with the UI interaction mechanics for a given condition before study trials begin. Training is NOT intended to make the participant expert — it sets a minimum competency floor so that timing variability reflects interface comprehension, not motor confusion.",
+      "training_fixture_used": "mg-small-v2/0.1.0 (see fixtures.training_fixture above)",
+      "training_tasks": [
+        "Open the Knowledge destination.",
+        "Select an origin entity from the Knowledge list.",
+        "Use the 'Find path' action to identify a destination entity.",
+        "Read the path result in the active condition's representation (SemanticList + Graph2D for 2D/list condition; SemanticList + optional 3D view for 3D condition).",
+        "Click the correct destination entity in the Inspector and confirm its display name.",
+        "Repeat for a second training path query."
+      ],
+      "training_path_count": 2,
+      "training_pass_criterion": "The participant must successfully identify the correct destination entity in the Inspector for BOTH training paths. A path is successfully completed if the correct entity (matching the preregistered destination entity_id) is selected in the Inspector within a 5-minute time limit per training path. If either training path fails (wrong entity selected, or time limit exceeded), training is repeated with a new randomly-selected training path pair from mg-small-v2 until the pass criterion is met.",
+      "condition_symmetry": {
+        "requirement": "Training is identical in structure for both conditions. The number of training tasks, the pass criterion, the time limit, and the fixture are the same for 2D/list and 3D conditions. Only the visual representation layer differs (the condition being trained).",
+        "verification": "The study log must record the training start time, path pairs used, number of attempts, and pass/fail outcome for each condition before recording any study trials for that condition."
+      },
+      "no_study_data_in_training": "Task-time and error measurements do NOT begin during training. The measurement clock starts only after the participant explicitly signals readiness to begin study trials (confirmed via keyboard shortcut or UI control logged with a 'study_start' event).",
+      "training_washout": "If the participant re-enters training for a condition (e.g., after a long break or a context switch), the training pass criterion must be re-demonstrated before resuming study trials for that condition."
+    },
+
+    "counterbalancing": {
+      "design": "ABBA over sessions for one participant",
+      "rationale": "With a single participant, random assignment is not applicable. ABBA balances order effects (learning, fatigue, time-of-day) across sessions. Session ordering is fixed before data collection and must not change.",
+      "session_plan": [
+        { "session": 1, "condition": "2D_list", "label": "A" },
+        { "session": 2, "condition": "3D",      "label": "B" },
+        { "session": 3, "condition": "3D",      "label": "B" },
+        { "session": 4, "condition": "2D_list", "label": "A" }
+      ],
+      "extension_rule": "If more than 4 sessions are run (e.g., to reach the minimum 30 trials per condition), extend with the pattern ABBA|ABBA|... maintaining balance. The extension must be decided before any additional sessions begin, not after inspecting results.",
+      "washout_period": {
+        "minimum_between_conditions": "24 hours between the last session of one condition and the first session of a different condition",
+        "minimum_between_sessions_same_condition": "2 hours",
+        "rationale": "24-hour washout reduces condition-specific adaptation carry-over. 2-hour minimum for same-condition sessions reduces acute fatigue effects.",
+        "enforcement": "Session start timestamps are recorded. A session that begins before the washout period has elapsed is classified as an excluded session (see exclusions)."
+      },
+      "session_ordering_rule": "The ABBA sequence is determined at preregistration time (this document). The participant may not choose the condition order at session time. If a scheduled session cannot occur, it is postponed, not reordered.",
+      "learning_effect_reporting": "The analysis must report trial-level time series across sessions to make any learning trend visible. This is exploratory and supplementary; the primary analysis uses aggregate medians across all valid trials per condition."
+    },
+
+    "exclusions": {
+      "trial_level_exclusions": [
+        {
+          "criterion": "WebGL context loss during the trial",
+          "description": "The 3D renderer loses its WebGL context after the path query is submitted but before the participant selects the correct entity in the Inspector.",
+          "action": "Exclude the trial. Record the context loss event with timestamp and trial index. The study log must capture the renderer_context_loss event from the context-loss observation protocol below.",
+          "level": "trial"
+        },
+        {
+          "criterion": "System crash or application hang",
+          "description": "The Tauri application crashes, freezes, or becomes unresponsive for >10 seconds during a trial.",
+          "action": "Exclude the trial. Record the crash/hang event. Resume from the next scheduled path pair.",
+          "level": "trial"
+        },
+        {
+          "criterion": "Participant abandons the trial",
+          "description": "The participant explicitly skips or aborts a trial (e.g., presses an escape sequence, or verbally logs an abandonment note) before selecting an entity.",
+          "action": "Exclude the trial. Record the abandonment reason in the session log.",
+          "level": "trial"
+        },
+        {
+          "criterion": "Path becomes unreachable",
+          "description": "A preregistered path pair is unreachable in the current graph state (e.g., entities deleted or unlinked due to a schema migration).",
+          "action": "Exclude the trial. Do not replace the pair. Record the unreachable reason.",
+          "level": "trial"
+        },
+        {
+          "criterion": "Measurement boundary violation",
+          "description": "The task clock was not started at the correct moment (path query submission) or the correct termination event (entity confirmed in Inspector) was not captured.",
+          "action": "Exclude the trial. A trial with missing or ambiguous timing boundaries cannot be used for the primary analysis.",
+          "level": "trial"
+        }
+      ],
+      "session_level_exclusions": [
+        {
+          "criterion": "Washout period violation",
+          "description": "The session began before the required washout period elapsed.",
+          "action": "Exclude the entire session. Do not use any trial data from the session.",
+          "level": "session"
+        },
+        {
+          "criterion": "Training pass criterion not met before study trials",
+          "description": "Study trials were recorded without the participant first passing the 2-path training criterion for the session's condition.",
+          "action": "Exclude the entire session.",
+          "level": "session"
+        },
+        {
+          "criterion": "Fixture mismatch",
+          "description": "The session was run against a fixture other than the preregistered mg-medium-v2/0.1.0 (e.g., a regenerated fixture or a different version).",
+          "action": "Exclude the entire session.",
+          "level": "session"
+        },
+        {
+          "criterion": ">50% of trials excluded",
+          "description": "More than half of the trials in a session are individually excluded by trial-level criteria.",
+          "action": "Exclude the entire session and record the dominant exclusion reason.",
+          "level": "session"
+        }
+      ],
+      "exclusion_reporting_requirement": "All excluded trials and sessions must be reported in the study results, including counts and reasons. Exclusion rates above 20% across all trials in either condition are a warning flag and must be discussed in the analysis.",
+      "no_post_hoc_exclusion": "Exclusion criteria are frozen at preregistration. No new exclusion criterion may be created after data collection begins. Applying an unregistered exclusion criterion invalidates the study."
+    },
+
+    "measures": {
+      "primary": [
+        {
+          "name": "task_completion_time_ms",
+          "description": "Elapsed time in milliseconds from path query submission to correct entity confirmed in Inspector.",
+          "measurement_start": "The moment the path query request is dispatched to GraphQueryPort (the 'path query submitted' event logged by the UI with a high-resolution timestamp). This is NOT the moment the user begins reading the results — it is the query dispatch moment.",
+          "measurement_end": "The moment the participant clicks (or keyboard-activates) the correct destination entity in the Inspector and the Inspector panel visually confirms the entity (entity_confirmed event logged with record_id and timestamp). The entity is 'correct' if its record_id matches the preregistered destination entity_id for that path pair.",
+          "unit": "milliseconds",
+          "precision": "1 ms (system clock resolution; ±10 ms measurement uncertainty acceptable)",
+          "boundary_note_wrong_selections": "Time continues running through incorrect entity selections. The clock stops only on the correct entity confirmation.",
+          "boundary_note_loading": "If the path result has not loaded within 5 seconds of query dispatch, the trial is not started (the participant waits). The measurement clock starts only after the path result is fully rendered and visible.",
+          "boundary_note_context_loss": "If WebGL context loss occurs after the clock has started, the trial is excluded regardless of whether the participant eventually completes it."
+        },
+        {
+          "name": "error_count",
+          "description": "Count of incorrect entity selections (wrong entity clicked/activated in Inspector) before the correct entity is selected.",
+          "measurement_start": "Same as task_completion_time_ms — after path result is rendered.",
+          "measurement_end": "Correct entity confirmed in Inspector.",
+          "unit": "integer count (0 = first selection was correct)",
+          "boundary_note": "An 'incorrect selection' is any activation of an entity in the Inspector whose record_id does not match the preregistered destination entity_id for that trial. Hovering, scrolling, or examining a node without activating the Inspector does NOT count as an error."
+        }
+      ],
+      "secondary": [
+        {
+          "name": "path_identification_accuracy",
+          "description": "Binary: was the correct path (the preregistered A→...→B route) identified and selected, or did the participant select a different entity that happens to connect to the destination via an alternate route?",
+          "measurement": "After each trial, the session log records the sequence of entity IDs activated. Path accuracy is 1 if the intermediate nodes traversed match the preregistered path, 0 if the participant took a different route to reach the destination.",
+          "note": "This is a secondary measure only. It does not affect GO/NO-GO. It is collected to understand whether depth encoding guides users toward the specific preregistered path or allows faster arrival via alternate routes.",
+          "unit": "binary (0 or 1)"
+        },
+        {
+          "name": "time_to_first_correct_node",
+          "description": "Time from query dispatch to the first intermediate node (not the destination) that lies on the preregistered path being clicked in the Inspector.",
+          "unit": "milliseconds",
+          "note": "Secondary exploratory measure. Not used in the primary Wilcoxon analysis."
+        }
+      ],
+      "measurement_boundary_summary": {
+        "clock_starts": "GraphQueryPort path query dispatch event (logged by UI event instrumentation)",
+        "clock_stops": "Inspector entity_confirmed event for the preregistered destination entity_id",
+        "what_is_not_measured": [
+          "Time to load or render the result (excluded from measurement, trial does not start until result is fully rendered)",
+          "Time during wrong entity inspections that do not activate the Inspector entity_confirmed event",
+          "Time after correct entity confirmed (e.g., reading inspector content)"
+        ]
+      }
+    },
+
+    "analysis": {
+      "primary_test": {
+        "name": "Wilcoxon signed-rank test",
+        "rationale": "Appropriate for paired non-normal distributions. The 30 paired trials (one time per condition per path pair) are not assumed to be normally distributed. The test compares the paired median differences without parametric assumptions.",
+        "pairing": "Each trial is paired by path query index: trial_i_2D vs trial_i_3D for the same preregistered path pair i. If one condition's trial for pair i is excluded while the other is not, that pair is dropped from the paired analysis (listwise deletion per pair).",
+        "direction": "Two-tailed. Both improvements AND degradations are reported. The preregistration does not assume 3D is better.",
+        "alpha": 0.05,
+        "minimum_valid_pairs": 20,
+        "below_minimum_action": "If fewer than 20 valid pairs remain after exclusions, the study is considered underpowered and produces an inconclusive result, which is treated as NO-GO per the deletion rule."
+      },
+      "effect_size": {
+        "metric": "Median percentage difference",
+        "formula": "((median_3D - median_2D) / median_2D) * 100",
+        "unit": "percent",
+        "sign_convention": "Negative = 3D is faster / fewer errors (improvement). Positive = 3D is slower / more errors (degradation). Both are reported.",
+        "threshold_reference": "The ≥10% improvement threshold is defined in task_6_1_4 (to be preregistered). The analysis here computes the effect size; the GO/NO-GO threshold is applied in task_6_1_4."
+      },
+      "confidence_interval": {
+        "method": "Bootstrap CI",
+        "type": "95% bootstrap confidence interval over trial medians",
+        "bootstrap_samples": 10000,
+        "bootstrap_seed": "0x4D475230 (fixed for reproducibility)",
+        "unit": "milliseconds for task_completion_time_ms; count for error_count",
+        "interpretation": "If the CI for the median difference includes zero for both primary measures, the result is considered inconclusive."
+      },
+      "what_is_reported": [
+        "Median task_completion_time_ms per condition with 95% bootstrap CI",
+        "Median error_count per condition with 95% bootstrap CI",
+        "Wilcoxon W statistic and two-tailed p-value for each primary measure",
+        "Median percentage difference (effect size) for each primary measure",
+        "Number of valid pairs, excluded trials, excluded sessions with reasons",
+        "Trial-level time series for learning effect inspection",
+        "Secondary measures (path_identification_accuracy, time_to_first_correct_node) as exploratory only"
+      ],
+      "no_post_hoc_metric_changes": {
+        "statement": "The primary measures (task_completion_time_ms, error_count), the statistical test (Wilcoxon signed-rank), the effect size formula, and the CI method are frozen at preregistration. No metric definition, boundary, or analysis method may change after data collection begins. Any deviation from these methods is a protocol violation and invalidates the study."
+      },
+      "degradation_reporting": {
+        "requirement": "If the 3D condition produces worse median task time or higher median error count than 2D, this MUST be reported. There is no threshold below which a degradation is not reported. A degradation on either primary measure is a NO-GO signal for the ≥10% benefit threshold."
+      }
+    },
+
+    "context_loss_a11y_protocol": {
+      "_comment": "This protocol governs what is observed and recorded when the 3D renderer loses WebGL context mid-task, and establishes the keyboard-only and Orca screen reader baseline check for each condition.",
+
+      "webgl_context_loss_protocol": {
+        "trigger_definition": "A WebGL context loss event is defined as the browser/WebKitGTK WebGL context firing the 'webglcontextlost' event on the canvas element used by the 3D renderer, or any renderer state where 3D rendering visually stops and the system falls back to the 2D/list representation.",
+        "what_is_observed": [
+          "Timestamp of the context loss event (logged by the renderer event handler with window.performance.now() precision).",
+          "Trial index and path pair at the time of context loss.",
+          "Whether the context loss occurred before or after the measurement clock started (query dispatch event).",
+          "Whether the fallback to 2D/list representation completed successfully (the same path query result is visible in SemanticList and Graph2D within 2 seconds of context loss).",
+          "Whether the participant's current focus and pending entity selection state was preserved after fallback.",
+          "Whether any pending Inspector entity_confirmed event was lost or duplicated."
+        ],
+        "what_is_recorded": "A 'context_loss_event' entry in the session log with fields: timestamp_ms, trial_index, path_pair_id, clock_state (before_dispatch|after_dispatch|after_result_rendered), fallback_completed (bool), fallback_latency_ms, focus_preserved (bool), pending_state_preserved (bool).",
+        "trial_disposition": "Any trial with a context loss event after query dispatch is excluded per the trial-level exclusion criteria. The context_loss_event is still recorded even for excluded trials.",
+        "fallback_verification": "After each 3D session, the study log must confirm that at least one simulated context loss was induced (using the renderer's debug context loss trigger) to verify the fallback path is functional. This is an observation check, not a study trial."
+      },
+
+      "keyboard_only_navigation_baseline": {
+        "purpose": "Verify that the Find Path workflow is operable via keyboard alone in both conditions before the study begins for that condition.",
+        "protocol": [
+          "With mouse disconnected (or pointer events disabled in devtools), complete one full path query using only keyboard navigation: Tab to Knowledge destination, navigate entity list with arrow keys, activate Find Path, navigate path result, activate Inspector on destination entity.",
+          "Record whether each step is achievable without mouse, including: focus visibility at every step, whether all interactive elements are reachable in logical tab order, and whether the correct entity can be confirmed in the Inspector via keyboard."
+        ],
+        "pass_criterion": "All five steps completable by keyboard alone with visible focus at each step.",
+        "when_run": "Once per condition, immediately before the first study trial for that condition (after training).",
+        "what_is_recorded": "A 'keyboard_baseline' entry in the session log: condition, pass (bool), steps_failed (list), notes.",
+        "failure_action": "If keyboard navigation fails for any condition, that condition is flagged as a11y_non_compliant. The study may continue, but the GO decision for that condition requires an a11y remediation before F6 finalisation. This does not exclude trials but does affect the GO/NO-GO a11y parity requirement in task_6_1_4."
+      },
+
+      "orca_screen_reader_observation": {
+        "purpose": "Observe whether Orca announces path result nodes meaningfully in both conditions, specifically: entity names, hop structure, and the Inspector content upon entity activation.",
+        "protocol": [
+          "Enable Orca screen reader (orca --replace) on the reference hardware before the observation session.",
+          "Navigate to the Knowledge destination and submit a path query.",
+          "Observe and record: (a) whether path result nodes are announced with their display names, (b) whether hop position or depth information is conveyed verbally, (c) whether Inspector entity confirmation is announced.",
+          "Repeat the observation for both the 2D/list condition and the 3D condition.",
+          "Record Orca output verbatim or via transcript tool for each observation."
+        ],
+        "what_is_recorded": "An 'orca_observation' entry for each condition: condition, path_pair_used, node_names_announced (bool), hop_structure_announced (bool), inspector_confirmation_announced (bool), orca_transcript_excerpt (string, first 500 chars), issues (list).",
+        "when_run": "Once per condition, as a standalone observation session separate from study trials. Orca must be disabled during actual study trials to avoid timing distortion.",
+        "failure_action": "Failures to announce entity names or Inspector confirmation are recorded as a11y findings. Findings must be addressed before GO per the a11y parity requirement. Orca observation does not exclude study trials.",
+        "scope_note": "This is an observation protocol, not a certified WCAG audit. Full accessibility validation requires manual expert review and additional AT testing beyond what this protocol covers."
+      },
+
+      "immutability_statement": {
+        "status": "FROZEN at task 6.1.3",
+        "what_is_frozen": [
+          "The definition of a WebGL context loss event and what is observed/recorded.",
+          "The trial exclusion rule for mid-task context loss.",
+          "The keyboard-only navigation baseline steps and pass criterion.",
+          "The Orca observation protocol structure and what is recorded.",
+          "The timing of each check (before first study trial for that condition)."
+        ],
+        "protocol_violation_conditions": [
+          "Running study trials before the keyboard baseline check for that condition.",
+          "Running study trials with Orca enabled.",
+          "Modifying the context loss observation fields after data collection begins.",
+          "Omitting the context loss simulation verification at session end."
+        ]
+      }
+    }
+  },
+
+  "task_6_1_1": {
+    "_comment": "Subtask 6.1.1 — Select one F5-supported user task and state why depth could improve it versus the complete 2D/list baseline.",
+
+    "selected_task": "Multi-hop path exploration between two entities in the Knowledge destination",
+
+    "f5_workflow_reference": {
+      "destination": "Knowledge",
+      "source_file": "ui/src/shell/spaces/memory/destinations/Knowledge.tsx",
+      "action_kind": "path",
+      "action_label": "Find path",
+      "scene_module": "ui/src/shell/spaces/memory/scene/pathScene.ts",
+      "backend_api": "GraphQueryPort — path query variant (graph traversal ≤3 hops, cycle-safe, ≤120 visited nodes)",
+      "description": "The user selects one entity in the Knowledge list, then clicks 'Find path' on a second entity. The backend returns an ordered sequence of nodes A→B→C→D (up to 3 hops), and the UI renders it as a flat ordered list via buildPathScene(). Cycle-safe placeholders are emitted for repeated semantic IDs. The 2D canvas (Graph2D) renders the same sequence as a flat plane of connected nodes."
+    },
+
+    "baseline_description": {
+      "representation": "Flat ordered list (SemanticList) and flat 2D canvas (Graph2D)",
+      "what_it_shows": "Nodes are sequenced A→B→C→D left-to-right or top-to-bottom. Hop distance from the origin is encoded only by list position (integer index). All hops share one visual plane — no visual separation between 'close to origin' and 'far from origin'. The canvas spreads nodes with a force-directed or grid layout; z=0 for every node.",
+      "why_sufficient": "The flat list is complete and unambiguous: the user can read the path, click any node to inspect it, follow the chain, and understand the route. The list is accessible, stable, and requires no 3D capability. For paths ≤3 hops (≤4 nodes), the list is not cognitively demanding — a human can hold 4 sequential items in working memory without a spatial aid.",
+      "where_it_struggles": "When the user explores multiple candidate paths simultaneously (e.g., comparing two routes A→B→C→D vs A→E→F→D), the 2D plane forces both paths into the same visual space. Layout algorithms must separate them horizontally or vertically, competing with each other. The user cannot immediately perceive which intermediate node is semantically 'closer' to the query origin versus the destination — they must count hops or re-read labels. Critically, the flat plane encodes hop count via position only, not via any visual channel that scales naturally with path length."
+    },
+
+    "depth_hypothesis": {
+      "z_axis_semantics": "z = semantic distance from the query-origin entity, where z=0 is the origin and z=max is the destination. Each hop step increments z by one unit. Intermediate nodes whose embedding-cosine similarity to the origin is high are pulled toward z=0; nodes whose similarity is low are pushed toward z=max. This makes the z-axis authority-backed (cosine similarity from the pinned all-MiniLM-L6-v2 384d vectors) rather than decorative.",
+      "authority_backing": "Vector cosine similarity scores are already computed by SQLiteVectorStore.exact_search and stored as retrieval strategy contributions in retrieval_trace_items. The same similarity score that drives RRF fusion can be repurposed to position nodes on the z-axis. This is not an invented aesthetic — it is a direct read of existing authority-derived data.",
+      "why_depth_could_help": [
+        "Path comparison: when the user evaluates two paths between the same endpoints, z-depth separates their intermediate nodes into distinct planes, reducing visual overlap without requiring the layout algorithm to solve a 2D bin-packing problem.",
+        "Semantic proximity at a glance: an intermediate node that is conceptually close to the origin (high cosine similarity) appears near z=0; one that is a structural bridge but semantically distant sits deep in z. This helps the user decide which path is semantically coherent versus which is merely structurally shortest.",
+        "Disambiguation of cycles: the existing pathScene.ts already handles cycles by emitting navigation-container placeholders. In 3D, cycle-back nodes can be visualized at their z-distance from the origin, making the return arc visually distinct from the forward arc.",
+        "Reduced cognitive load for max-depth paths: a 3-hop path A→B→C→D has 4 nodes. In 2D, distinguishing A (origin) from D (destination) requires reading labels. In 3D, A is at z=0 and D is at z=3 — the spatial channel removes the need to re-read position in the list."
+      ],
+      "null_hypothesis": "Depth encoding provides no statistically significant improvement in median task time or error rate for path exploration compared to the complete 2D/list baseline.",
+      "alternative_hypothesis": "Depth encoding provides ≥10% improvement in median task time or ≥10% reduction in error rate for path exploration tasks compared to the complete 2D/list baseline (threshold per design.md).",
+      "failure_condition": "If measured improvement is <10% on both measures, or if error rate increases in the 3D condition, F6 does not proceed to implementation and the feature is deleted per the deletion rule."
+    },
+
+    "rationale_summary": "The 'Find path' action in the Knowledge destination is the single F5-supported workflow most likely to benefit from a third spatial dimension because: (1) it already produces an ordered multi-hop sequence where distance from origin is semantically meaningful, (2) the existing vector store provides an authority-backed cosine similarity score that can drive z-axis placement without inventing data, (3) the 2D baseline adequately handles single paths but incurs layout collision cost when the user compares multiple candidate paths simultaneously, and (4) the improvement hypothesis is falsifiable with a measurable threshold (≥10% task time or error rate delta) that is already specified in design.md. No other F5 destination — Recall, Overview, Timeline, Goals, Sources, Health — requires multi-path spatial comparison; they are either flat lists, time-series, or status dashboards where depth adds no authority-backed semantic signal."
+  },
+
+  "task_6_1_4": {
+    "_comment": "Subtask 6.1.4 — Freeze GO thresholds. All seven threshold groups are CONJUNCTIVE: every group must pass. Any single miss, missing data set, or inconclusive result in any group is a NO-GO with mandatory 3D deletion.",
+
+    "conjunctive_rule": {
+      "statement": "ALL seven threshold groups defined in this entry (task_benefit_threshold, fps_threshold, idle_quiet_threshold, resource_parity_threshold, a11y_parity_threshold, core_task_parity_threshold, foss_closure_threshold) must pass simultaneously for GO to be declared. A PASS on six groups with a FAIL, INCONCLUSIVE, or MISSING-DATA result on the seventh group is a NO-GO. There is no partial GO, conditional GO, or deferred threshold. A single miss in any group triggers mandatory deletion of the F6 3D renderer spike and all associated code, dependencies, and assets.",
+      "missing_data_rule": "If evidence for any threshold group cannot be produced (e.g., the benchmark did not run, the SBOM diff was not completed, the axe scan was not run), that group is scored INCONCLUSIVE, which is treated as FAIL for GO purposes.",
+      "degradation_override": "If the 3D renderer degrades any metric that is also covered by an existing F5 baseline (e.g., task time, error count, E2E test pass rate, VRAM, frame time), the degradation is a NO-GO regardless of whether the magnitude is within the threshold margin for that individual group. The 3D renderer is additive and must not regress any existing F5 quality signal.",
+      "immutability_statement": "These thresholds are frozen at task 6.1.4. No threshold may be relaxed, removed, or replaced after any study data or performance measurement has been collected. Any amendment requires a new task_6_1_4_rev entry with explicit rationale, a new preregistration timestamp, and confirmation that no evidence has been collected under the prior thresholds."
+    },
+
+    "task_benefit_threshold": {
+      "_comment": "Primary user-study GO criterion. Derived from the Wilcoxon analysis protocol frozen in task_6_1_3.",
+      "pass_criterion": "PASS if and only if ALL of the following hold simultaneously:",
+      "conditions": [
+        {
+          "id": "TB-1",
+          "description": "Minimum valid pairs: at least 20 valid paired trials exist after applying the exclusion criteria defined in task_6_1_3. Fewer than 20 valid pairs = INCONCLUSIVE = NO-GO regardless of the observed effect size."
+        },
+        {
+          "id": "TB-2",
+          "description": "Statistical significance: Wilcoxon signed-rank two-tailed p-value < 0.05 for at least one primary measure (task_completion_time_ms OR error_count)."
+        },
+        {
+          "id": "TB-3",
+          "description": "Effect size: median percentage difference ≤ −10% for the measure that passes TB-2. Formula: ((median_3D − median_2D) / median_2D) × 100. A value of −10% or more negative means 3D is at least 10% faster / fewer errors. A value of 0% or positive means no improvement or degradation."
+        },
+        {
+          "id": "TB-4",
+          "description": "Direction: the significant effect must be an improvement (3D faster or fewer errors than 2D). A statistically significant degradation on either primary measure — regardless of magnitude on the other — is a NO-GO."
+        }
+      ],
+      "fail_conditions": [
+        "Fewer than 20 valid pairs after exclusions.",
+        "Wilcoxon p ≥ 0.05 for both primary measures.",
+        "Median percentage difference > −10% (i.e., < 10% improvement) for both primary measures even when p < 0.05.",
+        "3D condition produces worse median task_completion_time_ms than 2D (positive percentage difference on task time).",
+        "3D condition produces higher median error_count than 2D (positive percentage difference on error count).",
+        "Study data not collected or analysis not run."
+      ],
+      "measurement_reference": "Analysis method, pairing, exclusions, alpha, effect size formula, and bootstrap CI are fully specified in task_6_1_3.analysis and task_6_1_3.exclusions. No re-specification is permitted here."
+    },
+
+    "fps_threshold": {
+      "_comment": "Frame-rate GO criterion for WebKitGTK real-scene rendering under the mg-medium-v2 fixture at maximum path-exploration scene size.",
+      "scene_definition": {
+        "fixture": "mg-medium-v2/0.1.0 (seed 0x4D475203, 10,000 records, 907 entity-kind records) — the study fixture frozen in task_6_1_3.",
+        "scene_size": "The largest preregistered path query result from the 30 immutable_path_pairs in task_6_1_3 (3-hop paths, all nodes visible, no culling). If multiple 3-hop paths produce the same node count, the one with the highest node count is used.",
+        "renderer": "WebKitGTK on reference hardware RHW-001 as defined in the F0/F5 baseline protocol (task 0.5.1).",
+        "warm_up": "Discard the first 10 frames after scene load before beginning measurement. Measurement begins on frame 11."
+      },
+      "measurement": {
+        "sample_count": "≥ 30 warm frame samples after warm-up.",
+        "metric": "p95 frame time in milliseconds (95th percentile of the sampled frame durations).",
+        "pass_value": "p95 frame time ≤ 33.3 ms (equivalent to ≥ 30 FPS at the 95th percentile; derived from 1000 ms / 30 frames).",
+        "load_conditions": [
+          {
+            "condition": "idle",
+            "description": "No competing local processes beyond the KRIA application. OS background tasks at normal idle state.",
+            "pass_criterion": "p95 frame time ≤ 33.3 ms under idle load."
+          },
+          {
+            "condition": "competing_local_model_inference",
+            "description": "A local LLM inference task (same contention protocol as used in F5.1 performance baseline) is running concurrently on the same hardware. CPU/GPU contention is present.",
+            "pass_criterion": "p95 frame time ≤ 33.3 ms under competing-load conditions."
+          }
+        ],
+        "both_conditions_required": "Both the idle and competing-load p95 measurements must independently meet the ≤ 33.3 ms threshold. Passing one condition while failing the other is a NO-GO."
+      },
+      "fail_conditions": [
+        "p95 frame time > 33.3 ms under idle load.",
+        "p95 frame time > 33.3 ms under competing local model inference load.",
+        "Fewer than 30 warm frame samples collected in either condition.",
+        "Measurement not run on RHW-001 reference hardware.",
+        "Measurement not run against the mg-medium-v2 maximum-path-size real scene.",
+        "WebKitGTK renderer not used (e.g., measurements taken in a Chromium or Electron environment)."
+      ]
+    },
+
+    "idle_quiet_threshold": {
+      "_comment": "Render-loop quiescence GO criterion. When the scene has no active user input and no new path query, the render loop must stop within 2 seconds to avoid unnecessary CPU/GPU drain.",
+      "trigger_definition": "Measurement begins at the timestamp of the last user input event (mouse move, click, keyboard, or scroll) or the last path query result rendered — whichever is more recent.",
+      "pass_criterion": "requestAnimationFrame (rAF) stops firing within ≤ 2000 ms of the trigger timestamp.",
+      "measurement": {
+        "method": "Instrument the 3D renderer's rAF callback to log each frame timestamp. After the trigger event, measure elapsed time until consecutive rAF callbacks cease for ≥ 500 ms (interpreted as the loop having stopped).",
+        "cpu_delta_requirement": "Once the render loop is in the stopped state, the process CPU usage delta must be ≤ 2 percentage points above the F5 idle CPU baseline (measured using the same idle CPU measurement protocol as F5).",
+        "cpu_baseline_reference": "F5 idle CPU baseline as recorded in the F5 performance evidence manifest."
+      },
+      "fail_conditions": [
+        "rAF continues firing more than 2000 ms after the last user input event or last path query result render.",
+        "CPU delta in stopped state exceeds 2 percentage points above the F5 idle baseline.",
+        "The render loop never enters a stopped state (continuously polling).",
+        "Measurement not run or timing instrumentation not present."
+      ]
+    },
+
+    "resource_parity_threshold": {
+      "_comment": "Resource consumption GO criterion. The 3D scene must not exceed the 2D/list resource baseline by more than the specified margins.",
+      "reference_baseline": "The 2D/list resource measurements are taken from the same mg-medium-v2 path exploration session in the 2D/list condition (same fixture, same path query, same reference hardware RHW-001).",
+      "heap_memory": {
+        "pass_criterion": "3D peak heap ≤ 2D/list peak heap × 1.5",
+        "margin_rationale": "50% headroom is allowed to account for GPU texture buffers, Three.js/WebGL scene graph objects, and geometry data that have no equivalent in the 2D/list canvas renderer.",
+        "measurement": "Peak JS heap size (bytes) during a full path exploration session, measured via the browser's performance.memory API or equivalent WebKitGTK memory instrumentation on RHW-001."
+      },
+      "gc_pressure": {
+        "pass_criterion": "No individual GC pause ≥ 50 ms during any path exploration session.",
+        "measurement": "GC pause durations measured via PerformanceObserver entries of type 'gc' or equivalent WebKitGTK GC tracing during the path exploration session.",
+        "session_scope": "From path query submission until correct entity confirmed in Inspector (same boundary as task_completion_time_ms)."
+      },
+      "vram": {
+        "pass_criterion": "≤ 256 MB additional VRAM consumed by the 3D renderer versus the idle baseline (no scene loaded).",
+        "measurement": "VRAM delta = (VRAM during 3D path exploration session peak) − (VRAM at application idle with no scene loaded). Measured on RHW-001 using GPU memory query tools available on the reference platform.",
+        "note": "VRAM measurement is hardware-specific and applies only to RHW-001. Results on other hardware are informational only and do not affect GO."
+      },
+      "frame_p95_note": "Frame p95 is covered by fps_threshold above. It is not re-specified here to avoid duplication.",
+      "fail_conditions": [
+        "3D peak heap > 2D/list peak heap × 1.5.",
+        "Any GC pause ≥ 50 ms during a path exploration session.",
+        "VRAM delta > 256 MB versus idle baseline.",
+        "Measurements not collected on RHW-001.",
+        "2D/list baseline measurements not available for comparison."
+      ]
+    },
+
+    "a11y_parity_threshold": {
+      "_comment": "Accessibility parity GO criterion. All core-task workflows that pass in 2D/list must also be completable in 3D via keyboard and Orca. The 3D renderer must not introduce accessibility regressions.",
+      "keyboard_parity": {
+        "pass_criterion": "All 5 keyboard navigation steps from the keyboard_only_navigation_baseline protocol in task_6_1_3.context_loss_a11y_protocol must pass in the 3D condition using the same pass criterion as 2D.",
+        "steps_reference": "The 5 steps are: (1) Tab to Knowledge destination, (2) navigate entity list with arrow keys, (3) activate Find Path, (4) navigate path result, (5) activate Inspector on destination entity and confirm. Each step must be achievable without mouse with visible focus.",
+        "pass_value": "5 of 5 steps pass in 3D condition (same as 2D pass criterion: all steps completable by keyboard alone with visible focus at each step).",
+        "fail_condition": "Any single step among the 5 fails keyboard navigation in the 3D condition."
+      },
+      "orca_parity": {
+        "pass_criterion": "Both of the following must be announced in the 3D condition with the same fidelity as in the 2D/list condition:",
+        "required_announcements": [
+          "Entity display names for path result nodes (node_names_announced = true in the orca_observation record).",
+          "Inspector entity confirmation announcement when the correct destination entity is activated (inspector_confirmation_announced = true in the orca_observation record)."
+        ],
+        "reference_fields": "orca_observation fields as defined in task_6_1_3.context_loss_a11y_protocol.orca_screen_reader_observation.",
+        "fail_condition": "node_names_announced = false OR inspector_confirmation_announced = false in the 3D condition orca_observation record."
+      },
+      "axe_scan": {
+        "pass_criterion": "No new serious or critical axe-core findings introduced by the 3D renderer compared to the 2D/list baseline axe scan.",
+        "measurement": "Run axe-core scan on the Knowledge destination with 3D renderer active and with 2D/list renderer. Diff the findings. New findings introduced only in the 3D scan at severity serious or critical are a NO-GO.",
+        "scope": "Scoped to the Knowledge destination and path exploration workflow. Other destinations are out of scope for this check.",
+        "fail_condition": "One or more new serious or critical axe-core findings present in the 3D scan that are absent from the 2D/list baseline scan."
+      },
+      "focus_containment": {
+        "pass_criterion": "After a WebGL context loss (real or simulated) and fallback to 2D/list, keyboard focus must return to the same logical state as in the 2D/list condition (no lost, orphaned, or misplaced focus).",
+        "measurement": "Induce a simulated context loss (using the renderer debug trigger) during a path exploration session. Observe and record the focus state after fallback. Compare to the equivalent 2D/list focus state.",
+        "fail_condition": "Focus is lost, orphaned, or placed on a logically incorrect element after context loss fallback."
+      },
+      "fail_conditions": [
+        "Any of the 5 keyboard navigation steps fails in the 3D condition.",
+        "node_names_announced = false in the 3D orca_observation.",
+        "inspector_confirmation_announced = false in the 3D orca_observation.",
+        "One or more new serious or critical axe-core findings in the 3D scan vs 2D/list baseline.",
+        "Focus lost or orphaned after WebGL context loss fallback.",
+        "a11y checks not run for the 3D condition.",
+        "2D/list baseline a11y checks not available for comparison."
+      ]
+    },
+
+    "core_task_parity_threshold": {
+      "_comment": "F5 workflow non-regression GO criterion. The 3D renderer is an additive, optional enhancement. It must not break any workflow that passes in the F5 2D/list baseline.",
+      "statement": "All F5-supported tasks that pass in the 2D/list E2E test suite must also pass when the test suite is run against the 3D-enabled build.",
+      "measurement": {
+        "method": "Run the complete 2D/list E2E test suite (the suite that validates F5 workflows) against a build of the application with the 3D renderer enabled.",
+        "suite_reference": "The F5 E2E test suite as defined in the F5 evidence manifest. No new tests are added for this check; the existing suite is run unmodified.",
+        "pass_criterion": "All tests that pass in the 2D/list baseline build also pass in the 3D-enabled build. Zero regressions.",
+        "scope": "All seven destinations: Overview, Recall, Knowledge, Timeline, Goals, Sources, Health. The 3D renderer is active only for the Knowledge path exploration view; all other destinations must be unaffected."
+      },
+      "regression_definition": "A test regression is any test that passes in the F5 baseline build but fails in the 3D-enabled build. Flaky tests that fail intermittently in both builds are not regressions for this purpose, but must be documented.",
+      "fail_conditions": [
+        "Any E2E test that passes in the F5 2D/list baseline build fails in the 3D-enabled build.",
+        "The F5 E2E test suite cannot be run against the 3D-enabled build (build failure, missing configuration).",
+        "The F5 E2E test suite results are not available for comparison.",
+        "Any destination other than the Knowledge 3D path view exhibits changed behaviour attributable to the 3D renderer."
+      ]
+    },
+
+    "foss_closure_threshold": {
+      "_comment": "Supply chain and license GO criterion. All optional dependencies introduced by the F6 3D spike must have approved FOSS dispositions before GO can be declared.",
+      "sbom_diff": {
+        "method": "Generate a Software Bill of Materials (SBOM) for the F6 3D-spike build and diff it against the F5 release SBOM closure.",
+        "baseline": "F5 release SBOM as recorded in the F5 supply-chain evidence artifact.",
+        "scope": "All new dependencies (Rust crates, npm packages, Python packages, system libraries, WASM modules, and bundled assets) present in the F6 3D-spike closure that are absent from the F5 release closure."
+      },
+      "required_fields_per_new_dependency": [
+        "name: exact package/crate/module name and version.",
+        "license: exact SPDX license identifier (e.g., MIT, Apache-2.0). Inferred or assumed licenses are not accepted.",
+        "source_url: canonical repository or package registry URL.",
+        "checksum: SHA-256 or equivalent cryptographic hash of the artifact as downloaded.",
+        "foss_disposition: one of [approved, rejected, pending]. Must be 'approved' for GO.",
+        "reviewer: identity of the person who reviewed and approved the disposition.",
+        "review_timestamp: UTC timestamp of the review."
+      ],
+      "pass_criterion": "Every new dependency in the SBOM diff has a recorded license, source URL, checksum, and a foss_disposition of 'approved'. The Supply Chain review must sign off before GO can be declared.",
+      "fail_conditions": [
+        "Any new dependency has an unknown, unrecorded, or unresolved license.",
+        "Any new dependency has a proprietary, non-FOSS, or incompatible-with-project license.",
+        "Any new dependency is missing a checksum.",
+        "Any new dependency has foss_disposition = 'pending' or 'rejected' at GO decision time.",
+        "Supply Chain review sign-off has not been recorded.",
+        "SBOM diff has not been generated or is incomplete.",
+        "F5 release SBOM baseline is not available for comparison."
+      ],
+      "supply_chain_signoff_requirement": "The Supply Chain review sign-off must be a recorded entry in the F6 evidence manifest with reviewer identity, reviewed artifact hash, and UTC timestamp. Self-review by the owner/developer is accepted per the single-developer pre-production context defined in dev-context.md, but the review must be explicitly recorded as a separate step, not implied."
+    },
+
+    "immutability_statement": {
+      "status": "FROZEN — this GO threshold definition is preregistered before any F6 3D spike implementation, performance measurement, or study data collection begins.",
+      "frozen_at_task": "6.1.4",
+      "what_is_frozen": [
+        "The conjunctive rule: all 7 threshold groups must pass simultaneously.",
+        "task_benefit_threshold: ≥10% median improvement (Wilcoxon p<0.05) on ≥1 primary measure, with ≥20 valid pairs, and no degradation on either measure.",
+        "fps_threshold: p95 frame time ≤ 33.3 ms on the mg-medium-v2 max-path real scene, under both idle and competing-load conditions, on RHW-001 with WebKitGTK, with ≥30 warm samples.",
+        "idle_quiet_threshold: rAF stops ≤ 2000 ms after last input; CPU delta ≤ 2pp above F5 idle baseline in stopped state.",
+        "resource_parity_threshold: 3D peak heap ≤ 1.5× 2D peak; no GC pause ≥ 50 ms; VRAM delta ≤ 256 MB vs idle on RHW-001.",
+        "a11y_parity_threshold: 5/5 keyboard steps pass in 3D; entity names and Inspector confirmation announced by Orca; no new serious/critical axe findings; focus preserved after context loss fallback.",
+        "core_task_parity_threshold: zero regressions in F5 E2E suite when run against 3D-enabled build.",
+        "foss_closure_threshold: all new dependencies have recorded license, source URL, checksum, and approved FOSS disposition with Supply Chain sign-off."
+      ],
+      "protocol_violation_conditions": [
+        "Relaxing any threshold value after study data or performance measurements have been collected.",
+        "Removing any threshold group from the conjunctive rule.",
+        "Declaring GO when any group result is FAIL, INCONCLUSIVE, or MISSING.",
+        "Substituting a different statistical test, fixture, hardware environment, or measurement method without a new preregistration revision.",
+        "Treating a partial pass (some conditions within a group passing) as a full group PASS."
+      ],
+      "amendment_process": "Any change to this definition requires: (1) a new task_6_1_4_rev entry in this file, (2) explicit rationale for why the original threshold was wrong or incomplete, (3) confirmation that no evidence has been collected under the prior threshold for the amended group, and (4) a new preregistration timestamp before evidence collection for that group resumes.",
+      "no_go_consequence": "A NO-GO result means the F6 3D renderer spike is not promoted to the F5 production build. All F6-specific code, dependencies, assets, and this preregistration study data are scheduled for deletion. The F5 2D/list production build is unaffected."
+    }
+  },
+
+  "task_6_1_5": {
+    "_comment": "Subtask 6.1.5 — Freeze the mandatory deletion inventory and rule. Preregistered before any F6 spike implementation begins. A single miss, ambiguity, maintenance/supply-chain failure, or semantic divergence in any of the 7 conjunctive GO groups defined in task_6_1_4 is a NO-GO and triggers complete deletion of every artifact listed here.",
+
+    "mandatory_deletion_inventory": {
+      "_comment": "Exhaustive list of every artifact that MUST be deleted on a NO-GO result. Derived by codebase scan of ui/src/ and cross-referenced against the F0 inventory (evidence/F0/f0-inventory/reports/ui-paths.json), design.md §3, and the F6 spike scope. Items are grouped by artifact class.",
+
+      "source_code_files": {
+        "_note": "These files exist on-disk in the current repository. GraphCanvas3D.tsx is already dormant for the Memory Graph (confirmed by F0 inventory). GraphScene.ts, lensController.ts, layout.worker.ts, and layoutSettle.ts are currently shared with ConstellationCanvas3D (capabilities space). On a NO-GO their F6-specific wiring is removed; if ConstellationCanvas3D still requires them, that is a separate retention question outside the F6 deletion scope — the F6 memory-graph 3D spike code is deleted regardless.",
+        "memory_graph_3d_primary": [
+          "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx"
+        ],
+        "shared_3d_infrastructure": {
+          "_note": "These modules are shared between GraphCanvas3D (dormant memory-graph 3D target) and ConstellationCanvas3D (live capabilities 3D lens). On NO-GO the F6 memory-graph integration of these modules is deleted. The files themselves are retained only if ConstellationCanvas3D continues to require them after the F6 spike is unwound; if the F6 spike introduced any modifications to these shared files, those modifications are reverted to their pre-spike state.",
+          "files": [
+            "ui/src/shell/spaces/memory/graph/GraphScene.ts",
+            "ui/src/shell/spaces/memory/graph/lensController.ts",
+            "ui/src/shell/spaces/memory/graph/layout.worker.ts",
+            "ui/src/shell/spaces/memory/graph/layoutSettle.ts"
+          ],
+          "deletion_rule": "Revert any F6-spike modifications to the pre-spike state verified by the F5 commit digest in the F5 evidence manifest. If the F6 spike introduced new exports, types, or behaviours to these files that are only consumed by the memory-graph 3D path, those additions are deleted. Files are not deleted in their entirety unless the F6 spike created them from scratch with no pre-existing version."
+        },
+        "f6_spike_new_files": {
+          "_note": "Any NEW source files created exclusively for the F6 3D spike (e.g., pathScene3D.ts, zAxisMapper.ts, graph3DLayout.ts, or any renderer-side scene/DTO/component file that did not exist in the F5 release commit) must be deleted in their entirety.",
+          "pattern": "ui/src/shell/spaces/memory/**/*3D*",
+          "pattern_2": "ui/src/shell/spaces/memory/**/z{A,a}xis*",
+          "pattern_3": "ui/src/shell/spaces/memory/**/*3d*",
+          "pattern_4": "ui/src/shell/spaces/memory/**/path*3D*",
+          "enumeration_required": "Before spike implementation begins, the list of F5-release files in ui/src/shell/spaces/memory/ is snapshotted. Any file present in the spike that is absent from the F5 snapshot is an F6-specific file subject to deletion on NO-GO."
+        },
+        "f6_test_files": {
+          "_note": "Any test or story files introduced specifically for the F6 3D spike are deleted on NO-GO. Test files that existed in F5 and were modified by the spike revert to their pre-spike state.",
+          "pattern": "ui/src/shell/spaces/memory/**/*3D*.test.*",
+          "pattern_2": "ui/src/shell/spaces/memory/**/*3d*.test.*",
+          "pattern_3": "ui/src/shell/spaces/memory/**/*3D*.stories.*",
+          "existing_test_files_with_3d_content": [
+            "ui/src/shell/spaces/memory/graph/lensController.test.ts",
+            "ui/src/shell/spaces/memory/graph/layoutSettle.test.ts"
+          ],
+          "existing_test_files_rule": "The above existing test files are retained in their F5-baseline form. Any F6-spike-added test cases inside them that exercise F6-specific 3D memory-graph behaviour are reverted to the pre-spike state."
+        }
+      },
+
+      "capability_flags_and_feature_gates": {
+        "_note": "The current renderMode.ts already contains enable3D / LensRenderMode gating consumed by ConstellationCanvas3D. These are NOT F6-specific and are not deleted. What is deleted on NO-GO is any F6-specific wiring that makes the memory-graph Knowledge destination conditionally mount a 3D path view.",
+        "f6_specific_items": [
+          "Any conditional branch in ui/src/shell/spaces/memory/destinations/Knowledge.tsx (or equivalent) that mounts a 3D path view based on enable3D or any F6 feature flag",
+          "Any F6-specific feature flag, constant, or environment variable introduced during the spike that is not part of the F5 release (e.g., VITE_ENABLE_F6_3D, F6_3D_ENABLED, enable3DPathView, or equivalent)",
+          "Any F6-specific Tauri capability or permission entry added to tauri.conf.json, capabilities/*.json, or permissions/*.toml that was not present in the F5 release",
+          "Any F6-specific Rust feature flag in Cargo.toml (e.g., features = [\"f6-3d\"] or equivalent)"
+        ],
+        "retained_items": [
+          "ui/src/platform/renderMode.ts — enable3D field and LensRenderMode component (pre-existing, shared with ConstellationCanvas3D)",
+          "ui/src/platform/capabilities.ts — shouldEnable3D, decideRenderMode (pre-existing, shared)",
+          "ui/src/platform/coreRenderMode.ts — Core-3D gate for Constellation (pre-existing, shared)",
+          "ui/src/platform/LensModeToggle.tsx and LensRenderMode.tsx — pre-existing shared infrastructure"
+        ]
+      },
+
+      "npm_dependencies": {
+        "_note": "three@0.169.0, @types/three@0.169.0, ngraph.forcelayout@3.3.1, and ngraph.graph@20.0.1 are currently present in ui/package.json. They are NOT exclusively F6 additions — they are used by ConstellationCanvas3D (pre-existing). On NO-GO these dependencies are NOT removed unless the F6 spike introduced a version bump or new dependency that is exclusively consumed by the memory-graph 3D path.",
+        "deletion_trigger": "If the F6 spike introduced NEW npm packages that are exclusively consumed by the memory-graph 3D path (not used by ConstellationCanvas3D or any other pre-existing feature), those packages are removed from ui/package.json and ui/package-lock.json on NO-GO.",
+        "version_bump_revert": "If the F6 spike bumped the version of three, @types/three, ngraph.forcelayout, or ngraph.graph, and ConstellationCanvas3D does not require the bumped version, the version is reverted to its F5-release value.",
+        "sbom_diff_reference": "The SBOM diff produced for foss_closure_threshold in task_6_1_4 is the authoritative list of new npm dependencies introduced by the F6 spike. Every entry in that diff with an exclusively-F6 consumer is deleted on NO-GO.",
+        "current_f5_baseline_versions": {
+          "three": "0.169.0",
+          "ngraph.forcelayout": "3.3.1",
+          "ngraph.graph": "20.0.1",
+          "@types/three": "0.169.0"
+        }
+      },
+
+      "rust_cargo_dependencies": {
+        "_note": "No F6-specific Rust crates are known to exist in the current pre-spike codebase. The F6 3D spike is expected to be purely a UI/TypeScript concern. However, if the spike introduces new Rust crates to support WebGL/WASM generation, z-axis computation, or renderer communication, those crates are deleted on NO-GO.",
+        "deletion_trigger": "Any crate added to Cargo.toml or Cargo.lock during the F6 spike that is exclusively consumed by the F6 memory-graph 3D renderer is removed on NO-GO.",
+        "sbom_diff_reference": "The SBOM diff produced for foss_closure_threshold is the authoritative list of new Rust crates. Every entry in that diff with an exclusively-F6 consumer is deleted on NO-GO."
+      },
+
+      "study_evidence_artifacts": {
+        "_note": "The preregistration.json file itself (this document) is NOT deleted on NO-GO — it is the protocol record and must be retained as evidence of the study that led to the NO-GO decision. What is deleted are the study-run data artifacts generated during the spike.",
+        "deleted_on_no_go": [
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/session_logs/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/trial_data/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/analysis/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/performance/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/benchmarks/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/supply-chain/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/a11y/ (entire directory if created)",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/manifest.json (if created, unless the manifest records the NO-GO outcome)"
+        ],
+        "retained_on_no_go": [
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/preregistration.json — this document; frozen protocol record",
+          ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/manifest.json — IF AND ONLY IF it records the NO-GO outcome, threshold results, and deletion confirmation; otherwise deleted"
+        ]
+      },
+
+      "documentation_and_marketing_claims": {
+        "_note": "Any documentation, README section, CHANGELOG entry, or UI copy introduced during the F6 spike that claims 3D memory-graph capability is deleted on NO-GO. Existing documentation that describes GraphCanvas3D as dormant/conditional (e.g., design.md §3, decisions.md MGD-021, glossary.md) is retained as-is — it correctly describes the pre-spike state.",
+        "deleted_on_no_go": [
+          "Any README.md section added during the F6 spike that advertises 3D memory-graph path exploration",
+          "Any CHANGELOG entry added during the F6 spike that lists 3D path exploration as a shipped or experimental feature",
+          "Any in-app UI copy introduced during the F6 spike that implies the memory-graph Knowledge destination has 3D capability (tooltip text, help text, feature disclosures, onboarding copy)",
+          "Any .kiro/specs/ documentation file created exclusively for the F6 spike implementation (distinct from this preregistration)"
+        ],
+        "retained": [
+          "design.md §3 reference to dormant GraphCanvas3D files — pre-existing, accurate description of current state",
+          "decisions.md MGD-021 — pre-existing, documents dormancy",
+          "glossary.md entry for GraphCanvas3D — pre-existing, describes current state",
+          "This preregistration document — frozen protocol record"
+        ]
+      }
+    },
+
+    "deletion_rule": {
+      "statement": "On a NO-GO result — defined as ANY of the conditions below — all items enumerated in mandatory_deletion_inventory are deleted before the F6 evidence manifest may record a closed NO-GO outcome. The deletion is complete and machine-verified before the F5→F6 manifest chain may record the NO-GO.",
+      "no_go_trigger_conditions": [
+        {
+          "id": "DR-1",
+          "description": "Any miss on any of the 7 GO threshold groups defined in task_6_1_4: task_benefit_threshold, fps_threshold, idle_quiet_threshold, resource_parity_threshold, a11y_parity_threshold, core_task_parity_threshold, foss_closure_threshold. All 7 are conjunctive; one miss is a NO-GO."
+        },
+        {
+          "id": "DR-2",
+          "description": "Any ambiguity or inconclusive result in any threshold group. INCONCLUSIVE is scored as FAIL for GO purposes (task_6_1_4.conjunctive_rule.missing_data_rule). A study with fewer than 20 valid pairs (TB-1), an underpowered analysis, or a CI that straddles zero for both primary measures is inconclusive and therefore a NO-GO."
+        },
+        {
+          "id": "DR-3",
+          "description": "Any supply-chain or maintenance failure for a 3D-specific dependency introduced by the F6 spike. This includes: (a) a new npm or Rust dependency that has an unresolved, pending, or rejected FOSS disposition at GO decision time (foss_closure_threshold fail), (b) a new dependency whose upstream repository becomes unmaintained, archived, or has a known CVE before the F6 evidence manifest is signed, (c) a new dependency whose checksum cannot be reproduced from the recorded source URL and version, or (d) a version bump forced by a security advisory that introduces a breaking API change requiring spike rework."
+        },
+        {
+          "id": "DR-4",
+          "description": "Any semantic divergence between the 3D renderer's scene model and the F5 Semantic Scene. Semantic divergence is defined as: the 3D renderer (GraphCanvas3D or any F6 scene module) maintaining its own truth, policy, layout state, or node/edge authority that is not derived purely from the shared SemanticScene / pathScene.ts output. Specifically: (a) if the 3D renderer caches or recomputes node positions, z-values, or entity labels independently of what pathScene.ts provides, (b) if the 3D renderer introduces its own record fetching, graph traversal, or relationship resolution outside GraphQueryPort, (c) if the 3D renderer writes back any state to the SQLite authority or any derived index, or (d) if the 3D renderer's scene model diverges from the representation parity invariant A10 (design §2) by maintaining a different set of visible nodes, edges, or entity states than the 2D canvas."
+        },
+        {
+          "id": "DR-5",
+          "description": "Any degradation of an existing F5 baseline metric attributable to the presence of the 3D renderer in the build, regardless of magnitude (task_6_1_4.conjunctive_rule.degradation_override). This includes task time, error count, E2E test pass rate, VRAM, frame time, idle CPU, or any other metric covered by the F5 evidence manifest."
+        }
+      ],
+      "deletion_is_mandatory": "Deletion is not discretionary. When any DR-1 through DR-5 condition is met, the inventory is deleted. There is no 'conditional retain pending fix', 'experimental flag that keeps the code dormant', or 'defer deletion to a future sprint'. The only exception is the retention of the preregistration document and the NO-GO outcome manifest entry, which are evidence records."
+    },
+
+    "machine_verifiable_inventory": {
+      "_comment": "For each inventory class, a machine-executable verification command and expected post-deletion result. All commands are run from the repository root. Zero exit code with the specified expected output confirms deletion is complete.",
+      "items": [
+        {
+          "id": "MVI-1",
+          "description": "GraphCanvas3D.tsx source file absent",
+          "verification_command": "test ! -f ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx",
+          "expected_result": "Exit code 0 (file does not exist)",
+          "grep_cross_check": "grep -r 'GraphCanvas3D' ui/src/ --include='*.ts' --include='*.tsx' --include='*.js' | grep -v '^\\.kiro/' | grep -v test | grep -v stories | grep -v '__snapshots__'",
+          "grep_expected": "Zero matching lines (no live import or mount of GraphCanvas3D in shipped source)"
+        },
+        {
+          "id": "MVI-2",
+          "description": "No live mount or import of GraphCanvas3D in the memory-graph Knowledge path",
+          "verification_command": "grep -r 'GraphCanvas3D' ui/src/shell/spaces/memory/ --include='*.ts' --include='*.tsx'",
+          "expected_result": "Zero matching lines"
+        },
+        {
+          "id": "MVI-3",
+          "description": "GraphScene.ts contains no F6-spike additions (reverted to F5 state or absent)",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/GraphScene.ts",
+          "expected_result": "Empty diff (no changes from F5 release commit) or file absent if it was created by the F6 spike",
+          "note": "F5_RELEASE_COMMIT is the commit SHA recorded in the F5 evidence manifest. This command must be run after verifying the F5 manifest hash."
+        },
+        {
+          "id": "MVI-4",
+          "description": "lensController.ts contains no F6-spike additions (reverted to F5 state or absent)",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/lensController.ts",
+          "expected_result": "Empty diff or file absent if created by F6 spike"
+        },
+        {
+          "id": "MVI-5",
+          "description": "layout.worker.ts contains no F6-spike additions (reverted to F5 state or absent)",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/layout.worker.ts",
+          "expected_result": "Empty diff or file absent if created by F6 spike"
+        },
+        {
+          "id": "MVI-6",
+          "description": "layoutSettle.ts contains no F6-spike additions (reverted to F5 state or absent)",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- ui/src/shell/spaces/memory/graph/layoutSettle.ts",
+          "expected_result": "Empty diff or file absent if created by F6 spike"
+        },
+        {
+          "id": "MVI-7",
+          "description": "No F6-specific 3D files exist anywhere under ui/src/shell/spaces/memory/",
+          "verification_command": "find ui/src/shell/spaces/memory/ -name '*3D*' -o -name '*3d*' | grep -v '__snapshots__'",
+          "expected_result": "Empty output (zero matching files)"
+        },
+        {
+          "id": "MVI-8",
+          "description": "No F6-specific feature flag identifiers present in the memory-graph space source",
+          "verification_command": "grep -r 'F6_3D\\|ENABLE_F6\\|enable3DPath\\|f6.*3d\\|3d.*f6' ui/src/shell/spaces/memory/ --include='*.ts' --include='*.tsx' -i",
+          "expected_result": "Zero matching lines"
+        },
+        {
+          "id": "MVI-9",
+          "description": "No F6-spike npm packages present in package.json beyond F5 baseline",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- ui/package.json",
+          "expected_result": "Empty diff, or diff shows only non-F6 changes. Any new package present in the diff that appears in the SBOM diff as F6-exclusively-consumed must be absent."
+        },
+        {
+          "id": "MVI-10",
+          "description": "No F6-spike Rust crate additions in Cargo.toml beyond F5 baseline",
+          "verification_command": "git diff <F5_RELEASE_COMMIT> -- Cargo.toml Cargo.lock",
+          "expected_result": "Empty diff, or diff shows only non-F6 changes. Any crate from the SBOM diff that is F6-exclusively-consumed must be absent."
+        },
+        {
+          "id": "MVI-11",
+          "description": "No F6 study session or trial data artifacts present",
+          "verification_command": "find .kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/ -mindepth 1 -not -name 'preregistration.json' -not -path '*/study/preregistration.json'",
+          "expected_result": "Empty output OR output contains only 'manifest.json' if it records the NO-GO outcome. All other subdirectories (session_logs, trial_data, analysis, performance, benchmarks, supply-chain, a11y) must be absent."
+        },
+        {
+          "id": "MVI-12",
+          "description": "No 3D memory-graph marketing or documentation claims in shipped text",
+          "verification_command": "grep -r '3D.*memory.*graph\\|memory.*graph.*3D\\|3D.*path.*explor\\|path.*explor.*3D' README.md CHANGELOG.md docs/ ui/src/ --include='*.md' --include='*.tsx' --include='*.ts' -i 2>/dev/null",
+          "expected_result": "Zero matching lines in any shipped document (grep may exit non-zero if no files exist in docs/; that is acceptable)"
+        },
+        {
+          "id": "MVI-13",
+          "description": "No conditional 3D mount in the Knowledge destination's path exploration rendering path",
+          "verification_command": "grep -r 'enable3D\\|threeD\\|GraphCanvas3D\\|3DPath\\|pathScene3D' ui/src/shell/spaces/memory/destinations/ --include='*.ts' --include='*.tsx'",
+          "expected_result": "Zero matching lines"
+        }
+      ],
+      "verification_protocol": "All 13 MVI checks must pass (each returning the expected result) before the deletion step is considered complete. Any failing check is an inventory miss and is itself a NO-GO for recording the F5→F6 manifest chain NO-GO outcome.",
+      "verification_timing": "MVI checks are run after all deletion steps are complete and before the F6 evidence manifest entry for the NO-GO outcome is written."
+    },
+
+    "completeness_rule": {
+      "statement": "Any F6 3D artifact that persists in the repository after the deletion step — meaning any artifact that would have been listed here had it been known at preregistration time but was omitted from this inventory — is itself a NO-GO condition for recording the F5→F6 manifest chain NO-GO outcome. The deletion must be complete and machine-verified (all 13 MVI checks pass) before the NO-GO outcome is recorded.",
+      "inventory_miss_definition": "An inventory miss is a file, dependency, flag, documentation claim, or artifact that: (a) was introduced during the F6 spike, (b) is exclusively consumed by or associated with the F6 memory-graph 3D renderer, and (c) is not listed in mandatory_deletion_inventory and is not covered by an MVI pattern check.",
+      "discovery_protocol": "If an inventory miss is discovered during the deletion step, it is added to a delta list, deleted, and its MVI check is added to this entry via an amendment (task_6_1_5_rev). The amendment does not require a new run-id but must be timestamped and must confirm no implementation has been deployed based on the missed item.",
+      "chain_blocking_rule": "The F6 evidence manifest cannot record a valid NO-GO outcome, and the F5 manifest predecessor hash cannot be annotated with a closed F6 outcome, until all known inventory items are deleted and all MVI checks pass."
+    },
+
+    "immutability_statement": {
+      "status": "FROZEN — this inventory and deletion rule are preregistered before any F6 spike implementation begins. The inventory reflects the repository state as of the task 6.1.5 preregistration timestamp.",
+      "frozen_at_task": "6.1.5",
+      "preregistration_timestamp": "2025-07-30T00:00:00Z",
+      "what_is_frozen": [
+        "The mandatory_deletion_inventory: all source file paths, categories, and deletion rules enumerated above.",
+        "The deletion_rule: the five NO-GO trigger conditions DR-1 through DR-5.",
+        "The machine_verifiable_inventory: all 13 MVI checks and their expected results.",
+        "The completeness_rule: the inventory-miss definition and the chain-blocking requirement.",
+        "The retention list: items explicitly listed as retained on NO-GO (preregistration.json, NO-GO outcome manifest entry, pre-existing shared infrastructure in its F5 state)."
+      ],
+      "amendment_process": "Any addition to the inventory discovered during the F6 spike (new files, new flags, new dependencies) is recorded via a new task_6_1_5_rev entry in this file. The amendment must include: (1) the new item(s) discovered, (2) the corresponding MVI check added, (3) confirmation that the item was not deployed to a production-equivalent environment before being added to the inventory, and (4) a new timestamp. The amendment does not invalidate the existing frozen entries.",
+      "amendment_does_not_require_new_run_id": "Inventory amendments via task_6_1_5_rev are additive corrections to this preregistration within run-001. A new run-id is required only if the study protocol (task_6_1_3), the z-axis definition (task_6_1_2), or the GO thresholds (task_6_1_4) change.",
+      "protocol_violation_conditions": [
+        "Retaining any item from mandatory_deletion_inventory on a NO-GO result for any reason other than the explicitly listed retention exceptions.",
+        "Recording a NO-GO outcome in the F6 manifest before all MVI checks pass.",
+        "Adding an 'experimental', 'dormant', or 'feature-flagged-off' exception that allows F6 3D spike code to remain in the repository after a NO-GO.",
+        "Treating an inventory miss as acceptable if the persisting artifact is 'small' or 'harmless'.",
+        "Relaxing any DR condition after any GO threshold evidence has been collected."
+      ]
+    }
+  },
+
+  "task_6_2_7": {
+    "_comment": "Subtask 6.2.7 — Machine-verifiable inventory of all code, tests, evidence artifacts, and modified files created during the F6.2 spike (tasks 6.2.1–6.2.6). Produced by scanning the actual repository state (git status) after the spike completed. This is the authoritative deletion manifest for the NO-GO path.",
+
+    "inventory_timestamp": "2025-07-30T12:00:00Z",
+    "inventory_complete": true,
+    "inventory_method": "git-status scan: untracked files (??) are new spike files; modified files (M) are pre-existing files changed by the spike. All 15 files in ui/src/shell/spaces/memory/graph/ and 2 evidence artifacts under evidence/F6/ are accounted for.",
+
+    "f6_spike_source_files": [
+      {
+        "path": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts",
+        "created_by_task": "6.2.1",
+        "description": "Core spike module: SemanticScene→3D input wiring, z-mapping helpers, packed transferable buffer layout (tasks 6.2.1 + 6.2.2). Contains the semantic collection/action hash parity implementation and z-axis formula (z = (1 − cosine_similarity) / 2).",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.test.ts",
+        "created_by_task": "6.2.1",
+        "description": "Unit tests for task 6.2.1 parity spike: semantic collection hash parity, authorized action hash parity, determinism, sensitivity, and GraphCanvas3D component wiring.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeZ.test.ts",
+        "created_by_task": "6.2.2",
+        "description": "Unit tests for task 6.2.2 z-axis mapping: computeNodeZ edge cases, mapZValues (origin/no-score/cycle-placeholder/general), packNodePositions buffer layout, SemanticSceneItem3D interface.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/culling3D.ts",
+        "created_by_task": "6.2.3",
+        "description": "LOD, frustum/cap culling, and bounded dirty label/collision update logic. Pure TS module, no WebGL/DOM side effects. Implements SCENE_CAPS limits, getLODLevel, frustumCull, applyCaps, updateDirtyLabels.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeRender.test.ts",
+        "created_by_task": "6.2.3",
+        "description": "Unit tests for task 6.2.3 LOD/culling: SCENE_CAPS constants, getLODLevel assignment, frustumCull visibility, applyCaps BALANCED_NODES priority ordering, updateDirtyLabels bounded processing.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/camera3D.ts",
+        "created_by_task": "6.2.4",
+        "description": "Camera state machine: fit/focus/presets/back/forward, keyboard actions, touch policy, depth comfort, focus indication, selected/offscreen continuity, list synchronization. Pure TS, no WebGL/DOM.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/camera3D.test.ts",
+        "created_by_task": "6.2.4",
+        "description": "Unit tests for task 6.2.4 camera state machine: fit/focus/presets/back/forward, keyboard actions, touch policy, depth comfort, selected/offscreen continuity.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/renderPolicy3D.ts",
+        "created_by_task": "6.2.5",
+        "description": "Render policy state machine: reduced-motion static mode, quality ladder, idle render stop, device/context loss recovery to 2D fallback state. Pure TS, all state immutable.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/renderPolicy3D.test.ts",
+        "created_by_task": "6.2.5",
+        "description": "Unit tests for task 6.2.5 render policy: reduced-motion mode, quality ladder transitions, idle render stop, context loss recovery, 2D fallback state restoration.",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/profiling3D.ts",
+        "created_by_task": "6.2.6",
+        "description": "Performance profiling instrumentation stubs for the F6 spike: FPS/frame/CPU/GPU/RAM/VRAM/heap/GC/idle measurement harness for use during reference hardware profiling (RHW-001).",
+        "deletion_method": "delete-file"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/profiling3D.test.ts",
+        "created_by_task": "6.2.6",
+        "description": "Unit tests for task 6.2.6 profiling stubs: validates profiling instrumentation contracts and sample collection behavior.",
+        "deletion_method": "delete-file"
+      }
+    ],
+
+    "f6_spike_modified_files": [
+      {
+        "path": "ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx",
+        "created_by_task": "6.2.1",
+        "description": "Pre-existing dormant GraphCanvas3D component. Modified during task 6.2.1 to wire the SemanticScene/authorized action inputs and to integrate the spike modules (graphCanvas3DSpike.ts, camera3D.ts, culling3D.ts, renderPolicy3D.ts). On NO-GO, must be reverted to its F5 state (the pre-spike committed version).",
+        "deletion_method": "revert-to-f5-state"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/layout.worker.ts",
+        "created_by_task": "6.2.2",
+        "description": "Pre-existing layout worker. Modified during task 6.2.2 to accept and process packed transferable buffers from graphCanvas3DSpike.ts. On NO-GO, must be reverted to its F5 state.",
+        "deletion_method": "revert-to-f5-state"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/layoutSettle.ts",
+        "created_by_task": "6.2.2",
+        "description": "Pre-existing layout settle helper. Modified during task 6.2.2 to integrate with the authority-backed z-mapping and deterministic position pipeline. On NO-GO, must be reverted to its F5 state.",
+        "deletion_method": "revert-to-f5-state"
+      },
+      {
+        "path": "ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+        "created_by_task": "6.2.1",
+        "description": "Pre-existing MemoryUniverse component. Modified during task 6.2.1 to register the spike renderer and provide the conditional 3D/2D rendering path. On NO-GO, must be reverted to its F5 state.",
+        "deletion_method": "revert-to-f5-state"
+      }
+    ],
+
+    "f6_spike_evidence_files": [
+      {
+        "path": ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/preregistration.json",
+        "created_by_task": "6.1.1",
+        "description": "This preregistration document, including all 6.1.x and 6.2.7 entries. Records the study protocol, z-axis definition, GO thresholds, deletion inventory, and this spike inventory. RETAINED on NO-GO as the record of the NO-GO outcome.",
+        "deletion_method": "retain-no-go-record"
+      },
+      {
+        "path": ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/performance/profiling-protocol.json",
+        "created_by_task": "6.2.6",
+        "description": "The performance profiling protocol for the F6 spike: defines measurement conditions, load scenarios, frame budget thresholds, and the CMD-MG-PROFILE-SPIKE command spec. Status: PENDING_EXECUTION (no profiling data collected yet). RETAINED on NO-GO as evidence that the profiling protocol was defined and the run was not executed/passed.",
+        "deletion_method": "retain-no-go-record"
+      }
+    ],
+
+    "delta_mvi_checks": [
+      {
+        "check_id": "MVI-D-01",
+        "description": "No new spike source files exist: assert that none of the 11 paths listed in f6_spike_source_files exist in the working tree after NO-GO deletion.",
+        "command": "for f in ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpike.test.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeZ.test.ts ui/src/shell/spaces/memory/graph/culling3D.ts ui/src/shell/spaces/memory/graph/graphCanvas3DSpikeRender.test.ts ui/src/shell/spaces/memory/graph/camera3D.ts ui/src/shell/spaces/memory/graph/camera3D.test.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.ts ui/src/shell/spaces/memory/graph/renderPolicy3D.test.ts ui/src/shell/spaces/memory/graph/profiling3D.ts ui/src/shell/spaces/memory/graph/profiling3D.test.ts; do [ -e \"$f\" ] && echo \"FAIL: $f exists\" && exit 1; done; echo PASS",
+        "expected_result": "PASS",
+        "failure_means": "At least one spike source file was not deleted; NO-GO cleanup is incomplete."
+      },
+      {
+        "check_id": "MVI-D-02",
+        "description": "Modified files reverted to F5 state: assert that GraphCanvas3D.tsx, layout.worker.ts, layoutSettle.ts, and MemoryUniverse.tsx have no uncommitted changes and match the last committed (F5) state.",
+        "command": "git diff --name-only HEAD -- ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx ui/src/shell/spaces/memory/graph/layout.worker.ts ui/src/shell/spaces/memory/graph/layoutSettle.ts ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx",
+        "expected_result": "Empty output (no diff lines). Any listed filename indicates revert is incomplete.",
+        "failure_means": "At least one pre-existing file was not reverted to its F5 state after NO-GO."
+      },
+      {
+        "check_id": "MVI-D-03",
+        "description": "No spike imports in MemoryUniverse.tsx: assert that MemoryUniverse.tsx does not import any spike module (graphCanvas3DSpike, camera3D, culling3D, renderPolicy3D, profiling3D, GraphCanvas3D spike path).",
+        "command": "grep -E \"graphCanvas3DSpike|camera3D|culling3D|renderPolicy3D|profiling3D\" ui/src/shell/spaces/memory/graph/MemoryUniverse.tsx && echo FAIL || echo PASS",
+        "expected_result": "PASS",
+        "failure_means": "MemoryUniverse.tsx still imports a spike module after revert."
+      },
+      {
+        "check_id": "MVI-D-04",
+        "description": "No spike imports in GraphCanvas3D.tsx: assert that the reverted GraphCanvas3D.tsx does not import any of the 11 new spike source files.",
+        "command": "grep -E \"graphCanvas3DSpike|camera3D|culling3D|renderPolicy3D|profiling3D\" ui/src/shell/spaces/memory/graph/GraphCanvas3D.tsx && echo FAIL || echo PASS",
+        "expected_result": "PASS",
+        "failure_means": "GraphCanvas3D.tsx still references spike modules after revert."
+      },
+      {
+        "check_id": "MVI-D-05",
+        "description": "No 3D spike references survive in layout.worker.ts and layoutSettle.ts: assert neither file references packed-buffer spike types (packNodePositions, SemanticSceneItem3D, NodePosition3D, graphCanvas3DSpike).",
+        "command": "grep -E \"packNodePositions|SemanticSceneItem3D|NodePosition3D|graphCanvas3DSpike\" ui/src/shell/spaces/memory/graph/layout.worker.ts ui/src/shell/spaces/memory/graph/layoutSettle.ts && echo FAIL || echo PASS",
+        "expected_result": "PASS",
+        "failure_means": "layout.worker.ts or layoutSettle.ts still references spike-only types after revert."
+      },
+      {
+        "check_id": "MVI-D-06",
+        "description": "TypeScript build passes after NO-GO deletion: assert that the UI builds without errors after all spike files are deleted and modified files are reverted.",
+        "command": "cd ui && npm run typecheck 2>&1 | tail -5",
+        "expected_result": "Exit code 0, no TypeScript errors referencing any of the 11 deleted spike files.",
+        "failure_means": "The UI TypeScript build fails after deletion — a revert or deletion is incomplete or introduced a type error."
+      },
+      {
+        "check_id": "MVI-D-07",
+        "description": "No git untracked spike files remain: assert that `git status --short ui/src/shell/spaces/memory/graph/` shows no untracked (??) files matching any of the 11 spike source file names.",
+        "command": "git status --short ui/src/shell/spaces/memory/graph/ | grep '^??' | grep -E \"graphCanvas3DSpike|camera3D\\.ts|camera3D\\.test|culling3D|renderPolicy3D|profiling3D\" && echo FAIL || echo PASS",
+        "expected_result": "PASS",
+        "failure_means": "One or more new spike files are still present as untracked files after deletion."
+      }
+    ],
+
+    "retention_list": [
+      {
+        "path": ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/study/preregistration.json",
+        "reason": "Records the NO-GO outcome, the study protocol, the deletion audit trail, and this inventory. Must be retained as the permanent NO-GO record per the deletion_rule in task_6_1_5.",
+        "deletion_method": "retain-no-go-record"
+      },
+      {
+        "path": ".kiro/specs/memory-graph-production-redesign/evidence/F6/run-001/performance/profiling-protocol.json",
+        "reason": "Records that the performance profiling protocol was defined but the spike did not meet GO thresholds. Retained as part of the NO-GO evidence record.",
+        "deletion_method": "retain-no-go-record"
+      }
+    ],
+
+    "summary": {
+      "new_files_to_delete_on_no_go": 11,
+      "files_to_revert_to_f5_state_on_no_go": 4,
+      "evidence_files_to_retain_on_no_go": 2,
+      "total_spike_source_files": 15,
+      "total_evidence_artifacts": 2,
+      "delta_mvi_checks_added": 7,
+      "all_new_files_confirmed_untracked_in_git": true,
+      "all_modified_files_confirmed_tracked_with_uncommitted_changes_in_git": true
+    }
+  }
+}

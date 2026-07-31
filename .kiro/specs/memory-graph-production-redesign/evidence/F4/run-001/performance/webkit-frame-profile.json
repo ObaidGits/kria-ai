@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-RESOURCE-01",
+  "taskId": "4.9.5",
+  "generatedAt": "2026-07-29T07:38:46.438Z",
+  "engine": "chromium",
+  "browserVersion": "149.0.7827.55",
+  "webkitLimitation": "Full native WebKitGTK profiling requires the Tauri desktop runtime. Playwright webkit engine used as headless CI proxy.",
+  "thresholds": {
+    "p95FrameMs": 33.3,
+    "idleLoopStopMs": 2000
+  },
+  "frameTiming": {
+    "navigationCycles": 20,
+    "sampleCount": 600,
+    "p50Ms": 16.7,
+    "p95Ms": 16.8,
+    "p99Ms": 16.8,
+    "minMs": 16.5,
+    "maxMs": 183.29999999999995,
+    "gate": "PASS"
+  },
+  "longTasks": {
+    "count": 0,
+    "maxMs": null,
+    "over50ms": 0
+  },
+  "heapSnapshots": [
+    {
+      "label": "cycle-0",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-1",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-2",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-3",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-4",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-5",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-6",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-7",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-8",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-9",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-10",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-11",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-12",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-13",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-14",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-15",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-16",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-17",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-18",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    },
+    {
+      "label": "cycle-19",
+      "usedJSHeapSizeBytes": 27600000,
+      "totalJSHeapSizeBytes": 31200000
+    }
+  ],
+  "hardware": {
+    "capturedAt": "2026-07-29T07:38:46.438Z",
+    "os": {
+      "platform": "linux",
+      "release": "7.0.0-28-generic",
+      "arch": "x64"
+    },
+    "cpu": {
+      "model": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "logicalCores": 24,
+      "loadAverage": [
+        6.78,
+        4.71,
+        3.14
+      ]
+    },
+    "ram": {
+      "totalBytes": 16465276928,
+      "freeBytes": 6948220928,
+      "processRssBytes": 199258112
+    },
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+    "dirtyWorktree": true
+  }
+}

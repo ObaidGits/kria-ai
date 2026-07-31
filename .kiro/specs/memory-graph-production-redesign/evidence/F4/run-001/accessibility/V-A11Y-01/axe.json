@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "V-A11Y-01",
+  "generatedAt": "2026-07-29T07:24:13.633Z",
+  "engine": "chromium",
+  "hardware": {
+    "capturedAt": "2026-07-29T07:24:13.633Z",
+    "os": {
+      "platform": "linux",
+      "release": "7.0.0-28-generic",
+      "arch": "x64"
+    },
+    "cpu": {
+      "model": "13th Gen Intel(R) Core(TM) i7-13700HX",
+      "cores": 24
+    },
+    "ram": {
+      "totalGiB": 15
+    },
+    "commit": "765654d8cc7c24dab5663452961112fd0a658569",
+    "branch": "main"
+  },
+  "summary": {
+    "totalDestinations": 7,
+    "destinationsWithSeriousViolations": 0,
+    "zoom200seriousViolations": 0,
+    "forcedColorsSeriousViolations": 1
+  },
+  "destinations": [
+    {
+      "destination": "overview",
+      "tab": "Overview",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "recall",
+      "tab": "Recall",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "knowledge",
+      "tab": "Knowledge",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "timeline",
+      "tab": "Timeline",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "goals",
+      "tab": "Goals",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "sources",
+      "tab": "Sources",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    },
+    {
+      "destination": "health",
+      "tab": "Health",
+      "totalViolations": 0,
+      "seriousOrCritical": 0,
+      "violations": []
+    }
+  ],
+  "zoom200": {
+    "viewport": "720x450 (1440x900 @200%)",
+    "violations": []
+  },
+  "forcedColors": {
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds"
+      }
+    ]
+  }
+}
