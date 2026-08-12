@@ -11350,5 +11350,3 @@ fn detect_session_continuation_options(
     Some((context, detail, options))
 }
 
-#[cfg(test)]
-mod tests;

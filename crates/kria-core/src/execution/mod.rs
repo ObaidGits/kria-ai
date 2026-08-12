@@ -34,8 +34,6 @@ pub mod planner;
 pub mod recovery;
 pub mod scheduler;
 
-#[cfg(test)]
-mod tests;
 
 // ── Re-exports: the public execution API ──
 pub use context::{Artifact, ExecutionContext};

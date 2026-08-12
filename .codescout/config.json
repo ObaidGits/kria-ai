@@ -1,0 +1,92 @@
+{
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/out/**",
+    "**/coverage/**",
+    "**/vendor/**",
+    "**/third_party/**",
+    "**/third-party/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.svelte-kit/**",
+    "**/.angular/**",
+    "**/.cache/**",
+    "**/.turbo/**",
+    "**/.parcel-cache/**",
+    "**/.yarn/**",
+    "**/tmp/**",
+    "**/temp/**",
+    "**/.wwebjs_auth/**",
+    "**/.wwebjs_cache/**",
+    "**/.puppeteer_cache/**",
+    "**/__pycache__/**",
+    "**/venv/**",
+    "**/.venv/**",
+    "**/site-packages/**",
+    "target/**",
+    "models/**",
+    "openclaw-substrate/**",
+    "testing/**",
+    ".codescout/**",
+    ".codescout-trash/**",
+    ".kiro/**",
+    ".git/**",
+    "**/*.min.js",
+    "**/*.min.css",
+    "**/*.bundle.js",
+    "**/*.map",
+    "**/*.lock",
+    "**/package-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/yarn.lock",
+    "**/*.pyc",
+    "**/*.so",
+    "**/*.dylib",
+    "**/*.rlib",
+    "**/*.d",
+    "**/*.o",
+    "**/*.rmeta",
+    "**/*.gguf",
+    "**/*.bin",
+    "**/*.onnx",
+    "**/*.pt",
+    "**/*.pth"
+  ],
+  "tags": {
+    "customRules": []
+  },
+  "importance": {
+    "weights": {
+      "dependents": 5,
+      "imports": 2,
+      "git": 3,
+      "route": 4
+    }
+  },
+  "security": {
+    "customSecretPatterns": [],
+    "ignore": []
+  },
+  "context": {
+    "defaultRadius": 2,
+    "defaultTokenBudget": 12000,
+    "models": {
+      "claude-3": {
+        "tokensPerKiloChar": 280,
+        "pricePer1K": 0.003
+      },
+      "gpt-4": {
+        "tokensPerKiloChar": 260,
+        "pricePer1K": 0.01
+      }
+    }
+  },
+  "clean": {
+    "maxChangesPerRun": 50
+  },
+  "limits": {
+    "maxFilesPerRun": 200
+  }
+}

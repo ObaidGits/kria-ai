@@ -20,7 +20,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 
 use crate::memory::db::Database;
 use crate::memory::error::{MemoryResult, StorageError};
@@ -887,143 +887,9 @@ fn resolve_authorized_seeds(
     Ok(out)
 }
 
-/// Check whether a specific entity passes the caller's policy.
-///
-/// We check: the entity exists AND has at least one relationship (in
-/// `relationships_v2`) that is visible to the caller.  An entity with zero
-/// visible relationships is treated as hidden for traversal purposes.
-///
-/// This is a lightweight check — one indexed query.
-fn is_entity_authorized(
-    conn: &Connection,
-    entity_id: &str,
-    req: &GraphRetrievalRequest,
-) -> MemoryResult<bool> {
-    // Entity must exist.
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM entities WHERE id = ?1",
-            params![entity_id],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::Sqlite)?;
 
-    if exists == 0 {
-        return Ok(false);
-    }
 
-    // Entity is visible if at least one adjacent relationship in
-    // relationships_v2 matches the caller's namespace / scope / sensitivity.
-    let truth_in: String = if req.allowed_truth_states.is_empty() {
-        "'current','unverified','stale','contradicted','inferred','confirmed'".to_owned()
-    } else {
-        req.allowed_truth_states
-            .iter()
-            .map(|s| format!("'{}'", s.replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
 
-    let sql = format!(
-        "SELECT COUNT(*) FROM relationships_v2
-         WHERE namespace  = ?1
-           AND scope      = ?2
-           AND sensitivity <= ?3
-           AND (truth_state IS NULL OR truth_state IN ({truth_in}))
-           AND (truth_state NOT IN ('superseded','forgotten','deleted') OR truth_state IS NULL)
-           AND (
-                 (source_kind = 'entity' AND source_id = ?4)
-              OR (target_kind = 'entity' AND target_id = ?4)
-               )
-         LIMIT 1",
-        truth_in = truth_in
-    );
-
-    let count: i64 = conn
-        .query_row(
-            &sql,
-            params![
-                req.caller_namespace,
-                req.caller_scope,
-                req.max_sensitivity,
-                entity_id
-            ],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::Sqlite)?;
-
-    Ok(count > 0)
-}
-
-/// Check whether a node has any edges that exist in `relationships_v2` but
-/// are NOT visible to the caller (i.e., they fail the policy gate).  This is
-/// used to detect hidden intermediary boundaries where a node has hidden
-/// connections the caller can't traverse through.
-fn node_has_hidden_edges(
-    conn: &Connection,
-    entity_id: &str,
-    req: &GraphRetrievalRequest,
-) -> MemoryResult<bool> {
-    // Count ALL adjacent relationships (ignoring policy) for this entity.
-    let total: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM relationships_v2
-             WHERE (truth_state NOT IN ('superseded','forgotten','deleted')
-                    OR truth_state IS NULL)
-               AND (
-                     (source_kind = 'entity' AND source_id = ?1)
-                  OR (target_kind = 'entity' AND target_id = ?1)
-                   )",
-            params![entity_id],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::Sqlite)?;
-
-    if total == 0 {
-        return Ok(false);
-    }
-
-    // Count policy-visible relationships for this entity.
-    let truth_in: String = if req.allowed_truth_states.is_empty() {
-        "'current','unverified','stale','contradicted','inferred','confirmed'".to_owned()
-    } else {
-        req.allowed_truth_states
-            .iter()
-            .map(|s| format!("'{}'", s.replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-
-    let sql = format!(
-        "SELECT COUNT(*) FROM relationships_v2
-         WHERE namespace  = ?1
-           AND scope      = ?2
-           AND sensitivity <= ?3
-           AND (truth_state IS NULL OR truth_state IN ({truth_in}))
-           AND (truth_state NOT IN ('superseded','forgotten','deleted') OR truth_state IS NULL)
-           AND (
-                 (source_kind = 'entity' AND source_id = ?4)
-              OR (target_kind = 'entity' AND target_id = ?4)
-               )",
-        truth_in = truth_in
-    );
-
-    let visible: i64 = conn
-        .query_row(
-            &sql,
-            params![
-                req.caller_namespace,
-                req.caller_scope,
-                req.max_sensitivity,
-                entity_id
-            ],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::Sqlite)?;
-
-    // Has hidden edges when total > visible (some edges are invisible to caller).
-    Ok(total > visible)
-}
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 

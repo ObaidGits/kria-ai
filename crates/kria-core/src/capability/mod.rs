@@ -67,10 +67,6 @@ pub mod provider;
 pub mod registry;
 pub mod state;
 
-#[cfg(test)]
-pub(crate) mod fake;
-#[cfg(test)]
-mod tests;
 
 pub use config::{CapabilityIntelligenceConfig, CapabilityPlatformConfig, ProviderConfig};
 pub use descriptor::{

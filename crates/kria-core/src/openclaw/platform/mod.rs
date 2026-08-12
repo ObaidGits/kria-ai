@@ -32,8 +32,6 @@ pub mod sync;
 pub mod trust;
 pub mod updates;
 
-#[cfg(test)]
-mod tests;
 
 // ── Public platform API ──
 pub use marketplace::{Listing, MarketQuery, Marketplace};

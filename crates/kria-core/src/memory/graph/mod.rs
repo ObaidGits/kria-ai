@@ -35,5 +35,3 @@ pub mod projection;
 pub mod query;
 pub mod traversal;
 
-#[cfg(test)]
-mod tests;

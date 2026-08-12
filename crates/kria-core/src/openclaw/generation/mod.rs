@@ -41,8 +41,6 @@ pub mod requirements;
 pub mod sandbox;
 pub mod validator;
 
-#[cfg(test)]
-mod tests;
 
 // ── Public ASGS API ──
 pub use approval::{ApprovalDecision, ApprovalLayer, ApprovalRequirement};

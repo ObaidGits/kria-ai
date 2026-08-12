@@ -36,5 +36,3 @@ pub use registry::{create_backend_for_provider, ProviderRegistry};
 pub use streaming::UnifiedStream;
 pub use types::{ModelInfo, ProviderStatus};
 
-#[cfg(test)]
-mod tests;

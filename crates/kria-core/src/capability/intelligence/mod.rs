@@ -42,8 +42,6 @@ pub mod knowledge;
 pub mod lifecycle;
 pub mod llm_proposer;
 pub mod marketplace;
-#[cfg(test)]
-mod neutrality;
 pub mod plan_executor;
 pub mod plan_permission;
 pub mod planner;

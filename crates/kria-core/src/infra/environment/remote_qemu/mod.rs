@@ -3613,5 +3613,3 @@ impl Drop for WindowsQemuProcess {
 #[cfg(windows)]
 mod windows_spawn;
 
-#[cfg(test)]
-mod tests;

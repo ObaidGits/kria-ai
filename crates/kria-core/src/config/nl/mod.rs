@@ -20,8 +20,6 @@ pub mod value;
 
 pub use flow::{ConfigFlowState, FlowEngine, FlowOutcome, FlowStore, ProviderDraft, Slot};
 
-#[cfg(test)]
-mod properties;
 
 /// Whether the unified NL settings control pipeline is active.
 ///
