@@ -86,3 +86,35 @@ Stages 3–6 (voice, image, resource, os_control) were planned on the assumption
 crate size drove the cost. The measurement says otherwise, so they are **not worth
 doing for build speed**. They may still be worth doing later for architectural
 clarity — that is a different justification, and should be argued on its own terms.
+| AFTER consolidation · leaf edit, full test build (49 binaries) | 163s | 8829 MB | 825 MB | 315 | ok |
+| AFTER mold + consolidation · leaf edit, full test build | 179s | 8498 MB | 970 MB | 342 | ok |
+| AFTER mold (actually engaged) + consolidation · leaf edit | 303s | 8269 MB | 643 MB | 583 | ok |
+| AFTER mold + consolidation · leaf edit, warm cache | 172s | 8521 MB | 588 MB | 329 | ok |
+
+## Test-binary consolidation — the change that worked
+
+152 integration-test files each became their own executable, statically linking the
+whole crate. 109 of them make no process-global mutation and were grouped into 6
+umbrella binaries; the other 43 keep their own process because they call
+`env::set_var`, bind a port, or hold a global, and sharing would change how they
+behave. 49 binaries instead of 152.
+
+| Scenario | Wall | Peak MB |
+|---|---|---|
+| Stage 2 only · leaf edit | 246s | 8,630 |
+| **+ consolidation** | **163s** | 8,829 |
+| + consolidation + mold | 172s | 8,521 |
+
+**163s, down from the original 267s — a 39% reduction.** All 1,912 test functions are
+still present; nothing was dropped, only repacked.
+
+### mold made no difference, and is left off
+
+Linking was the hypothesis; the measurement refuted it. 163s without mold, 172s with
+— no gain, within noise. Once the duplicated linking was gone, what remained was
+rustc codegen, which a linker cannot help. mold stays installed but unwired; see
+`.cargo/config.toml` for how to re-enable and why `-B` is the wrong flag.
+
+The lesson repeats Stage 2's: measure the phases before optimising one. Both the
+crate split and the linker were plausible fixes aimed at costs that were not actually
+dominant.

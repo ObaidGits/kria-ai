@@ -697,8 +697,16 @@ fn extract_shell_c_command(args: &[String]) -> Option<String> {
     None
 }
 
-impl PolicyGate for CapabilityPolicyGate {
-    fn evaluate(&self, binary: &str, args: &[String]) -> PolicyDecision {
+/// How many nested shell invocations are followed before the command is refused.
+///
+/// `bash -c "sh -c '…'"` is legitimate but rare; nesting deeper than this is far
+/// more likely to be an attempt to bury a prohibited command under enough layers
+/// that the inspector gives up. Refusing is the safe direction: a false refusal
+/// is visible and recoverable, a missed prohibition is neither.
+const MAX_SHELL_NESTING: u8 = 4;
+
+impl CapabilityPolicyGate {
+    fn evaluate_at_depth(&self, binary: &str, args: &[String], depth: u8) -> PolicyDecision {
         // Command policy is DEFENCE-IN-DEPTH, subordinate to `ExecutionGate`
         // (design §2.1 / §6, OSC-001/OSC-002/OSC-004). Its hard prohibitions —
         // BLACK-scope administration, blocked binaries, and blocked argument
@@ -740,7 +748,11 @@ impl PolicyGate for CapabilityPolicyGate {
                     };
                 }
                 let classification = crate::safety::command_classifier::classify(&inner_cmd);
-                return match classification.tier {
+                // The classifier's tier is only ONE opinion about the inner command.
+                // Take the strictest of it and the verdict the inner command would
+                // have received had it been invoked directly — see
+                // `strictest_inner_verdict` for why that is required for soundness.
+                let classifier_decision = match classification.tier {
                     RiskLevel::Green => PolicyDecision::AutoApproved {
                         risk_level: RiskLevel::Green,
                         capabilities: [CommandCapability::ProcessInspect].into_iter().collect(),
@@ -758,6 +770,7 @@ impl PolicyGate for CapabilityPolicyGate {
                         reason: classification.reason,
                     },
                 };
+                return self.strictest_inner_verdict(&inner_cmd, classifier_decision, depth);
             }
         }
 
@@ -840,6 +853,150 @@ impl PolicyGate for CapabilityPolicyGate {
                 reason: format!("Command '{}' is blocked (Black risk)", binary),
             },
         }
+    }
+
+    /// Combine the classifier's opinion of a shell's inner command with the verdict
+    /// that command would have received had it been invoked directly, and return
+    /// whichever is stricter.
+    ///
+    /// # Why this is necessary
+    ///
+    /// Two independent judgements exist in this gate, and they do not agree:
+    ///
+    /// * `command_classifier` / `black_scope` read a command STRING.
+    /// * capability resolution (step 5) reads a structured `(binary, args)` pair.
+    ///
+    /// Destructive filesystem removal is recognised by the second and not the first.
+    /// So returning the classifier's tier alone for `bash -c "<destructive command>"`
+    /// let a command through the shell wrapper that was blocked when run directly —
+    /// the wrapper became a bypass. Replacing the old blanket "all shells are
+    /// blocked" rule with command inspection is right, but only if the inspection is
+    /// at least as strict as the direct path.
+    ///
+    /// The invariant this restores: **wrapping a command in a shell can never make it
+    /// more permissible than running it directly.**
+    ///
+    /// Each `;`, `&&`, `||` or `|` separated segment is judged on its own and the
+    /// strictest verdict wins, so a prohibited command cannot hide behind a harmless
+    /// first segment such as `echo hi; <destructive command>`.
+    fn strictest_inner_verdict(
+        &self,
+        inner_cmd: &str,
+        classifier_decision: PolicyDecision,
+        depth: u8,
+    ) -> PolicyDecision {
+        if depth >= MAX_SHELL_NESTING {
+            return PolicyDecision::Blocked {
+                reason: format!(
+                    "shell nesting deeper than {MAX_SHELL_NESTING} levels is refused: the \
+                     inner command cannot be inspected with confidence"
+                ),
+            };
+        }
+
+        let mut strictest = classifier_decision;
+        for segment in split_shell_segments(inner_cmd) {
+            let Some((segment_binary, segment_args)) = segment.split_first() else {
+                continue;
+            };
+            let verdict = self.evaluate_at_depth(segment_binary, segment_args, depth + 1);
+            // `risk_level()` reports Black for a Blocked decision, so a single
+            // comparison orders every variant correctly.
+            if verdict.risk_level() > strictest.risk_level() {
+                strictest = verdict;
+            }
+        }
+        strictest
+    }
+}
+
+/// Split a shell command string into independently-judged argv segments.
+///
+/// A shell command can carry several commands at once (`a; b`, `a && b`, `a | b`),
+/// and each one executes, so each must be judged. Returning them separately lets the
+/// caller take the strictest verdict rather than reading only the first command.
+///
+/// # Why this respects quotes
+///
+/// A whitespace-only split gets nested shells wrong in the dangerous direction.
+/// `sh -c 'rmdir /some/path'` would tokenise to `["sh", "-c", "'rmdir", "/some/path'"]`,
+/// so the inner command seen by the next layer is the fragment `'rmdir` — which looks
+/// harmless. The quoted run has to survive as ONE token for the recursion to inspect
+/// the real command, otherwise every prohibition can be hidden one quote deep.
+///
+/// This is still not a full shell parser — it does not do expansion, substitution or
+/// here-documents. It handles quoting and the command separators, which is what
+/// deciding "how many commands are here, and what is each one" requires.
+fn split_shell_segments(command: &str) -> Vec<Vec<String>> {
+    // Close off the token being built, if any.
+    fn end_token(token: &mut String, current: &mut Vec<String>) {
+        if !token.is_empty() {
+            current.push(std::mem::take(token));
+        }
+    }
+    // Close off the segment being built, if any.
+    fn end_segment(
+        token: &mut String,
+        current: &mut Vec<String>,
+        segments: &mut Vec<Vec<String>>,
+    ) {
+        end_token(token, current);
+        if !current.is_empty() {
+            segments.push(std::mem::take(current));
+        }
+    }
+
+    let mut segments: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut token = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = command.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match quote {
+            // Inside quotes only the matching close quote is special, so separators
+            // and whitespace stay part of the command string.
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                    // A quoted run is a token even when empty, so `sh -c ''` does not
+                    // silently vanish.
+                    current.push(std::mem::take(&mut token));
+                } else {
+                    token.push(c);
+                }
+            }
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                // A backslash escapes the next character outside quotes.
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        token.push(next);
+                    }
+                }
+                ';' | '\n' => end_segment(&mut token, &mut current, &mut segments),
+                '&' | '|' => {
+                    // `&&` and `||` are one separator, `&` and `|` are also separators,
+                    // so either way the segment ends here.
+                    if chars.peek() == Some(&c) {
+                        chars.next();
+                    }
+                    end_segment(&mut token, &mut current, &mut segments);
+                }
+                c if c.is_whitespace() => end_token(&mut token, &mut current),
+                _ => token.push(c),
+            },
+        }
+    }
+    // An unterminated quote means the string cannot be read with confidence. Keeping
+    // what was collected is the strict choice: it yields MORE to inspect, never less.
+    end_segment(&mut token, &mut current, &mut segments);
+    segments
+}
+
+impl PolicyGate for CapabilityPolicyGate {
+    fn evaluate(&self, binary: &str, args: &[String]) -> PolicyDecision {
+        self.evaluate_at_depth(binary, args, 0)
     }
 
     fn resolve_capabilities(&self, binary: &str, args: &[String]) -> HashSet<CommandCapability> {

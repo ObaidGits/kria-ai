@@ -23,3 +23,31 @@ incremental = false
 # fast run with:  RUST_TEST_THREADS=8 cargo test …
 [env]
 RUST_TEST_THREADS = "2"
+
+# ── mold linker ──────────────────────────────────────────────────────────
+# Linking is the memory peak and a large share of the wall time of a KRIA test
+# build: 49 test binaries each statically link the whole crate. GNU ld holds the
+# link graph of a ~412k-line crate in memory at once; mold is built for exactly
+# this and is several times faster.
+#
+# A linker decides only HOW the pieces are joined, never what the code does. The
+# resulting binary behaves identically — this is a build-time setting with no
+# effect on the shipped app.
+#
+# ── mold linker: INSTALLED BUT NOT ENABLED ───────────────────────────────
+# mold 2.40.1 is installed at ~/.local/bin/mold. It is deliberately NOT wired in.
+#
+# Measured on this workload, a leaf-edit rebuild took 163s with GNU ld and 172s
+# with mold — no gain, inside run-to-run noise. The reason is that linking is not
+# the bottleneck: after consolidating 152 test binaries into 49, the remaining
+# cost is rustc codegen, and a linker cannot touch that.
+#
+# Enabling it also makes every build depend on ~/.local/bin being on PATH; when it
+# is not, `-fuse-ld=mold` fails the build outright. Carrying that fragility for no
+# measured benefit is a bad trade, so it stays off.
+#
+# To try it again (e.g. for release builds, where linking is a larger share):
+#   [target.x86_64-unknown-linux-gnu]
+#   rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+# Note `-B<dir>` does NOT work — gcc treats it as a search hint and silently keeps
+# using the default linker, so the build looks configured but is not.

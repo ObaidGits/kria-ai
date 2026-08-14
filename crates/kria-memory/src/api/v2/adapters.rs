@@ -68,7 +68,7 @@ pub enum AdapterKind {
 /// # Example
 ///
 /// ```rust
-/// use crate::api::v2::adapters::{AdapterKind, AdapterLimits};
+/// use kria_memory::api::v2::adapters::{AdapterKind, AdapterLimits};
 ///
 /// assert!(!AdapterLimits::requires_auth(AdapterKind::Tauri));
 /// assert!(AdapterLimits::requires_auth(AdapterKind::Axum));
@@ -191,9 +191,9 @@ impl AdapterContext {
 /// # Example
 ///
 /// ```rust
-/// use crate::api::v2::adapters::{AdapterKind, validate_adapter_request};
-/// use crate::api::v2::dto::GraphRequestV2;
-/// use crate::api::v2::error::MemoryApiErrorV2;
+/// use kria_memory::api::v2::adapters::{AdapterKind, validate_adapter_request};
+/// use kria_memory::api::v2::dto::GraphRequestV2;
+/// use kria_memory::api::v2::error::MemoryApiErrorV2;
 /// use serde_json::json;
 ///
 /// let export_req = GraphRequestV2 {

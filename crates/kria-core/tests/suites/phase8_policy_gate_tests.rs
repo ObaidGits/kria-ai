@@ -160,19 +160,97 @@ fn pg17_rm_rf_root_blocked() {
     assert!(decision.is_blocked());
 }
 
+// The next two tests used to assert that `bash` and `sh` are blocked outright.
+// That blanket rule was deliberately replaced with command-level granularity: the
+// gate now inspects what the interpreter would actually RUN, because blocking every
+// shell invocation stopped harmless work while still missing the real danger of a
+// dangerous command reaching a shell by another route.
+//
+// So the property under test changed shape. It is no longer "is this binary a
+// shell" but "does the command this shell would run cross a prohibited boundary".
+// Both halves are asserted, because only checking the blocked half would let a
+// regression that blocks everything pass unnoticed.
+
 #[test]
-fn pg18_bash_blocked() {
+fn pg18_bash_carrying_a_dangerous_command_is_blocked() {
     let g = gate();
-    let decision = g.evaluate("bash", &args(&["-c", "echo hello"]));
-    assert!(decision.is_blocked(), "Shell interpreters must be blocked");
+    let decision = g.evaluate("bash", &args(&["-c", "rm -rf /"]));
+    assert!(
+        decision.is_blocked(),
+        "a shell carrying a prohibited command must be blocked"
+    );
 }
 
 #[test]
-fn pg19_sh_blocked() {
+fn pg18b_bash_carrying_a_harmless_command_is_not_blocked() {
     let g = gate();
-    let decision = g.evaluate("sh", &args(&["-c", "echo hello"]));
-    assert!(decision.is_blocked());
+    let decision = g.evaluate("bash", &args(&["-c", "echo hello"]));
+    assert!(
+        !decision.is_blocked(),
+        "echoing a string is not a prohibited scope; blanket-blocking shells was \
+         replaced by inspecting the command"
+    );
 }
+
+#[test]
+fn pg19_sh_carrying_a_dangerous_command_is_blocked() {
+    let g = gate();
+    let decision = g.evaluate("sh", &args(&["-c", "mkfs.ext4 /dev/sda"]));
+    assert!(
+        decision.is_blocked(),
+        "the inner command is inspected regardless of which interpreter carries it"
+    );
+}
+
+#[test]
+fn pg19b_dangerous_command_cannot_hide_behind_a_harmless_first_segment() {
+    let g = gate();
+    // A shell runs every `;`-separated command, so judging only the first would let
+    // anything through behind an `echo`.
+    let decision = g.evaluate("bash", &args(&["-c", "echo starting; mkfs.ext4 /dev/sda"]));
+    assert!(
+        decision.is_blocked(),
+        "each segment of a compound command must be judged, not just the first"
+    );
+}
+
+#[test]
+fn pg19c_dangerous_command_cannot_hide_behind_a_pipe() {
+    let g = gate();
+    let decision = g.evaluate("bash", &args(&["-c", "cat /etc/hostname | mkfs.ext4 /dev/sda"]));
+    assert!(
+        decision.is_blocked(),
+        "a piped command still executes and must still be judged"
+    );
+}
+
+#[test]
+fn pg19d_dangerous_command_cannot_hide_inside_a_nested_quoted_shell() {
+    let g = gate();
+    // The realistic evasion: one more shell layer, with the payload in quotes. A
+    // whitespace-only split would hand the next layer the fragment `'mkfs.ext4` and
+    // wave it through, so the quoted run has to survive tokenisation intact.
+    let decision = g.evaluate("bash", &args(&["-c", "sh -c 'mkfs.ext4 /dev/sda'"]));
+    assert!(
+        decision.is_blocked(),
+        "a prohibited command must not become permissible by adding a quoted shell layer"
+    );
+}
+
+#[test]
+fn pg19e_quoted_data_is_not_mistaken_for_a_command() {
+    let g = gate();
+    // The other direction: a dangerous-looking string as DATA must not be blocked, or
+    // the gate becomes unusable for ordinary work.
+    let decision = g.evaluate("bash", &args(&["-c", "echo 'mkfs.ext4 /dev/sda'"]));
+    assert!(
+        !decision.is_blocked(),
+        "echoing a string is not running it; only the command position is judged"
+    );
+}
+
+// (The old `pg19_sh_blocked` asserted the same superseded blanket rule as
+// `pg18_bash_blocked` and is replaced by the granular pair above.)
 
 // ─── Unknown Binary ─────────────────────────────────────────────────────────
 

@@ -92,7 +92,7 @@ pub enum CapabilityStatus {
 /// # Example
 ///
 /// ```rust
-/// use crate::api::v2::capabilities::{
+/// use kria_memory::api::v2::capabilities::{
 ///     Capability, CapabilityMatrix, CapabilityStatus,
 /// };
 /// use std::collections::HashMap;

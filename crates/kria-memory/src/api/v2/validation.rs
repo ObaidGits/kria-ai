@@ -148,7 +148,7 @@ pub fn validate_request(req: &GraphRequestV2) -> Result<(), MemoryApiErrorV2> {
 /// # Example
 ///
 /// ```rust
-/// use crate::api::v2::{
+/// use kria_memory::api::v2::{
 ///     dto::GraphRequestV2,
 ///     validation::ValidatedRequest,
 /// };

@@ -25,7 +25,13 @@
 use std::path::{Path, PathBuf};
 
 fn memory_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/memory")
+    // The memory subsystem was lifted out of this crate into `kria-memory`, so its
+    // sources are a sibling crate away rather than under `src/`. This invariant suite
+    // reads the source text directly, which is why it has to follow the move.
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("kria-core lives inside crates/, so it has a parent")
+        .join("kria-memory/src")
 }
 
 /// Recursively collect `.rs` files under `dir`.
@@ -110,7 +116,10 @@ fn i1b_fts_writes_only_in_storage_layer() {
 
 #[test]
 fn i2_single_public_facade_exists() {
-    let api = std::fs::read_to_string(memory_dir().join("api.rs")).unwrap();
+    // `api/mod.rs`, not `api.rs`: the façade has always been a directory module, so
+    // this assertion was reading a path that never existed and failing for the wrong
+    // reason. It went unnoticed because this suite was not in the verification gate.
+    let api = std::fs::read_to_string(memory_dir().join("api/mod.rs")).unwrap();
     assert!(
         api.contains("pub struct MemorySystem"),
         "I-2: MemorySystem façade must exist in memory/api.rs"

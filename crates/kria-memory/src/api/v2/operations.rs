@@ -62,7 +62,7 @@ impl OperationKind {
     /// # Examples
     ///
     /// ```rust
-    /// use crate::api::v2::operations::OperationKind;
+    /// use kria_memory::api::v2::operations::OperationKind;
     ///
     /// assert_eq!(OperationKind::from_str("search"), Some(OperationKind::Search));
     /// assert_eq!(OperationKind::from_str("trace.get"), Some(OperationKind::TraceGet));

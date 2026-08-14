@@ -60,7 +60,7 @@ impl CommandKind {
     /// # Examples
     ///
     /// ```rust
-    /// use crate::api::v2::commands::CommandKind;
+    /// use kria_memory::api::v2::commands::CommandKind;
     ///
     /// assert_eq!(CommandKind::from_str("command.preview"), Some(CommandKind::Preview));
     /// assert_eq!(CommandKind::from_str("export"), Some(CommandKind::Export));
