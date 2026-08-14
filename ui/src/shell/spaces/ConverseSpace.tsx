@@ -57,7 +57,7 @@ import {
 } from "../../stores/guiCognitionSession";
 import { GuiCognitionPanel } from "../../components/GuiCognitionPanel";
 import { Icon } from "../../components/Icon";
-import { Confirm, IconButton, Menu, type MenuItem } from "../../kit";
+import { Button, Confirm, Dialog, IconButton, Menu, type MenuItem } from "../../kit";
 import { OverflowControl } from "../OverflowControl";
 import { controlTier, partitionControls, type TieredControl } from "../controlPriority";
 import MessageStream from "./converse/MessageStream";
@@ -295,6 +295,31 @@ export default function ConverseSpace() {
   });
   const [showArchived, setShowArchived] = createSignal(false);
   const [pendingDelete, setPendingDelete] = createSignal<Thread | null>(null);
+  // Rename is a two-step interaction (open, type, confirm), so the thread being
+  // renamed and the draft name are separate from the thread list itself — the list
+  // must not mutate while the user is still typing.
+  const [renaming, setRenaming] = createSignal<Thread | null>(null);
+  const [renameDraft, setRenameDraft] = createSignal("");
+  const [pendingClearAll, setPendingClearAll] = createSignal(false);
+  const [editDraft, setEditDraft] = createSignal("");
+
+  // Load the message's current text when the edit dialog opens, so editing is an edit
+  // rather than retyping. Keyed on the message id: reopening for a DIFFERENT message
+  // must not carry the previous draft over.
+  createEffect(() => {
+    const pending = converseStore.messagePendingEdit();
+    setEditDraft(pending ? pending.content : "");
+  });
+
+  async function submitMessageEdit(): Promise<void> {
+    const pending = converseStore.messagePendingEdit();
+    const next = editDraft().trim();
+    if (!pending || next.length === 0) return;
+    // Close first: the send is asynchronous and branches the conversation, and leaving
+    // the dialog open over a changing thread is disorienting.
+    converseStore.cancelMessageEdit();
+    await converseStore.editAndResendMessage(pending.id, next);
+  }
   let threadSearchTimer: ReturnType<typeof setTimeout> | undefined;
   let converseRoot: HTMLElement | undefined;
   let focusedLane: string | undefined;
@@ -487,6 +512,11 @@ export default function ConverseSpace() {
         items.push(
           { id: "export-text", label: "Export as plain text (.txt)", icon: "file-text", disabled: exportDisabled(), description: exportReason, onSelect: () => void converseStore.exportActiveConversation("text") },
           { id: "export-markdown", label: "Export as Markdown (.md)", icon: "file-code", disabled: exportDisabled(), description: exportReason, onSelect: () => void converseStore.exportActiveConversation("markdown") },
+          { id: "export-json", label: "Export as JSON (.json)", icon: "file-code", disabled: exportDisabled(), description: exportReason, onSelect: () => void converseStore.exportActiveConversation("json") },
+          // Deleting every conversation is irreversible, so it opens a confirmation
+          // rather than acting on the click. The backend command existed with no UI at
+          // all, which meant there was no way to clear history from inside the app.
+          { id: "clear-all-chats", label: "Delete all chats…", icon: "trash-2", description: "Removes every conversation and starts a new one", onSelect: () => setPendingClearAll(true) },
           { id: "export-pdf", label: "Export as PDF / print", icon: "printer", disabled: exportDisabled(), description: exportReason, onSelect: () => void converseStore.exportActiveConversation("pdf") },
         );
       } else if (control.id === "detach") {
@@ -577,6 +607,16 @@ export default function ConverseSpace() {
                     </button>
                     <div class="kria-converse__thread-actions">
                       <IconButton
+                        icon="pencil"
+                        label={`Rename ${thread.title}`}
+                        onClick={() => {
+                          // Prefill with the current name so renaming is an edit, not
+                          // retyping from scratch.
+                          setRenameDraft(thread.title);
+                          setRenaming(thread);
+                        }}
+                      />
+                      <IconButton
                         icon="pin"
                         label={thread.pinned ? `Unpin ${thread.title}` : `Pin ${thread.title}`}
                         aria-pressed={thread.pinned}
@@ -666,6 +706,13 @@ export default function ConverseSpace() {
                         icon: converseStore.exportFormat() === "markdown" ? "check" : "file-code",
                         disabled: exportDisabled(),
                         onSelect: () => void converseStore.exportActiveConversation("markdown"),
+                      },
+                      {
+                        id: "export-json",
+                        label: "JSON (.json)",
+                        icon: converseStore.exportFormat() === "json" ? "check" : "file-code",
+                        disabled: exportDisabled(),
+                        onSelect: () => void converseStore.exportActiveConversation("json"),
                       },
                       {
                         id: "export-pdf",
@@ -832,6 +879,110 @@ export default function ConverseSpace() {
           </div>
         </div>
       </Show>
+
+      <Dialog
+        open={renaming() !== null}
+        onOpenChange={(open) => { if (!open) setRenaming(null); }}
+        title="Rename chat"
+        description={<>A name you choose is kept — automatic titling will not overwrite it.</>}
+        footer={
+          <div class="kria-converse__rename-actions">
+            <Button variant="ghost" onClick={() => setRenaming(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={renameDraft().trim().length === 0}
+              onClick={() => {
+                const thread = renaming();
+                const title = renameDraft().trim();
+                if (!thread || title.length === 0) return;
+                setRenaming(null);
+                void converseStore.renameThread(thread.id, title);
+              }}
+            >
+              Save name
+            </Button>
+          </div>
+        }
+      >
+        <label class="kria-converse__rename-field">
+          <span>Chat name</span>
+          <input
+            type="text"
+            value={renameDraft()}
+            maxLength={120}
+            autofocus
+            onInput={(event) => setRenameDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              // Enter saves, Escape closes — the two keys anyone tries in a one-field
+              // dialog. Without these the mouse is the only way out.
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const thread = renaming();
+                const title = renameDraft().trim();
+                if (!thread || title.length === 0) return;
+                setRenaming(null);
+                void converseStore.renameThread(thread.id, title);
+              }
+              if (event.key === "Escape") setRenaming(null);
+            }}
+          />
+        </label>
+      </Dialog>
+
+      <Dialog
+        open={converseStore.messagePendingEdit() !== null}
+        onOpenChange={(open) => { if (!open) converseStore.cancelMessageEdit(); }}
+        title="Edit and resend"
+        description={
+          <>
+            Your original conversation is kept. The edited question starts a new branch
+            from this point, so the earlier answer stays available in the sidebar.
+          </>
+        }
+        footer={
+          <div class="kria-converse__rename-actions">
+            <Button variant="ghost" onClick={() => converseStore.cancelMessageEdit()}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={editDraft().trim().length === 0}
+              onClick={() => void submitMessageEdit()}
+            >
+              Send edited message
+            </Button>
+          </div>
+        }
+      >
+        <label class="kria-converse__rename-field">
+          <span>Your message</span>
+          <textarea
+            value={editDraft()}
+            rows={5}
+            autofocus
+            onInput={(event) => setEditDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              // Ctrl/Cmd+Enter sends, matching the Composer. A bare Enter must insert a
+              // newline here: an edited message is often multi-line, and sending on
+              // Enter would truncate it mid-thought.
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                void submitMessageEdit();
+              }
+              if (event.key === "Escape") converseStore.cancelMessageEdit();
+            }}
+          />
+        </label>
+      </Dialog>
+
+      <Confirm
+        open={pendingClearAll()}
+        onOpenChange={(open) => { if (!open) setPendingClearAll(false); }}
+        title="Delete all chats?"
+        message={`All ${converseStore.threads().length} conversation(s) and their history will be permanently deleted, and a new empty chat will be started. KRIA memories are managed separately and are not affected.`}
+        confirmLabel="Delete all chats"
+        cancelLabel="Keep my chats"
+        risk="danger"
+        onConfirm={() => void converseStore.clearAllThreads()}
+      />
 
       <Confirm
         open={pendingDelete() !== null}

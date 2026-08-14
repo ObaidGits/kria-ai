@@ -109,6 +109,47 @@ impl ConversationStore {
         })
     }
 
+    /// Every turn in a session, oldest first.
+    ///
+    /// Separate from [`Self::get_recent_turns`] because that one takes a `limit` and
+    /// its callers pass 100 — correct for building a prompt context window, silently
+    /// wrong for an export, where a longer conversation would lose its beginning with
+    /// nothing to indicate the file is incomplete.
+    ///
+    /// There is no limit parameter here on purpose: a caller that wants the whole
+    /// conversation should not have to guess a number large enough.
+    pub fn get_all_turns(&self, session_id: &str) -> MemoryResult<Vec<ConversationTurn>> {
+        self.db.with_read(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, session_id, role, content, tool_name, tool_result, tokens_used, \
+                     timestamp FROM conversations WHERE session_id = ?1 ORDER BY id ASC",
+                )
+                .map_err(StorageError::Sqlite)?;
+            let turns = stmt
+                .query_map(params![session_id], |row| {
+                    Ok(ConversationTurn {
+                        id: Some(row.get(0)?),
+                        session_id: row.get(1)?,
+                        role: row.get(2)?,
+                        content: row.get(3)?,
+                        tool_name: row.get(4)?,
+                        tool_result: row.get(5)?,
+                        tokens_used: row.get(6)?,
+                        timestamp: row.get::<_, String>(7).map(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .map(|d| d.with_timezone(&Utc))
+                                .unwrap_or_else(|_| Utc::now())
+                        })?,
+                    })
+                })
+                .map_err(StorageError::Sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::Sqlite)?;
+            Ok(turns)
+        })
+    }
+
     /// Full-text search across conversation turns (parity with the legacy
     /// `MemoryReader::search_conversations`). Uses the FTS5 index, newest match
     /// first. Empty/operator-only queries return no rows.

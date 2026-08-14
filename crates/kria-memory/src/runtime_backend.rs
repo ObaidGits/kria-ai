@@ -391,6 +391,10 @@ impl MemoryReader for KriaMemoryRuntime {
         Ok(self.conversation.get_recent_turns(session_id, limit)?)
     }
 
+    fn get_all_turns(&self, session_id: &str) -> anyhow::Result<Vec<ConversationTurn>> {
+        Ok(self.conversation.get_all_turns(session_id)?)
+    }
+
     fn search_conversations(
         &self,
         query: &str,

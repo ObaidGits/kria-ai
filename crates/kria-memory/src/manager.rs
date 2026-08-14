@@ -57,6 +57,9 @@ pub trait MemoryReader: Send + Sync {
         session_id: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<ConversationTurn>>;
+    /// Every turn in a session, oldest first — for export, where a `limit` would
+    /// silently drop the start of a long conversation.
+    fn get_all_turns(&self, session_id: &str) -> anyhow::Result<Vec<ConversationTurn>>;
     fn search_conversations(
         &self,
         query: &str,

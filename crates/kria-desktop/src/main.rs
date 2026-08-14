@@ -124,6 +124,8 @@ fn main() {
             commands::sessions::rename_session,
             commands::sessions::auto_rename_session,
             commands::sessions::search_sessions,
+            commands::sessions::auto_title_session,
+            commands::sessions::export_session,
             commands::sessions::set_session_pinned,
             commands::sessions::set_session_archived,
             commands::sessions::set_session_temporary,

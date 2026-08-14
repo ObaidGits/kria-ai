@@ -540,6 +540,75 @@ pub async fn auto_rename_session(
     }))
 }
 
+/// Give a conversation a readable name derived from its own first real message.
+///
+/// The UI calls this after a turn completes; it does not pass a title, because
+/// choosing one is domain logic and lives in `kria_core::agent::session_title`.
+///
+/// Deliberately a no-op in three cases, each reported rather than silently ignored:
+/// the user renamed the chat by hand (`session_title_manual` is `1`), the
+/// conversation still contains nothing but greetings, or the title already matches.
+/// A chat the user named must never be overwritten by a guess.
+#[tauri::command]
+pub async fn auto_title_session(
+    session_id: Option<String>,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let session_id = match session_id {
+        Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+        _ => state.current_session_id.read().await.clone(),
+    };
+
+    // A hand-picked name outranks anything derived. Checked BEFORE reading the
+    // conversation so a manual title costs no query.
+    let manual_key = format!("session_title_manual:{session_id}");
+    if state
+        .memory_store
+        .get_preference(&manual_key)
+        .map_err(|error| error.to_string())?
+        .as_deref()
+        == Some("1")
+    {
+        return Ok(serde_json::json!({ "updated": false, "reason": "manual_title" }));
+    }
+
+    // Only the opening exchange matters for a title, so this reads a small window
+    // rather than the whole conversation.
+    let turns = state
+        .memory_store
+        .get_recent_turns(&session_id, 12)
+        .map_err(|error| error.to_string())?;
+
+    let Some(title) = kria_core::agent::session_title::derive_title(&turns) else {
+        return Ok(serde_json::json!({ "updated": false, "reason": "no_substantive_message" }));
+    };
+
+    let title_key = format!("session_title:{session_id}");
+    let existing = state
+        .memory_store
+        .get_preference(&title_key)
+        .map_err(|error| error.to_string())?;
+    if existing.as_deref() == Some(title.as_str()) {
+        return Ok(serde_json::json!({ "updated": false, "reason": "unchanged", "title": title }));
+    }
+
+    let memory_writer: Arc<dyn MemoryManager> = state.memory_store.clone();
+    memory_writer
+        .set_preference(&preference_record(title_key, title.clone()))
+        .map_err(|error| error.to_string())?;
+    // Left at "0": this title was derived, so a later derivation may improve it, and
+    // a manual rename must still be able to take over.
+    memory_writer
+        .set_preference(&preference_record(manual_key, "0"))
+        .map_err(|error| error.to_string())?;
+
+    Ok(serde_json::json!({ "updated": true, "title": title }))
+}
+
 #[tauri::command]
 pub async fn search_sessions(
     query: String,
@@ -663,6 +732,65 @@ pub async fn set_memory_enabled(
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Render one conversation as a downloadable transcript.
+///
+/// Returns the rendered content plus a suggested filename and dialog filter, which
+/// the caller hands to `save_export_file`. Splitting "build the transcript" from
+/// "write it to disk" means the format rules are exercised by unit tests in
+/// `kria_core::agent::transcript` rather than only by clicking the button.
+///
+/// `session_id` defaults to the active session. `format` is one of `text`,
+/// `markdown`, or `json`; an unrecognised name is REFUSED rather than defaulted, so
+/// a typo cannot produce a plain-text file when the caller asked for JSON.
+#[tauri::command]
+pub async fn export_session(
+    session_id: Option<String>,
+    format: String,
+    state: State<'_, AppStateCell>,
+) -> Result<serde_json::Value, String> {
+    use kria_core::agent::transcript::{render, TranscriptFormat};
+
+    let state = state
+        .get()
+        .ok_or_else(|| "KRIA is still initializing — please try again in a moment".to_string())?;
+
+    let format = TranscriptFormat::parse(&format).ok_or_else(|| {
+        format!("Unsupported export format '{format}'. Use text, markdown, or json.")
+    })?;
+
+    let session_id = match session_id {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => state.current_session_id.read().await.clone(),
+    };
+
+    // Every turn, not the most recent 100: an export that quietly loses the start of
+    // a long conversation is worse than one that refuses.
+    let turns = state
+        .memory_store
+        .get_all_turns(&session_id)
+        .map_err(|error| error.to_string())?;
+
+    // Same title the sidebar shows, so the file the user gets is named after the
+    // conversation they clicked rather than a raw session id.
+    let title = state
+        .memory_store
+        .get_preference(&format!("session_title:{session_id}"))
+        .unwrap_or(None)
+        .unwrap_or_else(|| {
+            let short: String = session_id.chars().take(8).collect();
+            format!("Session ({short})")
+        });
+
+    let transcript = render(&title, &turns, format);
+    Ok(serde_json::json!({
+        "content": transcript.content,
+        "suggested_name": transcript.suggested_name,
+        "extension": transcript.extension,
+        "filter_label": transcript.filter_label,
+        "turn_count": transcript.turn_count,
+    }))
 }
 
 #[cfg(test)]

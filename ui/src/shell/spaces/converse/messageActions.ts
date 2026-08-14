@@ -121,5 +121,20 @@ export function buildMessageActions(message: Message): MessageAction[] {
     });
   }
 
+  // Edit is offered ONLY on the user's own messages, and is placed after the base
+  // six so their positions do not shift depending on who sent the message — muscle
+  // memory for "second item is Retry" holds either way.
+  //
+  // Editing KRIA's reply and re-sending it would fabricate a question the user never
+  // asked, which is why there is no assistant equivalent.
+  if (message.role === "user") {
+    actions.push({
+      id: "edit",
+      label: "Edit and resend",
+      icon: "pencil",
+      run: () => converseStore.requestMessageEdit(message),
+    });
+  }
+
   return actions;
 }

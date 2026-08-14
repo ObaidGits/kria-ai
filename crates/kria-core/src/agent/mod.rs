@@ -2,6 +2,20 @@
 // Single source of truth for workflow lifecycle, telemetry, verdicts, HITL, and capabilities.
 pub mod workflow_types;
 
+/// Rendering a stored conversation into a text, Markdown, or JSON file.
+///
+/// Lives here rather than in the UI store that used to build these strings, so the
+/// escaping and filename rules are testable and every format is available to any
+/// caller, not just the conversation currently loaded on screen.
+pub mod transcript;
+
+/// Deriving a readable conversation name from the conversation itself.
+///
+/// Exists because every chat kept the placeholder `"New chat"` forever: the backend
+/// had an auto-rename command and nothing called it, so the sidebar showed several
+/// identical rows and the user could not tell their own chats apart.
+pub mod session_title;
+
 // ── Phase 1: Execution Environment Resolution ────────────────────────────────
 // Transitional bridge from legacy ExecutionTarget to canonical ExecutionEnvironment + ToolCategory.
 pub mod execution_environment;

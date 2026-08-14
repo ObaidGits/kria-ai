@@ -91,9 +91,62 @@ echo "═══ kria-memory ═══"
 run_target memory-lib -p kria-memory --lib -j 2
 run_target memory-doc -p kria-memory --doc -j 2
 
+# ── kria-desktop ────────────────────────────────────────────────────────────
+# Small but load-bearing: `live_os_control_default.rs` asserts that live OS control
+# is ON by default and that the deny-live TEST composition is not linked into the
+# shipped binary. Those two facts are exactly the kind that break silently, and this
+# crate was outside the gate — the guards existed and nothing ran them.
+echo "═══ kria-desktop ═══"
+run_target desktop-tests -p kria-desktop --tests -j 2
+
+# ── Frontend ────────────────────────────────────────────────────────────────
+# The UI suite was NOT in this gate, which is how a failing CSS transition-budget
+# test sat unnoticed: the Rust gate was green and nobody ran vitest. ~5,300 tests
+# and a typecheck are too much signal to leave outside the one command that is
+# supposed to mean "everything passes".
+#
+# Counted separately from the Rust totals because the floor check below is
+# calibrated to the Rust suites; a frontend failure is reported on its own terms.
+echo "═══ ui ═══"
+if [ -d ui/node_modules ]; then
+  printf '  %-34s ' "ui-typecheck"
+  if (cd ui && timeout 900 npx tsc --noEmit > "$LOG_DIR/ui-typecheck.log" 2>&1); then
+    echo "ok"
+  else
+    echo "FAILED (see $LOG_DIR/ui-typecheck.log)"
+    fail=$((fail + 1))
+    failed_tests+=("ui-typecheck")
+  fi
+
+  printf '  %-34s ' "ui-vitest"
+  (cd ui && timeout 1800 npx vitest run --reporter=basic > "$LOG_DIR/ui-vitest.log" 2>&1)
+  ui_line=$(grep -E "^ *Tests  " "$LOG_DIR/ui-vitest.log" | tail -1)
+  ui_failed=$(printf '%s' "$ui_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || true)
+  ui_passed=$(printf '%s' "$ui_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || true)
+  ui_pass=${ui_passed:-0}
+  ui_fail=${ui_failed:-0}
+  printf '%5s passed  %3s failed\n' "$ui_pass" "$ui_fail"
+  if [ "$ui_fail" -gt 0 ]; then
+    # Names come from vitest's own failure lines so they can be listed alongside
+    # the Rust ones and matched against the same allowlists.
+    while read -r name; do
+      [ -n "$name" ] && failed_tests+=("$name")
+    done < <(grep -oE "^ *FAIL +[^ ]+" "$LOG_DIR/ui-vitest.log" | awk '{print $2}' | sort -u)
+  fi
+else
+  echo "  ui                                 SKIPPED (run: cd ui && npm ci)"
+fi
+
 echo
 echo "═══ Summary ═══"
-printf 'passed: %d   failed: %d\n' "$pass" "$fail"
+# Reported as two lines, not one. An earlier version added the frontend's FAILURES
+# to the Rust total while leaving its ~5,300 passes out, which understated the suite
+# and made the ratio meaningless. The floor check below still uses the Rust count
+# alone, so a skipped Rust target cannot be masked by a healthy frontend run.
+printf 'rust:     %6d passed  %3d failed\n' "$pass" "$fail"
+printf 'frontend: %6d passed  %3d failed\n' "${ui_pass:-0}" "${ui_fail:-0}"
+printf 'total:    %6d passed  %3d failed\n' \
+  "$((pass + ${ui_pass:-0}))" "$((fail + ${ui_fail:-0}))"
 
 if [ "$pass" -lt "$MIN_EXPECTED_TESTS" ]; then
   echo
@@ -167,7 +220,7 @@ fi
 
 echo
 if [ "${#triage_hit[@]}" -gt 0 ]; then
-  echo "GATE PASSED with debt — $pass tests passed, ${#triage_hit[@]} unexplained failure(s) outstanding."
+  echo "GATE PASSED with debt — $((pass + ${ui_pass:-0})) tests passed, ${#triage_hit[@]} unexplained failure(s) outstanding."
 else
-  echo "GATE PASSED — $pass tests, no unexpected failures."
+  echo "GATE PASSED — $((pass + ${ui_pass:-0})) tests, no unexpected failures."
 fi

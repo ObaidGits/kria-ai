@@ -255,7 +255,21 @@ export interface ComposerDraft {
   toolLock?: string;
 }
 
-export type ConversationExportFormat = "text" | "markdown" | "pdf";
+export type ConversationExportFormat = "text" | "markdown" | "json" | "pdf";
+
+/**
+ * What `export_session` returns — rendered by `kria_core::agent::transcript`.
+ *
+ * snake_case because these are the Rust struct's field names as serialised; renaming
+ * them here would only hide where they come from.
+ */
+interface ExportedTranscript {
+  content: string;
+  suggested_name: string;
+  extension: string;
+  filter_label: string;
+  turn_count: number;
+}
 
 // ─── Signals ───────────────────────────────────────────────────────────────────
 
@@ -286,6 +300,15 @@ const [searchingThreads, setSearchingThreads] = createSignal(false);
 const [deletingThreadId, setDeletingThreadId] = createSignal<string | null>(null);
 const [exportFormat, setExportFormat] = createSignal<ConversationExportFormat>("markdown");
 const [exportingConversation, setExportingConversation] = createSignal(false);
+/**
+ * The message the user asked to edit, or `null`.
+ *
+ * Lives in the store rather than inside ConverseSpace because the request comes from
+ * `messageActions.ts`, a plain module with no component scope — the same reason
+ * "Why did KRIA answer this?" reaches for shellStore. The dialog itself is rendered
+ * by ConverseSpace, which watches this.
+ */
+const [messagePendingEdit, setMessagePendingEdit] = createSignal<Message | null>(null);
 
 interface RawSession {
   id: string;
@@ -497,6 +520,86 @@ function setThreadTemporary(threadId: string, temporary: boolean): Promise<boole
   return setThreadFlag(threadId, "temporary", temporary);
 }
 
+/**
+ * Rename a conversation to a name the user typed.
+ *
+ * `rename_session` has existed in the backend all along with nothing calling it, so
+ * there was no way to name a chat. It also sets a "manual" flag server-side, which
+ * stops automatic titling from ever overwriting the user's choice.
+ */
+async function renameThread(threadId: string, title: string): Promise<boolean> {
+  const trimmed = title.trim();
+  if (!threadId) return false;
+  if (trimmed.length === 0) {
+    actionNotification("error", "A conversation name cannot be empty.");
+    return false;
+  }
+  const result = await bridgeInvoke<void>("rename_session", { sessionId: threadId, title: trimmed });
+  if (!result.ok) {
+    actionNotification("error", `Couldn't rename the conversation: ${result.message}`);
+    return false;
+  }
+  // Update in place rather than reloading: the row the user just edited should not
+  // jump or flicker while a full list round trip completes.
+  setThreads((current) =>
+    current.map((thread) => (thread.id === threadId ? { ...thread, title: trimmed } : thread)),
+  );
+  actionNotification("success", "Conversation renamed");
+  return true;
+}
+
+/**
+ * Ask the backend to derive a readable title for a conversation.
+ *
+ * Returns the applied title, or `null` when nothing changed — which is the normal
+ * outcome for a chat the user named themselves or one that still contains only
+ * greetings. Callers treat `null` as "fine, leave it".
+ */
+async function autoTitleThread(threadId: string): Promise<string | null> {
+  if (!threadId) return null;
+  const result = await bridgeInvoke<{ updated: boolean; title?: string }>(
+    "auto_title_session",
+    { sessionId: threadId },
+  );
+  if (!result.ok || !result.data?.updated || !result.data.title) return null;
+  const title = result.data.title;
+  setThreads((current) =>
+    current.map((thread) => (thread.id === threadId ? { ...thread, title } : thread)),
+  );
+  return title;
+}
+
+/**
+ * Delete every conversation and start a fresh one.
+ *
+ * Irreversible, so the caller is responsible for confirming first — this function
+ * does the deed and does not ask. The backend returns how much it removed, which is
+ * reported back so the user sees that something actually happened.
+ */
+async function clearAllThreads(): Promise<boolean> {
+  const result = await bridgeInvoke<{
+    deleted_session_count: number;
+    deleted_turn_count: number;
+    replacement_session_id: string;
+  }>("clear_all_chat_sessions", undefined, { timeoutMs: 60_000 });
+  if (!result.ok) {
+    actionNotification("error", `Couldn't clear conversations: ${result.message}`);
+    return false;
+  }
+  clearMessages();
+  const refreshed = await loadThreads();
+  const replacement = result.data?.replacement_session_id;
+  if (replacement && refreshed.some((thread) => thread.id === replacement)) {
+    await activateThread(replacement);
+  }
+  const sessions = result.data?.deleted_session_count ?? 0;
+  actionNotification(
+    "success",
+    sessions === 1 ? "1 conversation deleted" : `${sessions} conversations deleted`,
+  );
+  return true;
+}
+
 async function deleteThread(threadId: string): Promise<boolean> {
   if (!threadId || deletingThreadId()) return false;
   const deletingActiveThread = activeThreadId() === threadId;
@@ -580,60 +683,8 @@ function safeExportName(title: string, extension: string): string {
   return `kria-${safeTitle}-${new Date().toISOString().slice(0, 10)}.${extension}`;
 }
 
-function appendTextResults(lines: string[], message: Message): void {
-  for (const result of message.results ?? []) {
-    lines.push(`  Result: ${result.title} [${result.kind}]`);
-    if (result.summary) lines.push(`  Summary: ${result.summary}`);
-    if (result.data !== undefined) lines.push(`  Data:\n${toolResultText(result.data)}`);
-  }
-}
 
-function buildTextExport(title: string): string {
-  const lines = [
-    `KRIA Conversation — ${title}`,
-    `Exported: ${new Date().toLocaleString()}`,
-    "",
-  ];
-  for (const message of messages()) {
-    lines.push(`[${exportTime(message.timestamp)}] ${exportRole(message.role).toUpperCase()}`);
-    lines.push(message.content);
-    appendTextResults(lines, message);
-    lines.push("");
-  }
-  const tools = workBlocks().filter((block) => block.type === "tool-call" && block.toolCall);
-  if (tools.length > 0) {
-    lines.push("TOOL EXECUTION DETAILS", "");
-    for (const block of tools) {
-      lines.push(`${block.toolCall!.name} [${block.status}]`);
-      if (block.toolCall!.args !== undefined) lines.push(`Arguments:\n${block.toolCall!.args}`);
-      if (block.toolCall!.result !== undefined) lines.push(`Result:\n${block.toolCall!.result}`);
-      lines.push("");
-    }
-  }
-  return lines.join("\n");
-}
 
-function buildMarkdownExport(title: string): string {
-  const lines = [`# KRIA Conversation — ${title}`, "", `> Exported: ${new Date().toLocaleString()}`, ""];
-  for (const message of messages()) {
-    lines.push(`## ${exportRole(message.role)} · ${exportTime(message.timestamp)}`, "", message.content, "");
-    for (const result of message.results ?? []) {
-      lines.push(`### Result: ${result.title}`, "", `Status: \`${result.kind}\``, "");
-      if (result.summary) lines.push(result.summary, "");
-      if (result.data !== undefined) lines.push("```text", toolResultText(result.data), "```", "");
-    }
-  }
-  const tools = workBlocks().filter((block) => block.type === "tool-call" && block.toolCall);
-  if (tools.length > 0) {
-    lines.push("# Tool execution details", "");
-    for (const block of tools) {
-      lines.push(`## ${block.toolCall!.name}`, "", `Status: \`${block.status}\``, "");
-      if (block.toolCall!.args !== undefined) lines.push("**Arguments**", "", "```json", block.toolCall!.args, "```", "");
-      if (block.toolCall!.result !== undefined) lines.push("**Result**", "", "```text", block.toolCall!.result, "```", "");
-    }
-  }
-  return lines.join("\n");
-}
 
 function escapeExportHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -673,6 +724,20 @@ pre { font-family: ui-monospace, monospace; }
 </style></head><body><h1>KRIA Conversation — ${escapeExportHtml(title)}</h1><p>Exported ${escapeExportHtml(new Date().toLocaleString())}</p>${messageHtml}${toolHtml ? `<h2>Tool execution details</h2>${toolHtml}` : ""}</body></html>`;
 }
 
+/**
+ * A native "Save As" dialog waits for a HUMAN to choose a folder and confirm.
+ *
+ * This is the fix for the reported bug: `save_export_file` inherited the module's
+ * 8-second default timeout, so anyone who took longer than that to pick a location
+ * saw `invoke('save_export_file') timed out after 8000ms` — reported to them as
+ * "Check file permissions and try again", which was not the problem at all. Worse,
+ * nothing cancels the Rust side, so a click after the deadline still wrote the file
+ * while the UI had already declared failure.
+ *
+ * Five minutes is not a performance budget, it is a "user walked away" backstop.
+ */
+const SAVE_DIALOG_TIMEOUT_MS = 300_000;
+
 async function exportActiveConversation(format: ConversationExportFormat = exportFormat()): Promise<boolean> {
   const threadId = activeThreadId();
   const thread = threads().find((candidate) => candidate.id === threadId);
@@ -689,24 +754,61 @@ async function exportActiveConversation(format: ConversationExportFormat = expor
   setExportFormat(format);
   setExportingConversation(true);
   try {
-    const result = format === "pdf"
-      ? await bridgeInvoke<unknown>("open_html_for_print", {
-          html: buildPrintExport(thread.title),
-          filename: safeExportName(thread.title, "html"),
-        })
-      : await bridgeInvoke<string | null>("save_export_file", {
-          content: format === "text" ? buildTextExport(thread.title) : buildMarkdownExport(thread.title),
-          defaultName: safeExportName(thread.title, format === "text" ? "txt" : "md"),
-          filterName: format === "text" ? "Text Files" : "Markdown Files",
-          extensions: [format === "text" ? "txt" : "md"],
-        });
-    if (!result.ok) {
-      const action = format === "pdf" ? "open the print dialog" : `save the ${format} file`;
-      actionNotification("error", `Couldn't ${action}: ${result.message}. Check file permissions and try again.`);
+    if (format === "pdf") {
+      const printed = await bridgeInvoke<unknown>(
+        "open_html_for_print",
+        { html: buildPrintExport(thread.title), filename: safeExportName(thread.title, "html") },
+        // Opens the OS default browser, which can be slow to launch cold.
+        { timeoutMs: SAVE_DIALOG_TIMEOUT_MS },
+      );
+      if (!printed.ok) {
+        actionNotification("error", `Couldn't open the print dialog: ${printed.message}`);
+        return false;
+      }
+      actionNotification("success", "Print dialog opened");
+      return true;
+    }
+
+    // Rendering happens in kria-core via `export_session`, not here. That gives the
+    // export the WHOLE conversation from the database rather than only the turns
+    // currently loaded into this store, and puts the escaping and filename rules
+    // where they can be unit-tested.
+    const rendered = await bridgeInvoke<ExportedTranscript>(
+      "export_session",
+      { sessionId: threadId, format },
+      { timeoutMs: 30_000 },
+    );
+    if (!rendered.ok) {
+      actionNotification("error", `Couldn't prepare the ${format} export: ${rendered.message}`);
       return false;
     }
-    if (format !== "pdf" && result.data === null) return false;
-    actionNotification("success", format === "pdf" ? "Print dialog opened" : "Conversation exported");
+    const transcript = rendered.data;
+    if (!transcript || transcript.turn_count === 0) {
+      actionNotification("error", "This conversation has no saved messages to export.");
+      return false;
+    }
+
+    const saved = await bridgeInvoke<string | null>(
+      "save_export_file",
+      {
+        content: transcript.content,
+        defaultName: transcript.suggested_name,
+        filterName: transcript.filter_label,
+        extensions: [transcript.extension],
+      },
+      { timeoutMs: SAVE_DIALOG_TIMEOUT_MS },
+    );
+    if (!saved.ok) {
+      // The real reason, not a guess about permissions.
+      actionNotification("error", `Couldn't save the ${format} file: ${saved.message}`);
+      return false;
+    }
+    // `null` means the user closed the dialog. That is a choice, not a failure, so it
+    // gets no error toast — the previous code returned false here silently, which was
+    // right, and this keeps that while making the intent explicit.
+    if (saved.data === null) return false;
+
+    actionNotification("success", `Conversation exported to ${saved.data}`);
     return true;
   } finally {
     setExportingConversation(false);
@@ -796,7 +898,22 @@ function initRuntimeSubscriptions(): void {
     }),
     eventBus.on("agent:done", ({ sessionId }) => {
       if (ownsActiveThread(sessionId)) setThinkingState(sessionId || activeThreadId() || "", false);
-      void loadThreads().catch(() => undefined);
+      // Give the conversation a readable name now that it has content.
+      //
+      // Every chat was created as "New chat" and nothing ever replaced it, so the
+      // sidebar filled up with identical rows — the user could not tell their own
+      // conversations apart. The backend has always had the rename command; nothing
+      // called it. Titling happens BEFORE reloading the list so the refreshed rows
+      // already carry the new name instead of showing the placeholder for one frame.
+      //
+      // The command decides whether a rename is warranted: it refuses when the user
+      // renamed by hand, and when the conversation still holds nothing but greetings.
+      // Failure is deliberately swallowed — a chat keeping its placeholder title is
+      // not worth interrupting the user over.
+      void autoTitleThread(sessionId || activeThreadId() || "")
+        .catch(() => undefined)
+        .then(() => loadThreads())
+        .catch(() => undefined);
     }),
     eventBus.on("agent:error", ({ sessionId, message }) => {
       if (!ownsActiveThread(sessionId)) return;
@@ -1483,6 +1600,102 @@ interface MemoryReasonResult {
   results?: Array<{ id?: string }>;
 }
 
+/**
+ * Re-ask a question with the wording changed.
+ *
+ * The missing sixth action: `Retry` re-sent a message VERBATIM, so a badly phrased
+ * question could only be fixed by retyping it from scratch further down the thread,
+ * leaving the wrong version in the history above.
+ *
+ * The original conversation is NOT rewritten. Editing branches: everything before the
+ * edited message is copied into a new conversation, and the new wording is sent
+ * there. So the earlier attempt stays intact and reachable in the sidebar, which
+ * matters when the first answer turns out to have been the better one.
+ *
+ * Only the user's own messages can be edited. Editing KRIA's reply and re-sending it
+ * would fabricate a question the user never asked.
+ */
+/** Ask the UI to open the edit dialog for a message. Ignores non-user messages. */
+function requestMessageEdit(message: Message): void {
+  if (message.role !== "user") return;
+  setMessagePendingEdit(message);
+}
+
+/** Close the edit dialog without sending. */
+function cancelMessageEdit(): void {
+  setMessagePendingEdit(null);
+}
+
+async function editAndResendMessage(messageId: string, newContent: string): Promise<boolean> {
+  const trimmed = newContent.trim();
+  const message = findMessage(messageId);
+  if (!message) return false;
+  if (message.role !== "user") {
+    actionNotification("error", "Only your own messages can be edited.");
+    return false;
+  }
+  if (trimmed.length === 0) {
+    actionNotification("error", "An edited message cannot be empty.");
+    return false;
+  }
+  if (trimmed === message.content.trim()) {
+    // Nothing changed, so branching would leave a duplicate conversation behind.
+    actionNotification("error", "The message is unchanged.");
+    return false;
+  }
+
+  const index = messages().findIndex((candidate) => candidate.id === messageId);
+  if (index < 0) return false;
+
+  let targetThreadId = message.threadId;
+  if (index === 0) {
+    // Editing the opening message: there is no earlier context worth copying, so a
+    // fresh thread is cheaper than a branch containing nothing.
+    const created = await createThread({ intentional: true });
+    if (!created) {
+      actionNotification("error", "Couldn't start a conversation for the edited message.");
+      return false;
+    }
+    targetThreadId = created;
+  } else {
+    // `through_index` is INCLUSIVE on the backend, so index - 1 copies everything up
+    // to but NOT including the message being replaced.
+    const sourceTitle = threads().find((thread) => thread.id === message.threadId)?.title;
+    const branched = await bridgeInvoke<{ session_id: string }>("branch_session", {
+      sourceSessionId: message.threadId,
+      throughIndex: index - 1,
+      title: sourceTitle,
+    });
+    if (!branched.ok) {
+      actionNotification("error", `Couldn't branch for the edit: ${branched.message}`);
+      return false;
+    }
+    await loadThreads();
+    await activateThread(branched.data.session_id);
+    targetThreadId = branched.data.session_id;
+  }
+
+  const turnId = crypto.randomUUID();
+  addMessage({
+    id: turnId,
+    threadId: targetThreadId,
+    role: "user",
+    content: trimmed,
+    timestamp: Date.now(),
+  });
+  setCurrentTurn(turnId);
+  setThinkingState(targetThreadId, true);
+  const sent = await bridgeInvoke("send_message", {
+    message: trimmed,
+    sessionId: targetThreadId,
+  });
+  if (sent.ok) return true;
+
+  setThinkingState(targetThreadId, false);
+  actionNotification("error", `Couldn't send the edited message: ${sent.message}`);
+  return false;
+}
+
 async function submitFeedback(messageId: string, sentiment: "up" | "down"): Promise<boolean> {
   const message = findMessage(messageId);
   if (!message) return false;
@@ -1580,6 +1793,9 @@ export const converseStore = {
   setThreadPinned,
   setThreadArchived,
   setThreadTemporary,
+  renameThread,
+  autoTitleThread,
+  clearAllThreads,
   deleteThread,
   setExportFormat,
   exportActiveConversation,
@@ -1613,5 +1829,9 @@ export const converseStore = {
   explainMessage,
   rememberMessage,
   branchMessage,
+  editAndResendMessage,
+  messagePendingEdit,
+  requestMessageEdit,
+  cancelMessageEdit,
   submitFeedback,
 } as const;

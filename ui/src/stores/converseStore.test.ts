@@ -426,16 +426,40 @@ describe("converseStore session management — backend authority", () => {
       content: "Hello export",
       timestamp: Date.UTC(2026, 0, 1),
     });
-    mockInvoke.mockResolvedValueOnce({ ok: true, data: "/tmp/Export-me.md" });
+    // The transcript body and filename now come from `export_session`
+    // (kria_core::agent::transcript) instead of being assembled in this store, so
+    // this test asserts the store FORWARDS the backend's answer rather than
+    // re-deriving one. Building it here exported only the turns the store happened
+    // to have loaded, and its escaping rules could not be unit-tested.
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") {
+        return {
+          ok: true,
+          data: {
+            content: "# KRIA Conversation — Export me\n\n## You · 2026-01-01\n\nHello export\n",
+            suggested_name: "Export me.md",
+            extension: "md",
+            filter_label: "Markdown Files",
+            turn_count: 1,
+          },
+        };
+      }
+      if (command === "save_export_file") return { ok: true, data: "/tmp/Export-me.md" };
+      return { ok: true, data: {} };
+    });
 
     await expect(converseStore.exportActiveConversation()).resolves.toBe(true);
 
-    expect(mockInvoke).toHaveBeenCalledWith("save_export_file", expect.objectContaining({
-      defaultName: expect.stringMatching(/^kria-Export-me-\d{4}-\d{2}-\d{2}\.md$/),
-      filterName: "Markdown Files",
-      extensions: ["md"],
-      content: expect.stringMatching(/# KRIA Conversation — Export me[\s\S]*## You · [^\n]+[\s\S]*Hello export/),
-    }));
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_export_file",
+      expect.objectContaining({
+        defaultName: "Export me.md",
+        filterName: "Markdown Files",
+        extensions: ["md"],
+        content: expect.stringMatching(/# KRIA Conversation — Export me[\s\S]*Hello export/),
+      }),
+      expect.anything(),
+    );
   });
 });
 
@@ -885,5 +909,458 @@ describe("converseStore — task 6.7 empty-state scenario coverage (Req 6.1–6.
     // addMessage reset point: first message promotes the intent thread to Active.
     expect(converseStore.newThreadIntentId()).toBeNull();
     expect(converseStore.emptyStateClass()).toBe("active");
+  });
+});
+
+/**
+ * Conversation export.
+ *
+ * The reported bug: clicking Download always errored. The cause was not the backend
+ * — `save_export_file` exists, is registered, and the dialog plugin is permitted. It
+ * was that the call inherited the bridge's 8-second default timeout while opening a
+ * native "Save As" dialog that waits for a HUMAN. Anyone slower than 8 seconds got
+ * `timed out after 8000ms`, shown to them as "Check file permissions and try again".
+ *
+ * These tests pin the three things that were wrong: the timeout budget, where the
+ * transcript is rendered, and the honesty of the messages.
+ */
+describe("converseStore — conversation export", () => {
+  function seedExportableThread(): void {
+    converseStore.setThreads([{
+      id: "thread-export",
+      title: "Export me",
+      createdAt: 1,
+      updatedAt: 1,
+      pinned: false,
+      archived: false,
+      temporary: false,
+    }]);
+    converseStore.setActiveThread("thread-export");
+    converseStore.addMessage({
+      id: "m1",
+      threadId: "thread-export",
+      role: "user",
+      content: "hello",
+      timestamp: Date.now(),
+    });
+  }
+
+  const TRANSCRIPT = {
+    content: "# KRIA Conversation — Export me",
+    suggested_name: "Export me.md",
+    extension: "md",
+    filter_label: "Markdown Files",
+    turn_count: 4,
+  };
+
+  beforeEach(() => {
+    resetStore();
+  });
+
+  it("renders the transcript in the backend, not in the store", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") return { ok: true, data: TRANSCRIPT };
+      if (command === "save_export_file") return { ok: true, data: "/home/u/Export me.md" };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.exportActiveConversation("markdown")).resolves.toBe(true);
+
+    // The store must ASK for the transcript rather than build one. Building it here
+    // meant only the loaded turns were exported and the escaping rules were untestable.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "export_session",
+      { sessionId: "thread-export", format: "markdown" },
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
+    );
+  });
+
+  it("gives the native save dialog far longer than the 8s default", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") return { ok: true, data: TRANSCRIPT };
+      if (command === "save_export_file") return { ok: true, data: "/home/u/out.md" };
+      return { ok: true, data: {} };
+    });
+
+    await converseStore.exportActiveConversation("markdown");
+
+    const saveCall = mockInvoke.mock.calls.find((call) => call[0] === "save_export_file");
+    expect(saveCall, "save_export_file must be invoked").toBeDefined();
+    const options = saveCall?.[2] as { timeoutMs?: number } | undefined;
+    // This is the regression guard for the actual bug. A human picking a folder is
+    // not a network call; anything near 8s will fail for real users again.
+    expect(options?.timeoutMs ?? 8000).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it("passes the backend's suggested filename and filter straight through", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") return { ok: true, data: TRANSCRIPT };
+      if (command === "save_export_file") return { ok: true, data: "/home/u/out.md" };
+      return { ok: true, data: {} };
+    });
+
+    await converseStore.exportActiveConversation("markdown");
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "save_export_file",
+      {
+        content: TRANSCRIPT.content,
+        defaultName: TRANSCRIPT.suggested_name,
+        filterName: TRANSCRIPT.filter_label,
+        extensions: [TRANSCRIPT.extension],
+      },
+      expect.anything(),
+    );
+  });
+
+  it("treats a closed dialog as a choice, not a failure", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") return { ok: true, data: TRANSCRIPT };
+      // null is what the Rust command returns when the user cancels.
+      if (command === "save_export_file") return { ok: true, data: null };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.exportActiveConversation("markdown")).resolves.toBe(false);
+  });
+
+  it("refuses to write a file for a conversation with no saved turns", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") {
+        return { ok: true, data: { ...TRANSCRIPT, turn_count: 0 } };
+      }
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.exportActiveConversation("markdown")).resolves.toBe(false);
+    // An empty transcript must never reach the save dialog — the user would be asked
+    // where to put a file containing only a header.
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "save_export_file")).toBe(false);
+  });
+
+  it("supports json as a format", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") {
+        return { ok: true, data: { ...TRANSCRIPT, extension: "json", suggested_name: "x.json" } };
+      }
+      if (command === "save_export_file") return { ok: true, data: "/home/u/x.json" };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.exportActiveConversation("json")).resolves.toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "export_session",
+      { sessionId: "thread-export", format: "json" },
+      expect.anything(),
+    );
+  });
+
+  it("stops before the save dialog when rendering fails", async () => {
+    seedExportableThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "export_session") {
+        return { ok: false, message: "Unsupported export format 'xml'." };
+      }
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.exportActiveConversation("markdown")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "save_export_file")).toBe(false);
+  });
+
+  it("requires a selected conversation", async () => {
+    converseStore.setActiveThread(null);
+    await expect(converseStore.exportActiveConversation("text")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "export_session")).toBe(false);
+  });
+});
+
+/**
+ * Naming conversations.
+ *
+ * Every chat was created as "New chat" and nothing replaced it, so a real machine's
+ * sidebar read: New chat · New chat · Hi · Hi · Change theme to dark mode · New chat ·
+ * hi. Seven conversations, six indistinguishable. `rename_session` and
+ * `auto_rename_session` both existed in the backend with zero UI callers.
+ */
+describe("converseStore — naming conversations", () => {
+  function seedThread(title = "New chat"): void {
+    converseStore.setThreads([{
+      id: "thread-name",
+      title,
+      createdAt: 1,
+      updatedAt: 1,
+      pinned: false,
+      archived: false,
+      temporary: false,
+    }]);
+    converseStore.setActiveThread("thread-name");
+  }
+
+  beforeEach(() => {
+    resetStore();
+  });
+
+  it("renames a conversation through the backend command", async () => {
+    seedThread();
+    mockInvoke.mockResolvedValue({ ok: true, data: undefined });
+
+    await expect(converseStore.renameThread("thread-name", "  Brightness fix  "))
+      .resolves.toBe(true);
+
+    // Trimmed: a name with stray spaces would sort and display unpredictably.
+    expect(mockInvoke).toHaveBeenCalledWith("rename_session", {
+      sessionId: "thread-name",
+      title: "Brightness fix",
+    });
+    expect(converseStore.threads()[0]?.title).toBe("Brightness fix");
+  });
+
+  it("refuses an empty name instead of storing a blank row", async () => {
+    seedThread("Keep me");
+    await expect(converseStore.renameThread("thread-name", "   ")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "rename_session")).toBe(false);
+    expect(converseStore.threads()[0]?.title).toBe("Keep me");
+  });
+
+  it("applies a derived title when the backend supplies one", async () => {
+    seedThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "auto_title_session") {
+        return { ok: true, data: { updated: true, title: "change the theme to dark mode" } };
+      }
+      return { ok: true, data: [] };
+    });
+
+    await expect(converseStore.autoTitleThread("thread-name"))
+      .resolves.toBe("change the theme to dark mode");
+    expect(converseStore.threads()[0]?.title).toBe("change the theme to dark mode");
+  });
+
+  it("leaves the title alone when the backend declines to rename", async () => {
+    // The backend refuses for a manually named chat, or one holding only greetings.
+    seedThread("My own name");
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "auto_title_session") {
+        return { ok: true, data: { updated: false, reason: "manual_title" } };
+      }
+      return { ok: true, data: [] };
+    });
+
+    await expect(converseStore.autoTitleThread("thread-name")).resolves.toBeNull();
+    expect(converseStore.threads()[0]?.title).toBe("My own name");
+  });
+
+  it("never lets a failed auto-title disturb the user", async () => {
+    seedThread("New chat");
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "auto_title_session") return { ok: false, message: "boom" };
+      return { ok: true, data: [] };
+    });
+
+    // Resolves null rather than rejecting: a chat keeping its placeholder name is not
+    // worth an error toast in front of the user.
+    await expect(converseStore.autoTitleThread("thread-name")).resolves.toBeNull();
+    expect(converseStore.threads()[0]?.title).toBe("New chat");
+  });
+
+  it("deletes every conversation and adopts the replacement session", async () => {
+    seedThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "clear_all_chat_sessions") {
+        return {
+          ok: true,
+          data: {
+            deleted_session_count: 7,
+            deleted_turn_count: 63,
+            replacement_session_id: "fresh-session",
+          },
+        };
+      }
+      if (command === "list_sessions") {
+        return {
+          ok: true,
+          data: [{ id: "fresh-session", title: "New chat", updated_at: 2, created_at: 2 }],
+        };
+      }
+      // Adopting the replacement session loads its history, which must be an array.
+      if (command === "get_session_history") return { ok: true, data: [] };
+      if (command === "switch_session") return { ok: true, data: {} };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.clearAllThreads()).resolves.toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "clear_all_chat_sessions",
+      undefined,
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
+    );
+    // Messages from the deleted conversation must not linger on screen.
+    expect(converseStore.messages()).toHaveLength(0);
+  });
+
+  it("reports a failed clear-all instead of appearing to succeed", async () => {
+    seedThread();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "clear_all_chat_sessions") return { ok: false, message: "database locked" };
+      return { ok: true, data: [] };
+    });
+
+    await expect(converseStore.clearAllThreads()).resolves.toBe(false);
+  });
+});
+
+/**
+ * Edit and resend.
+ *
+ * The sixth message action, previously absent. `Retry` re-sends a message VERBATIM,
+ * so a badly worded question could only be fixed by retyping it lower down the
+ * thread — leaving the wrong version above it forever.
+ *
+ * The original conversation is never rewritten: editing BRANCHES, so the earlier
+ * attempt stays reachable. These tests pin that, and pin that KRIA's own replies
+ * cannot be edited (which would fabricate a question the user never asked).
+ */
+describe("converseStore — edit and resend", () => {
+  function seedExchange(): void {
+    converseStore.setThreads([{
+      id: "thread-edit",
+      title: "Original",
+      createdAt: 1,
+      updatedAt: 1,
+      pinned: false,
+      archived: false,
+      temporary: false,
+    }]);
+    converseStore.setActiveThread("thread-edit");
+    converseStore.addMessage({
+      id: "u1",
+      threadId: "thread-edit",
+      role: "user",
+      content: "set brightnes to 40",
+      timestamp: 1,
+    });
+    converseStore.addMessage({
+      id: "a1",
+      threadId: "thread-edit",
+      role: "assistant",
+      content: "I could not find that setting.",
+      timestamp: 2,
+    });
+    converseStore.addMessage({
+      id: "u2",
+      threadId: "thread-edit",
+      role: "user",
+      content: "try agin",
+      timestamp: 3,
+    });
+  }
+
+  beforeEach(() => {
+    resetStore();
+  });
+
+  it("branches before the edited message so the original survives", async () => {
+    seedExchange();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "branch_session") return { ok: true, data: { session_id: "branch-1" } };
+      if (command === "list_sessions") {
+        return { ok: true, data: [{ id: "branch-1", title: "Original", created_at: 4, updated_at: 4 }] };
+      }
+      if (command === "get_session_history") return { ok: true, data: [] };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.editAndResendMessage("u2", "try again please"))
+      .resolves.toBe(true);
+
+    // u2 is at index 2, so the branch must copy through index 1 — everything BEFORE
+    // the message being replaced. Copying through 2 would duplicate the bad wording.
+    expect(mockInvoke).toHaveBeenCalledWith("branch_session", {
+      sourceSessionId: "thread-edit",
+      throughIndex: 1,
+      title: "Original",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("send_message", {
+      message: "try again please",
+      sessionId: "branch-1",
+    });
+  });
+
+  it("starts a fresh conversation when the FIRST message is edited", async () => {
+    seedExchange();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "create_session") return { ok: true, data: { session_id: "fresh-1" } };
+      if (command === "list_sessions") {
+        return { ok: true, data: [{ id: "fresh-1", title: "New chat", created_at: 4, updated_at: 4 }] };
+      }
+      if (command === "get_session_history") return { ok: true, data: [] };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.editAndResendMessage("u1", "set brightness to 40"))
+      .resolves.toBe(true);
+
+    // No earlier context exists, so branching would copy nothing — a new thread is
+    // the honest equivalent.
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "branch_session")).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith("create_session");
+  });
+
+  it("refuses to edit KRIA's own reply", async () => {
+    seedExchange();
+    mockInvoke.mockResolvedValue({ ok: true, data: {} });
+
+    await expect(converseStore.editAndResendMessage("a1", "a better answer"))
+      .resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "send_message")).toBe(false);
+  });
+
+  it("refuses an empty edit", async () => {
+    seedExchange();
+    mockInvoke.mockResolvedValue({ ok: true, data: {} });
+
+    await expect(converseStore.editAndResendMessage("u2", "   ")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "branch_session")).toBe(false);
+  });
+
+  it("refuses an unchanged edit rather than duplicating the conversation", async () => {
+    seedExchange();
+    mockInvoke.mockResolvedValue({ ok: true, data: {} });
+
+    await expect(converseStore.editAndResendMessage("u2", "try agin")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "branch_session")).toBe(false);
+  });
+
+  it("stops before sending when the branch fails", async () => {
+    seedExchange();
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === "branch_session") return { ok: false, message: "disk full" };
+      return { ok: true, data: {} };
+    });
+
+    await expect(converseStore.editAndResendMessage("u2", "try again")).resolves.toBe(false);
+    expect(mockInvoke.mock.calls.some((call) => call[0] === "send_message")).toBe(false);
+  });
+
+  it("only opens the edit dialog for the user's own messages", () => {
+    seedExchange();
+    const assistantMessage = converseStore.messages().find((m) => m.id === "a1");
+    const userMessage = converseStore.messages().find((m) => m.id === "u2");
+
+    converseStore.requestMessageEdit(assistantMessage!);
+    expect(converseStore.messagePendingEdit()).toBeNull();
+
+    converseStore.requestMessageEdit(userMessage!);
+    expect(converseStore.messagePendingEdit()?.id).toBe("u2");
+
+    converseStore.cancelMessageEdit();
+    expect(converseStore.messagePendingEdit()).toBeNull();
   });
 });

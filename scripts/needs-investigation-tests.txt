@@ -35,3 +35,9 @@
 #     where handlers reached the host directly. The properties it asserted are
 #     covered at the provider layer (os_control_packages_lifecycle.rs) and the
 #     handler envelope is covered in four other suites.
+
+# ── Frontend (added to the gate in the Converse work) ────────────────────────
+# A CSS transition exceeds the motion budget. PRE-EXISTING — confirmed by running
+# the suite with the Converse changes stashed. It went unnoticed because the UI
+# suite was outside this gate until now.
+src/platform/motionBudget.test.ts
