@@ -1913,7 +1913,7 @@ mod tests {
         // `key_ref` is an external locator (e.g. OS keyring handle), never
         // actual key material.
         {
-            let mut tx = db.begin().unwrap();
+            let tx = db.begin().unwrap();
             tx.conn()
                 .execute(
                     "INSERT OR IGNORE INTO shred_keys \

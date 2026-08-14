@@ -1,81 +1,43 @@
-//! Intelligent package management tools.
+//! Package tools: `search_package`, `get_package_info`,
+//! `list_installed_packages`, `plan_package_changes`, `install_package`,
+//! `uninstall_package`, `check_system_updates`, `get_reboot_required`.
 //!
-//! Provides 4 GREEN query tools + 2 RED action tools that the ReAct agent loop
-//! chains together to give intelligent, safe install/uninstall behaviour:
+//! linux-os-control-production **Task 3.4** — "Complete package planning,
+//! install/remove and update assessment" (OSC-014).
 //!
-//!   search_package          → find packages across all available sources
-//!   check_package_installed → is it already installed? what version?
-//!   check_package_updates   → is a newer version available?
-//!   get_package_info        → detailed metadata (maintainer, size, homepage …)
-//!   install_package         → actually install  (RED — requires HITL approval)
-//!   uninstall_package       → actually remove   (RED — requires HITL approval)
+//! Every handler here is a **thin facade**: it reaches host effects **only**
+//! through the injected [`OsControlRuntime`] +
+//! `os_control::packages::PackageControl` provider — never a direct
+//! subprocess. This replaces the previous ~1700-line direct-execution
+//! implementation that shelled out to `apt`/`dnf`/`pacman`/`zypper`/`brew`/
+//! `winget`/`choco`/`snap`/`flatpak` and escalated privilege itself via an
+//! ad-hoc `PrivEsc`/`pkexec`/`sudo` invocation. That machinery is deleted
+//! outright (per dev-context.md: delete dead code directly, no shims) —
+//! privileged package mutation now dispatches exclusively through
+//! `BrokerOperation::ApplyPackagePlan` bound to the approved plan digest,
+//! from inside `os_control::packages::PackageControl::apply` (never from
+//! this file).
+//!
+//! Until a live PackageKit/distro-adapter transport is composed into the
+//! runtime (desktop startup root), every handler fails closed with the
+//! frozen `Unavailable` envelope and never falls back to an ungoverned
+//! subprocess or `pkexec`/`sudo` invocation.
+//!
+//! The `check_package_installed`/`check_package_updates` legacy tool names
+//! are retired per the frozen legacy-difference report (folded into
+//! `get_package_info`/`list_installed_packages`, and renamed to
+//! `check_system_updates`, respectively) — they are not re-registered here.
 
 use crate::infra::ToolResult;
-use crate::platform::detect::{
-    get_available_package_managers, get_package_manager, PackageManager,
-};
+use crate::os_control::contract::SafeText;
+use crate::os_control::packages::{PackageOperation, PackageProviderId, PackageRef};
+use crate::os_control::{OsControlError, OsControlRuntime};
 use crate::safety::RiskLevel;
-use crate::tools::exec::{CommandOutput, ExecWrapper, ToolExecutionError};
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::os_governed as gov;
+use crate::tools::ToolContext;
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
-use tracing::{error, info, warn};
-
-const QUERY_TIMEOUT_SECS: u64 = 30;
-const APPLY_TIMEOUT_SECS: u64 = 300;
-const MAX_OUTPUT_BYTES: usize = 100 * 1024;
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ListInstalledPackagesInput {
-    #[serde(default)]
-    limit: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct SearchPackageInput {
-    #[serde(default)]
-    query: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    source: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PackageNameInput {
-    name: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PackageInfoInput {
-    name: String,
-    #[serde(default)]
-    source: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct InstallPackageInput {
-    name: String,
-    #[serde(default)]
-    source: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct UninstallPackageInput {
-    name: String,
-    #[serde(default)]
-    source: Option<String>,
-}
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -87,1603 +49,676 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
-fn parse_input<T: DeserializeOwned>(params: serde_json::Value) -> Result<T, ToolResult> {
-    serde_json::from_value(params)
-        .map_err(|error| ToolResult::err(format!("invalid parameters: {error}")))
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Validate a package name: alphanumeric, dash, dot, underscore, plus, slash (for flatpak refs).
-fn validate_name(name: &str) -> Result<(), String> {
-    if name.trim().is_empty() {
-        return Err("package name is required".into());
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_alphanumeric() || "-._+/@:".contains(c))
-    {
-        return Err("invalid package name: only alphanumeric and - . _ + / @ : are allowed".into());
-    }
-    Ok(())
-}
-
-fn exec_wrapper(timeout_secs: u64) -> ExecWrapper {
-    ExecWrapper::new()
-        .with_timeout(Duration::from_secs(timeout_secs))
-        .with_max_output_bytes(MAX_OUTPUT_BYTES)
-}
-
-fn preferred_output(output: &CommandOutput) -> String {
-    if output.stdout.trim().is_empty() {
-        output.stderr.trim().to_string()
-    } else {
-        output.stdout.clone()
-    }
-}
-
-fn non_zero_error(stderr: String, stdout: String) -> String {
-    if stderr.trim().is_empty() {
-        stdout
-    } else {
-        stderr
-    }
-}
-
-async fn run_cmd_with_timeout(
-    program: &str,
-    args: &[&str],
-    timeout_secs: u64,
-) -> Result<String, String> {
-    let wrapper = exec_wrapper(timeout_secs);
-    match wrapper.execute(program, args).await {
-        Ok(output) => Ok(preferred_output(&output)),
-        Err(ToolExecutionError::NonZeroExit { stdout, stderr, .. }) => {
-            if !stdout.trim().is_empty() {
-                Ok(stdout)
-            } else {
-                Err(non_zero_error(stderr, stdout))
-            }
-        }
-        Err(ToolExecutionError::TimedOut {
-            stderr,
-            stdout,
-            timeout_secs,
-            ..
-        }) => {
-            let details = non_zero_error(stderr, stdout);
-            Err(format!(
-                "command timed out after {timeout_secs}s: {details}"
-            ))
-        }
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-/// Run a command and capture its output as text.
-async fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
-    run_cmd_with_timeout(program, args, QUERY_TIMEOUT_SECS).await
-}
-
-/// Run a mutating/apply command and fail hard on any non-zero exit.
-async fn run_apply_cmd(program: &str, args: &[&str]) -> Result<String, String> {
-    let wrapper = exec_wrapper(APPLY_TIMEOUT_SECS);
-    match wrapper.execute(program, args).await {
-        Ok(output) => Ok(preferred_output(&output)),
-        Err(ToolExecutionError::NonZeroExit { stdout, stderr, .. }) => {
-            Err(non_zero_error(stderr, stdout))
-        }
-        Err(ToolExecutionError::TimedOut {
-            timeout_secs,
-            stdout,
-            stderr,
-            ..
-        }) => {
-            let details = non_zero_error(stderr, stdout);
-            Err(format!(
-                "command timed out after {timeout_secs}s: {details}"
-            ))
-        }
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-async fn is_binary_in_path(name: &str) -> bool {
-    let finder = if cfg!(target_os = "windows") {
-        "where.exe"
-    } else {
-        "which"
+/// Return the governed OS-control `Unavailable` envelope for a package tool.
+///
+/// Every migrated package handler reaches host effects **only** through the
+/// injected [`OsControlRuntime`] + `os_control::packages::PackageControl`
+/// provider — never a direct `apt`/`dnf`/`pacman`/`zypper`/`snap`/
+/// `flatpak`/`pkexec`/`sudo` subprocess (Task 3.4 completion proof). Until a
+/// live provider is composed into the runtime, the handler fails closed
+/// with this frozen envelope.
+fn os_packages_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
     };
-    run_cmd_with_timeout(finder, &[name], QUERY_TIMEOUT_SECS)
-        .await
-        .is_ok()
+    ToolResult::err_with_data(err.code(), err.to_envelope())
 }
 
-/// Resolve the package manager to use, preferring an explicit `source` param.
-fn resolve_pm(source: Option<&str>) -> Result<PackageManager, String> {
-    if let Some(s) = source {
-        let pm = match s.to_lowercase().as_str() {
-            "apt" | "apt-get"  => PackageManager::Apt,
-            "dnf" | "yum"      => PackageManager::Dnf,
-            "pacman"           => PackageManager::Pacman,
-            "zypper"           => PackageManager::Zypper,
-            "brew" | "homebrew"=> PackageManager::Brew,
-            "winget"           => PackageManager::Winget,
-            "choco" | "chocolatey" => PackageManager::Choco,
-            "snap"             => PackageManager::Snap,
-            "flatpak"          => PackageManager::Flatpak,
-            _ => return Err(format!("unknown package source '{s}'. Valid: apt, dnf, pacman, zypper, brew, winget, choco, snap, flatpak")),
-        };
-        return Ok(pm);
-    }
-    get_package_manager().ok_or_else(|| "no supported package manager found on this system".into())
+/// Parse a `{provider, name}` `PackageRef` param object, defaulting the
+/// provider to `apt` when omitted (the common Ubuntu case) so canonical
+/// calls that pass only a bare package name remain ergonomic.
+fn parse_package_ref(value: &serde_json::Value) -> Result<PackageRef, ToolResult> {
+    let name = value["name"]
+        .as_str()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| ToolResult::err("package.name is required"))?;
+    let provider = match value["provider"].as_str() {
+        Some(p) => PackageProviderId::from_str_lossy(p)
+            .ok_or_else(|| ToolResult::err(format!("unknown package provider '{p}'")))?,
+        None => PackageProviderId::Apt,
+    };
+    Ok(PackageRef::new(provider, name))
 }
 
-/// Privilege escalation strategy for the current environment.
-#[derive(Debug, Clone, Copy)]
-enum PrivEsc {
-    /// No elevation needed (Brew, Winget, Flatpak user-install).
-    None,
-    /// pkexec — shows a native graphical auth dialog (best for desktop Tauri app).
-    Pkexec,
-    /// sudo with cached credentials (NOPASSWD or already authenticated TTY session).
-    Sudo,
-}
-
-/// Determine the best privilege escalation method available.
-/// Priority: None (for PMs that don't need it) → pkexec → sudo -n.
-async fn get_priv_esc(pm: PackageManager) -> Result<PrivEsc, String> {
-    // Managers that don't need root at all.
-    if matches!(
-        pm,
-        PackageManager::Brew | PackageManager::Winget | PackageManager::Flatpak
-    ) {
-        info!("[packages] PM {:?} needs no privilege escalation", pm);
-        return Ok(PrivEsc::None);
-    }
-
-    // Try pkexec first — works in a desktop session even without TTY.
-    if run_cmd_with_timeout("pkexec", &["--version"], QUERY_TIMEOUT_SECS)
-        .await
-        .is_ok()
-    {
-        info!("[packages] pkexec available — will use for privilege escalation");
-        return Ok(PrivEsc::Pkexec);
-    }
-    warn!("[packages] pkexec not found or failed, falling back to sudo");
-
-    // Fall back to sudo -n (only works if NOPASSWD or credentials are cached).
-    match run_cmd_with_timeout("sudo", &["-n", "true"], QUERY_TIMEOUT_SECS).await {
-        Ok(_) => {
-            info!("[packages] sudo -n succeeded — credentials cached or NOPASSWD configured");
-            Ok(PrivEsc::Sudo)
-        }
-        Err(_) => {
-            error!("[packages] sudo requires a password and pkexec is unavailable");
-            Err("Cannot escalate privileges: pkexec is not installed on this system and 'sudo' requires a password. \
-                 Install policykit-1 (Ubuntu/Debian: sudo apt install policykit-1) to enable graphical privilege escalation, \
-                 or run 'sudo -v' in a terminal to cache credentials.".into())
-        }
+fn parse_optional_provider(
+    params: &serde_json::Value,
+) -> Result<Option<PackageProviderId>, ToolResult> {
+    match params["provider"].as_str() {
+        None => Ok(None),
+        Some(p) => PackageProviderId::from_str_lossy(p)
+            .map(Some)
+            .ok_or_else(|| ToolResult::err(format!("unknown package provider '{p}'"))),
     }
 }
 
-/// Build a command invocation that runs `program args` with privilege escalation.
-fn priv_invocation(priv_esc: PrivEsc, program: &str, args: &[&str]) -> (String, Vec<String>) {
-    match priv_esc {
-        PrivEsc::None => (
-            program.to_string(),
-            args.iter().map(|arg| (*arg).to_string()).collect(),
-        ),
-        PrivEsc::Pkexec => {
-            let mut full_args = Vec::with_capacity(args.len() + 1);
-            full_args.push(program.to_string());
-            full_args.extend(args.iter().map(|arg| (*arg).to_string()));
-            ("pkexec".to_string(), full_args)
-        }
-        PrivEsc::Sudo => {
-            let mut full_args = Vec::with_capacity(args.len() + 2);
-            full_args.push("-n".to_string());
-            full_args.push(program.to_string());
-            full_args.extend(args.iter().map(|arg| (*arg).to_string()));
-            ("sudo".to_string(), full_args)
-        }
-    }
-}
-
-/// Run a privileged command and return stdout, logging all details.
-async fn run_priv_cmd(priv_esc: PrivEsc, program: &str, args: &[&str]) -> Result<String, String> {
-    let display_cmd = format!("{program} {}", args.join(" "));
-    info!("[packages] Running (priv={priv_esc:?}): {display_cmd}");
-
-    let (runner, invocation_args) = priv_invocation(priv_esc, program, args);
-    let args_refs: Vec<&str> = invocation_args.iter().map(|arg| arg.as_str()).collect();
-    let wrapper = exec_wrapper(APPLY_TIMEOUT_SECS);
-
-    match wrapper.execute(&runner, &args_refs).await {
-        Ok(output) => {
-            let stdout = output.stdout;
-            let stderr = output.stderr;
-            if !stdout.is_empty() {
-                info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
-            }
-            if !stderr.is_empty() {
-                warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
-            }
-            Ok(if stdout.trim().is_empty() {
-                stderr
-            } else {
-                stdout
-            })
-        }
-        Err(ToolExecutionError::NonZeroExit {
-            exit_code,
-            stdout,
-            stderr,
-            ..
-        }) => {
-            if !stdout.is_empty() {
-                info!("[packages] stdout: {}", &stdout[..stdout.len().min(500)]);
-            }
-            if !stderr.is_empty() {
-                warn!("[packages] stderr: {}", &stderr[..stderr.len().min(500)]);
-            }
-            let err_output = non_zero_error(stderr, stdout);
-            Err(format!(
-                "command exited with code {exit_code:?}: {err_output}"
-            ))
-        }
-        Err(ToolExecutionError::TimedOut {
-            timeout_secs,
-            stdout,
-            stderr,
-            ..
-        }) => {
-            let err_output = non_zero_error(stderr, stdout);
-            Err(format!(
-                "command timed out after {timeout_secs}s: {err_output}"
-            ))
-        }
-        Err(error) => {
-            error!("[packages] Failed to spawn '{display_cmd}': {error}");
-            Err(error.to_string())
-        }
-    }
-}
-
-// ─── search_package ───────────────────────────────────────────────────────────
-
-/// List installed packages across all available package managers.
-/// Read-only (Green tier). Routed from prompts like
-/// "list all installed apps", "show installed packages", etc.
-struct ListInstalledPackages;
-
-#[async_trait]
-impl ToolHandler for ListInstalledPackages {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: ListInstalledPackagesInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
-        };
-        let limit = input.limit.unwrap_or(500).min(5000) as usize;
-
-        let mut sources: Vec<serde_json::Value> = Vec::new();
-
-        // dpkg / apt
-        if let Ok(out) = run_cmd("dpkg-query", &["-W", "-f=${Package}\\n"]).await {
-            let names: Vec<String> = out
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .take(limit)
-                .map(|l| l.trim().to_string())
-                .collect();
-            if !names.is_empty() {
-                sources.push(serde_json::json!({
-                    "manager": "apt",
-                    "count":   names.len(),
-                    "packages": names,
-                }));
-            }
-        }
-
-        // flatpak
-        if let Ok(out) = run_cmd("flatpak", &["list", "--app", "--columns=application"]).await {
-            let names: Vec<String> = out
-                .lines()
-                .filter(|l| !l.trim().is_empty() && !l.starts_with("Application"))
-                .take(limit)
-                .map(|l| l.trim().to_string())
-                .collect();
-            if !names.is_empty() {
-                sources.push(serde_json::json!({
-                    "manager": "flatpak",
-                    "count":   names.len(),
-                    "packages": names,
-                }));
-            }
-        }
-
-        // snap
-        if let Ok(out) = run_cmd("snap", &["list"]).await {
-            let names: Vec<String> = out
-                .lines()
-                .skip(1) // header
-                .filter_map(|l| l.split_whitespace().next().map(|s| s.to_string()))
-                .filter(|n| !n.is_empty())
-                .take(limit)
-                .collect();
-            if !names.is_empty() {
-                sources.push(serde_json::json!({
-                    "manager": "snap",
-                    "count":   names.len(),
-                    "packages": names,
-                }));
-            }
-        }
-
-        if sources.is_empty() {
-            return ToolResult::err(
-                "no package managers responded (apt/flatpak/snap unavailable on this system)",
-            );
-        }
-
-        let total: usize = sources
-            .iter()
-            .map(|s| s.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize)
-            .sum();
-
-        ToolResult::ok(serde_json::json!({
-            "total":   total,
-            "sources": sources,
-        }))
-    }
-}
+// ─── search_package (GREEN) ────────────────────────────────────────────────
 
 struct SearchPackage;
 
 #[async_trait]
 impl ToolHandler for SearchPackage {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: SearchPackageInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
-        };
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "search_package")
+    }
 
-        let query = input
-            .query
-            .as_deref()
-            .or(input.name.as_deref())
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let query = params["query"]
+            .as_str()
+            .or_else(|| params["name"].as_str())
             .map(str::trim)
-            .filter(|q| !q.is_empty())
-            .map(|q| q.to_string())
-            .unwrap_or_default();
-        if query.is_empty() {
+            .filter(|q| !q.is_empty());
+        if query.is_none() {
             return ToolResult::err("query parameter is required (or provide name as alias)");
         }
-        let source = input.source.as_deref();
-
-        let pms: Vec<PackageManager> = if let Some(s) = source {
-            match resolve_pm(Some(s)) {
-                Ok(pm) => vec![pm],
-                Err(e) => return ToolResult::err(e),
-            }
-        } else {
-            get_available_package_managers()
+        if let Err(err) = parse_optional_provider(&params) {
+            return err;
+        }
+        // The governed PackageControl provider owns the actual
+        // PackageKit/distro-adapter search across available providers.
+        let resolved = match gov::resolve(&ctx, "search_package") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
         };
-
-        if pms.is_empty() {
-            return ToolResult::err("no package managers found on this system");
-        }
-
-        let mut all_results: Vec<serde_json::Value> = Vec::new();
-
-        for pm in pms {
-            let results = search_with_pm(pm, &query).await;
-            all_results.extend(results);
-        }
-
-        ToolResult::ok(serde_json::json!({
-            "query": query,
-            "count": all_results.len(),
-            "results": all_results,
-        }))
-    }
-}
-
-async fn search_with_pm(pm: PackageManager, query: &str) -> Vec<serde_json::Value> {
-    let source = pm.as_str();
-    match pm {
-        PackageManager::Apt => match run_cmd("apt-cache", &["search", query]).await {
-            Ok(out) => out
-                .lines()
-                .filter(|l| !l.is_empty())
-                .take(20)
-                .map(|line| {
-                    let parts: Vec<&str> = line.splitn(2, " - ").collect();
-                    serde_json::json!({
-                        "name": parts.first().unwrap_or(&"").trim(),
-                        "description": parts.get(1).unwrap_or(&"").trim(),
-                        "source": source,
-                    })
-                })
-                .collect(),
-            Err(_) => vec![],
-        },
-        PackageManager::Dnf => match run_cmd("dnf", &["search", query]).await {
-            Ok(out) => out
-                .lines()
-                .filter(|l| l.contains('.') && !l.starts_with('=') && !l.starts_with(' '))
-                .take(20)
-                .map(|line| {
-                    let parts: Vec<&str> = line.splitn(2, " : ").collect();
-                    serde_json::json!({
-                        "name": parts.first().unwrap_or(&"").trim()
-                            .split_once('.').map(|(n,_)| n).unwrap_or(parts.first().unwrap_or(&"")),
-                        "description": parts.get(1).unwrap_or(&"").trim(),
-                        "source": source,
-                    })
-                })
-                .collect(),
-            Err(_) => vec![],
-        },
-        PackageManager::Pacman => match run_cmd("pacman", &["-Ss", query]).await {
-            Ok(out) => {
-                let mut results = Vec::new();
-                let mut lines = out.lines();
-                while let Some(pkg_line) = lines.next() {
-                    let desc = lines.next().map(|l| l.trim()).unwrap_or("");
-                    if let Some(name_part) = pkg_line.split_whitespace().next() {
-                        let name = name_part.split('/').next_back().unwrap_or(name_part);
-                        results.push(serde_json::json!({
-                            "name": name,
-                            "description": desc,
-                            "source": source,
-                        }));
-                    }
-                    if results.len() >= 20 {
-                        break;
-                    }
-                }
-                results
-            }
-            Err(_) => vec![],
-        },
-        PackageManager::Zypper => {
-            match run_cmd("zypper", &["search", query]).await {
-                Ok(out) => out
-                    .lines()
-                    .filter(|l| l.starts_with('|') || l.starts_with('+'))
-                    .skip(1) // header
-                    .take(20)
-                    .map(|line| {
-                        let cols: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-                        serde_json::json!({
-                            "name": cols.get(2).unwrap_or(&"").trim(),
-                            "description": cols.get(4).unwrap_or(&"").trim(),
-                            "source": source,
-                        })
-                    })
-                    .collect(),
-                Err(_) => vec![],
-            }
-        }
-        PackageManager::Brew => {
-            // brew search returns formulae and casks separated by headers
-            match run_cmd("brew", &["search", "--formula", query]).await {
-                Ok(formula_out) => {
-                    let mut results: Vec<serde_json::Value> = formula_out
-                        .lines()
-                        .filter(|l| !l.is_empty() && !l.starts_with('='))
-                        .take(10)
-                        .map(|name| {
-                            serde_json::json!({
-                                "name": name.trim(),
-                                "description": "",
-                                "source": "brew-formula",
-                            })
-                        })
-                        .collect();
-                    // also check casks
-                    if let Ok(cask_out) = run_cmd("brew", &["search", "--cask", query]).await {
-                        let casks: Vec<serde_json::Value> = cask_out
-                            .lines()
-                            .filter(|l| !l.is_empty() && !l.starts_with('='))
-                            .take(10)
-                            .map(|name| {
-                                serde_json::json!({
-                                    "name": name.trim(),
-                                    "description": "",
-                                    "source": "brew-cask",
-                                })
-                            })
-                            .collect();
-                        results.extend(casks);
-                    }
-                    results
-                }
-                Err(_) => vec![],
-            }
-        }
-        PackageManager::Winget => {
-            match run_cmd("winget", &["search", query, "--accept-source-agreements"]).await {
-                Ok(out) => out
-                    .lines()
-                    .skip(2) // skip header + separator
-                    .filter(|l| !l.is_empty() && !l.chars().all(|c| c == '-' || c == ' '))
-                    .take(20)
-                    .map(|line| {
-                        let cols: Vec<&str> = line.split_whitespace().collect();
-                        serde_json::json!({
-                            "name": cols.first().unwrap_or(&"").to_string(),
-                            "description": cols.get(1).map(|s| s.to_string()).unwrap_or_default(),
-                            "source": source,
-                        })
-                    })
-                    .collect(),
-                Err(_) => vec![],
-            }
-        }
-        PackageManager::Choco => match run_cmd("choco", &["search", query]).await {
-            Ok(out) => out
-                .lines()
-                .filter(|l| {
-                    !l.is_empty() && !l.starts_with("Chocolatey") && !l.contains("packages found")
-                })
-                .take(20)
-                .map(|line| {
-                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                    serde_json::json!({
-                        "name": parts.first().unwrap_or(&"").trim(),
-                        "description": parts.get(1).unwrap_or(&"").trim(),
-                        "source": source,
-                    })
-                })
-                .collect(),
-            Err(_) => vec![],
-        },
-        PackageManager::Snap => {
-            match run_cmd("snap", &["find", query]).await {
-                Ok(out) => out
-                    .lines()
-                    .skip(1) // skip header
-                    .filter(|l| !l.is_empty())
-                    .take(20)
-                    .map(|line| {
-                        let cols: Vec<&str> = line.splitn(4, '\t').collect();
-                        let cols_ws: Vec<&str> = line.split_whitespace().collect();
-                        serde_json::json!({
-                            "name": cols.first().or_else(|| cols_ws.first()).unwrap_or(&"").trim(),
-                            "description": cols.get(3).unwrap_or(&"").trim(),
-                            "source": source,
-                        })
-                    })
-                    .collect(),
-                Err(_) => vec![],
-            }
-        }
-        PackageManager::Flatpak => {
-            match run_cmd(
-                "flatpak",
-                &["search", "--columns=name,application,description", query],
-            )
-            .await
-            {
-                Ok(out) => out
-                    .lines()
-                    .skip(1)
-                    .filter(|l| !l.is_empty())
-                    .take(20)
-                    .map(|line| {
-                        let cols: Vec<&str> = line.splitn(3, '\t').collect();
-                        serde_json::json!({
-                            "name": cols.first().unwrap_or(&"").trim(),
-                            "description": cols.get(2).unwrap_or(&"").trim(),
-                            "source": source,
-                        })
-                    })
-                    .collect(),
-                Err(_) => vec![],
-            }
-        }
-    }
-}
-
-// ─── check_package_installed ──────────────────────────────────────────────────
-
-struct CheckPackageInstalled;
-
-#[async_trait]
-impl ToolHandler for CheckPackageInstalled {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: PackageNameInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
+        let provider = match resolved.runtime.packages("search_package") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
         };
-        let name = input.name.trim().to_string();
-        if name.is_empty() {
-            return ToolResult::err("name parameter is required");
-        }
-
-        if let Err(e) = validate_name(&name) {
-            return ToolResult::err(e);
-        }
-
-        let pms = get_available_package_managers();
-        if pms.is_empty() {
-            // Fallback: check if binary exists in PATH
-            let in_path = is_binary_in_path(&name).await;
-            return ToolResult::ok(serde_json::json!({
-                "name": name,
-                "installed": in_path,
-                "version": serde_json::Value::Null,
-                "source": if in_path { serde_json::json!("PATH") } else { serde_json::Value::Null },
-            }));
-        }
-
-        for pm in &pms {
-            if let Some(result) = check_installed_with_pm(*pm, &name).await {
-                return ToolResult::ok(result);
-            }
-        }
-
-        // Final fallback: which/where
-        let in_path = is_binary_in_path(&name).await;
-
-        ToolResult::ok(serde_json::json!({
-            "name": name,
-            "installed": in_path,
-            "version": null,
-        "source": if in_path { serde_json::Value::String("PATH".into()) } else { serde_json::Value::Null },
-        }))
-    }
-}
-
-async fn check_installed_with_pm(pm: PackageManager, name: &str) -> Option<serde_json::Value> {
-    match pm {
-        PackageManager::Apt => {
-            let out = run_cmd("dpkg-query", &["-W", "-f=${Status} ${Version}", name])
-                .await
-                .ok()?;
-            if out.contains("install ok installed") {
-                let version = out.split_whitespace().last().map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "apt",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Dnf => {
-            let out = run_cmd("dnf", &["list", "installed", name]).await.ok()?;
-            if out.lines().any(|l| l.starts_with(name)) {
-                let version = out
-                    .lines()
-                    .find(|l| l.starts_with(name))
-                    .and_then(|l| l.split_whitespace().nth(1))
-                    .map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "dnf",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Pacman => {
-            let out = run_cmd("pacman", &["-Q", name]).await.ok()?;
-            if !out.is_empty() && !out.contains("was not found") {
-                let version = out.split_whitespace().nth(1).map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "pacman",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Zypper => {
-            let out = run_cmd("rpm", &["-q", name]).await.ok()?;
-            if out.contains(name) && !out.contains("not installed") {
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": out.trim().to_string(),
-                    "source": "zypper",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Brew => {
-            let out = run_cmd("brew", &["list", "--versions", name]).await.ok()?;
-            if !out.trim().is_empty() {
-                let version = out.split_whitespace().nth(1).map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "brew",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Winget => {
-            let out = run_cmd("winget", &["list", name]).await.ok()?;
-            if out
-                .lines()
-                .skip(2)
-                .any(|l| l.to_lowercase().contains(&name.to_lowercase()))
-            {
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": null,
-                    "source": "winget",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Choco => {
-            let out = run_cmd("choco", &["list", "--local-only", name])
-                .await
-                .ok()?;
-            if out
-                .lines()
-                .any(|l| l.to_lowercase().starts_with(&name.to_lowercase()))
-            {
-                let version = out
-                    .lines()
-                    .find(|l| l.to_lowercase().starts_with(&name.to_lowercase()))
-                    .and_then(|l| l.split_whitespace().nth(1))
-                    .map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "choco",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Snap => {
-            let out = run_cmd("snap", &["list", name]).await.ok()?;
-            if out.lines().skip(1).any(|l| l.starts_with(name)) {
-                let version = out
-                    .lines()
-                    .nth(1)
-                    .and_then(|l| l.split_whitespace().nth(1))
-                    .map(|s| s.to_string());
-                Some(serde_json::json!({
-                    "name": name,
-                    "installed": true,
-                    "version": version,
-                    "source": "snap",
-                }))
-            } else {
-                None
-            }
-        }
-        PackageManager::Flatpak => {
-            let out = run_cmd("flatpak", &["list", "--columns=name,version"])
-                .await
-                .ok()?;
-            let found = out
-                .lines()
-                .find(|l| l.to_lowercase().contains(&name.to_lowercase()));
-            if let Some(line) = found {
-                let cols: Vec<&str> = line.splitn(2, '\t').collect();
-                Some(serde_json::json!({
-                    "name": cols.first().unwrap_or(&name).trim(),
-                    "installed": true,
-                    "version": cols.get(1).map(|s| s.trim().to_string()),
-                    "source": "flatpak",
-                }))
-            } else {
-                None
-            }
-        }
-    }
-}
-
-// ─── check_package_updates ────────────────────────────────────────────────────
-
-struct CheckPackageUpdates;
-
-#[async_trait]
-impl ToolHandler for CheckPackageUpdates {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: PackageNameInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
+        let call = match gov::read_call(&ctx, &resolved.runtime, "search_package") {
+            Ok(call) => call,
+            Err(result) => return result,
         };
-        let name = input.name.trim().to_string();
-        if name.is_empty() {
-            return ToolResult::err("name parameter is required");
-        };
-
-        if let Err(e) = validate_name(&name) {
-            return ToolResult::err(e);
-        }
-
-        let pm = match get_package_manager() {
-            Some(p) => p,
-            None => return ToolResult::err("no package manager found"),
-        };
-
-        let result = check_updates_with_pm(pm, &name).await;
-        ToolResult::ok(result)
-    }
-}
-
-async fn check_updates_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
-    match pm {
-        PackageManager::Apt => {
-            // apt list --upgradable shows packages with available upgrades
-            let upgradable = run_cmd("apt", &["list", "--upgradable"])
-                .await
-                .unwrap_or_default();
-            let line = upgradable.lines().find(|l| l.starts_with(name));
-            if let Some(l) = line {
-                // format: "name/repo version arch [upgradable from: old_ver]"
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                let latest = parts.get(1).map(|s| s.to_string());
-                let installed = l
-                    .split("upgradable from: ")
-                    .nth(1)
-                    .and_then(|s| s.strip_suffix(']'))
-                    .map(|s| s.to_string());
-                serde_json::json!({
-                    "name": name,
-                    "update_available": true,
-                    "installed_version": installed,
-                    "latest_version": latest,
-                    "source": "apt",
-                })
-            } else {
-                // Package is up to date (or not installed)
-                let installed = run_cmd("dpkg-query", &["-W", "-f=${Version}", name])
-                    .await
-                    .ok()
-                    .filter(|s| !s.is_empty());
-                serde_json::json!({
-                    "name": name,
-                    "update_available": false,
-                    "installed_version": installed,
-                    "latest_version": null,
-                    "source": "apt",
-                })
-            }
-        }
-        PackageManager::Dnf => {
-            let out = run_cmd("dnf", &["check-update", name])
-                .await
-                .unwrap_or_default();
-            let update_line = out.lines().find(|l| l.starts_with(name));
-            let update_available = update_line.is_some();
-            let latest = update_line
-                .and_then(|l| l.split_whitespace().nth(1))
-                .map(|s| s.to_string());
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": null,
-                "latest_version": latest,
-                "source": "dnf",
-            })
-        }
-        PackageManager::Pacman => {
-            // checkupdates from pacman-contrib if available, otherwise pacman -Qu
-            let out = run_cmd("pacman", &["-Qu", name]).await.unwrap_or_default();
-            let update_line = out.lines().find(|l| l.starts_with(name));
-            let update_available = update_line.is_some();
-            // pacman -Qu: "name old_ver -> new_ver"
-            let (installed, latest) = if let Some(l) = update_line {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                (
-                    parts.get(1).map(|s| s.to_string()),
-                    parts.get(3).map(|s| s.to_string()),
-                )
-            } else {
-                (None, None)
-            };
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": installed,
-                "latest_version": latest,
-                "source": "pacman",
-            })
-        }
-        PackageManager::Zypper => {
-            let out = run_cmd("zypper", &["list-updates"])
-                .await
-                .unwrap_or_default();
-            let update_line = out.lines().find(|l| l.contains(name));
-            let update_available = update_line.is_some();
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": null,
-                "latest_version": null,
-                "source": "zypper",
-            })
-        }
-        PackageManager::Brew => {
-            let out = run_cmd("brew", &["outdated", "--verbose"])
-                .await
-                .unwrap_or_default();
-            let update_line = out.lines().find(|l| l.starts_with(name));
-            if let Some(l) = update_line {
-                // "name (installed_ver) < latest_ver"
-                let installed = l
-                    .split('(')
-                    .nth(1)
-                    .and_then(|s| s.split(')').next())
-                    .map(|s| s.to_string());
-                let latest = l.split("< ").nth(1).map(|s| s.trim().to_string());
-                serde_json::json!({
-                    "name": name,
-                    "update_available": true,
-                    "installed_version": installed,
-                    "latest_version": latest,
-                    "source": "brew",
-                })
-            } else {
-                serde_json::json!({
-                    "name": name,
-                    "update_available": false,
-                    "installed_version": null,
-                    "latest_version": null,
-                    "source": "brew",
-                })
-            }
-        }
-        PackageManager::Winget => {
-            let out = run_cmd("winget", &["upgrade", name])
-                .await
-                .unwrap_or_default();
-            let update_available =
-                !out.contains("No applicable upgrade found") && out.lines().count() > 3;
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": null,
-                "latest_version": null,
-                "source": "winget",
-            })
-        }
-        PackageManager::Choco => {
-            let out = run_cmd("choco", &["outdated"]).await.unwrap_or_default();
-            let update_line = out
-                .lines()
-                .find(|l| l.to_lowercase().starts_with(&name.to_lowercase()));
-            let update_available = update_line.is_some();
-            let (installed, latest) = if let Some(l) = update_line {
-                let cols: Vec<&str> = l.split('|').collect();
-                (
-                    cols.get(1).map(|s| s.trim().to_string()),
-                    cols.get(2).map(|s| s.trim().to_string()),
-                )
-            } else {
-                (None, None)
-            };
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": installed,
-                "latest_version": latest,
-                "source": "choco",
-            })
-        }
-        PackageManager::Snap => {
-            let out = run_cmd("snap", &["refresh", "--list"])
-                .await
-                .unwrap_or_default();
-            let update_available = out.lines().any(|l| l.starts_with(name));
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": null,
-                "latest_version": null,
-                "source": "snap",
-            })
-        }
-        PackageManager::Flatpak => {
-            let out = run_cmd("flatpak", &["remote-ls", "--updates"])
-                .await
-                .unwrap_or_default();
-            let update_available = out
-                .lines()
-                .any(|l| l.to_lowercase().contains(&name.to_lowercase()));
-            serde_json::json!({
-                "name": name,
-                "update_available": update_available,
-                "installed_version": null,
-                "latest_version": null,
-                "source": "flatpak",
-            })
+        let query = params["query"].as_str().unwrap_or_default();
+        let limit = params["limit"].as_u64().unwrap_or(25).min(200) as usize;
+        match provider.search(call.observation(), query, None, 0, limit).await {
+            Ok(page) => ToolResult::ok(serde_json::json!({
+                "packages": page.items.iter().map(|e| serde_json::json!({
+                        "name": e.package.name(),
+                        "provider": e.provider.as_str(),
+                        "installed_version": e.installed_version,
+                        "candidate_version": e.candidate_version,
+                    })).collect::<Vec<_>>(),
+                "truncated": page.truncated,
+            })),
+            Err(error) => gov::os_error(&error),
         }
     }
 }
 
-// ─── get_package_info ─────────────────────────────────────────────────────────
+// ─── get_package_info (GREEN) ──────────────────────────────────────────────
 
 struct GetPackageInfo;
 
 #[async_trait]
 impl ToolHandler for GetPackageInfo {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: PackageInfoInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
-        };
-        let name = input.name.trim().to_string();
-        if name.is_empty() {
-            return ToolResult::err("name parameter is required");
-        };
-        let source = input.source.as_deref();
-
-        if let Err(e) = validate_name(&name) {
-            return ToolResult::err(e);
-        }
-
-        let pm = match resolve_pm(source) {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
-        };
-
-        let info = get_info_with_pm(pm, &name).await;
-        ToolResult::ok(info)
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "get_package_info")
     }
-}
 
-async fn get_info_with_pm(pm: PackageManager, name: &str) -> serde_json::Value {
-    match pm {
-        PackageManager::Apt => {
-            let out = run_cmd("apt-cache", &["show", name])
-                .await
-                .unwrap_or_default();
-            if out.is_empty() {
-                return serde_json::json!({"name": name, "found": false, "source": "apt"});
-            }
-            let field = |key: &str| -> Option<String> {
-                out.lines().find(|l| l.starts_with(key)).map(|l| {
-                    l.split_once(": ")
-                        .map(|x| x.1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                })
-            };
-            serde_json::json!({
-                "name": name,
-                "found": true,
-                "version": field("Version"),
-                "description": field("Description"),
-                "maintainer": field("Maintainer"),
-                "homepage": field("Homepage"),
-                "size": field("Installed-Size").map(|s| format!("{s} kB")),
-                "section": field("Section"),
-                "source": "apt",
-            })
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        if let Err(err) = parse_package_ref(&params["package"]) {
+            return err;
         }
-        PackageManager::Dnf => {
-            let out = run_cmd("dnf", &["info", name]).await.unwrap_or_default();
-            if out.is_empty() || out.contains("No matching Packages") {
-                return serde_json::json!({"name": name, "found": false, "source": "dnf"});
-            }
-            let field = |key: &str| -> Option<String> {
-                out.lines().find(|l| l.starts_with(key)).map(|l| {
-                    l.split_once(": ")
-                        .map(|x| x.1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                })
-            };
-            serde_json::json!({
-                "name": name,
-                "found": true,
-                "version": field("Version"),
-                "description": field("Summary"),
-                "maintainer": field("Packager"),
-                "homepage": field("URL"),
-                "source": "dnf",
-            })
-        }
-        PackageManager::Pacman => {
-            let out = run_cmd("pacman", &["-Si", name])
-                .await
-                .unwrap_or_else(|_e| String::new());
-            let out = if out.is_empty() {
-                run_cmd("pacman", &["-Qi", name]).await.unwrap_or_default()
-            } else {
-                out
-            };
-            if out.is_empty() {
-                return serde_json::json!({"name": name, "found": false, "source": "pacman"});
-            }
-            let field = |key: &str| -> Option<String> {
-                out.lines().find(|l| l.starts_with(key)).map(|l| {
-                    l.split_once(": ")
-                        .map(|x| x.1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                })
-            };
-            serde_json::json!({
-                "name": name,
-                "found": true,
-                "version": field("Version"),
-                "description": field("Description"),
-                "homepage": field("URL"),
-                "source": "pacman",
-            })
-        }
-        PackageManager::Zypper => {
-            let out = run_cmd("zypper", &["info", name]).await.unwrap_or_default();
-            let field = |key: &str| -> Option<String> {
-                out.lines().find(|l| l.contains(key)).map(|l| {
-                    l.split_once(": ")
-                        .map(|x| x.1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                })
-            };
-            serde_json::json!({
-                "name": name,
-                "found": !out.is_empty(),
-                "version": field("Version"),
-                "description": field("Summary"),
-                "homepage": field("Homepage"),
-                "source": "zypper",
-            })
-        }
-        PackageManager::Brew => {
-            let out = run_cmd("brew", &["info", "--json=v2", name])
-                .await
-                .unwrap_or_default();
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&out) {
-                // Try formulae first, then casks
-                let formula = json["formulae"]
-                    .as_array()
-                    .and_then(|a| a.first())
-                    .or_else(|| json["casks"].as_array().and_then(|a| a.first()));
-                if let Some(f) = formula {
-                    return serde_json::json!({
-                        "name": name,
-                        "found": true,
-                        "version": f["versions"]["stable"].as_str().or_else(|| f["version"].as_str()),
-                        "description": f["desc"].as_str(),
-                        "homepage": f["homepage"].as_str(),
-                        "source": "brew",
-                    });
-                }
-            }
-            serde_json::json!({"name": name, "found": false, "source": "brew"})
-        }
-        PackageManager::Winget => {
-            let out = run_cmd("winget", &["show", name]).await.unwrap_or_default();
-            serde_json::json!({
-                "name": name,
-                "found": !out.is_empty(),
-                "raw_info": &out[..out.len().min(2000)],
-                "source": "winget",
-            })
-        }
-        PackageManager::Choco => {
-            let out = run_cmd("choco", &["info", name]).await.unwrap_or_default();
-            serde_json::json!({
-                "name": name,
-                "found": !out.is_empty() && !out.contains("0 packages found"),
-                "raw_info": &out[..out.len().min(2000)],
-                "source": "choco",
-            })
-        }
-        PackageManager::Snap => {
-            let out = run_cmd("snap", &["info", name]).await.unwrap_or_default();
-            let field = |key: &str| -> Option<String> {
-                out.lines().find(|l| l.starts_with(key)).map(|l| {
-                    l.split_once(": ")
-                        .map(|x| x.1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                })
-            };
-            serde_json::json!({
-                "name": name,
-                "found": !out.is_empty() && !out.contains("snap not found"),
-                "version": field("snap-id"),
-                "description": field("summary"),
-                "publisher": field("publisher"),
-                "homepage": field("contact"),
-                "source": "snap",
-            })
-        }
-        PackageManager::Flatpak => {
-            let out = run_cmd(
-                "flatpak",
-                &[
-                    "search",
-                    "--columns=name,application,version,description",
-                    name,
-                ],
-            )
-            .await
+        // The governed PackageControl provider owns the actual normalized
+        // package observation read through the runtime.
+        let resolved = match gov::resolve(&ctx, "get_package_info") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("get_package_info") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_package_info") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let name = params["name"]
+            .as_str()
+            .or_else(|| params["package"].as_str())
             .unwrap_or_default();
-            let line = out
-                .lines()
-                .skip(1)
-                .find(|l| l.to_lowercase().contains(&name.to_lowercase()));
-            if let Some(l) = line {
-                let cols: Vec<&str> = l.splitn(4, '\t').collect();
-                serde_json::json!({
-                    "name": cols.first().unwrap_or(&name).trim(),
-                    "found": true,
-                    "app_id": cols.get(1).map(|s| s.trim()),
-                    "version": cols.get(2).map(|s| s.trim()),
-                    "description": cols.get(3).map(|s| s.trim()),
-                    "source": "flatpak",
-                })
-            } else {
-                serde_json::json!({"name": name, "found": false, "source": "flatpak"})
-            }
+        // PackageKit fronts whichever native manager the host uses, so it is the
+        // provider-neutral reference for a lookup.
+        let package = crate::os_control::packages::PackageRef::new(
+            crate::os_control::packages::PackageProviderId::PackageKit,
+            name,
+        );
+        match provider.get_info(call.observation(), &package).await {
+            Ok(o) => ToolResult::ok(serde_json::json!({
+                "name": o.package.name(),
+                "provider": o.provider.as_str(),
+                "installed_version": o.installed_version,
+                "candidate_version": o.candidate_version,
+                "origin": o.origin,
+                "size_bytes": o.size_bytes,
+                "dependency_count": o.dependency_count,
+            })),
+            Err(error) => gov::os_error(&error),
         }
     }
 }
 
-// ─── install_package (RED) ────────────────────────────────────────────────────
+// ─── list_installed_packages (GREEN) ───────────────────────────────────────
+
+struct ListInstalledPackages;
+
+#[async_trait]
+impl ToolHandler for ListInstalledPackages {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "list_installed_packages")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        if let Err(err) = parse_optional_provider(&params) {
+            return err;
+        }
+        // The governed PackageControl provider owns the actual installed-
+        // package listing across available providers.
+        let resolved = match gov::resolve(&ctx, "list_installed_packages") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("list_installed_packages") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "list_installed_packages") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let limit = params["limit"].as_u64().unwrap_or(100).min(500) as usize;
+        let cursor = params["cursor"].as_u64().unwrap_or(0) as usize;
+        match provider.list_installed(call.observation(), None, cursor, limit).await {
+            Ok(page) => ToolResult::ok(serde_json::json!({
+                "packages": page.items.iter().map(|e| serde_json::json!({
+                        "name": e.package.name(),
+                        "provider": e.provider.as_str(),
+                        "installed_version": e.installed_version,
+                        "candidate_version": e.candidate_version,
+                    })).collect::<Vec<_>>(),
+                "truncated": page.truncated,
+            })),
+            Err(error) => gov::os_error(&error),
+        }
+    }
+}
+
+// ─── plan_package_changes (GREEN) ──────────────────────────────────────────
+
+struct PlanPackageChanges;
+
+#[async_trait]
+impl ToolHandler for PlanPackageChanges {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "plan_package_changes")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let operation = match params["operation"].as_str() {
+            Some("install") => PackageOperation::Install,
+            Some("remove") => PackageOperation::Remove,
+            Some("update") => PackageOperation::Update,
+            Some(other) => {
+                return ToolResult::err(format!(
+                    "unknown operation '{other}': expected install, remove, or update"
+                ))
+            }
+            None => return ToolResult::err("operation parameter is required"),
+        };
+        let packages = match params["packages"].as_array() {
+            Some(items) if !items.is_empty() => {
+                let mut refs = Vec::with_capacity(items.len());
+                for item in items {
+                    match parse_package_ref(item) {
+                        Ok(r) => refs.push(r),
+                        Err(err) => return err,
+                    }
+                }
+                refs
+            }
+            _ => return ToolResult::err("packages parameter must be a non-empty array"),
+        };
+        let _ = (operation, packages);
+        // The governed PackageControl provider owns building the exact
+        // preflight plan (install/upgrade/removal split, download/disk-
+        // delta/security/reboot metadata) through the runtime. This is the
+        // only place install-vs-update-vs-remove-vs-no-change is resolved.
+        let resolved = match gov::resolve(&ctx, "plan_package_changes") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("plan_package_changes") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "plan_package_changes") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let operation = match params["operation"].as_str().unwrap_or("install") {
+            "remove" | "uninstall" => crate::os_control::packages::PackageOperation::Remove,
+            "update" | "upgrade" => crate::os_control::packages::PackageOperation::Update,
+            _ => crate::os_control::packages::PackageOperation::Install,
+        };
+        let refs = package_refs(&params);
+        match provider.plan(call.observation(), operation, &refs).await {
+            Ok(plan) => ToolResult::ok(serde_json::json!({
+                "plan_digest": plan.digest().as_hex(),
+                "operation": plan.operation.as_str(),
+                "provider": plan.provider.as_str(),
+                "installs": plan.installs.len(),
+                "upgrades": plan.upgrades.len(),
+                "removals": plan.removals.len(),
+                "download_bytes": plan.download_bytes,
+                "disk_delta_bytes": plan.disk_delta_bytes,
+                "security_relevant": plan.security_relevant,
+            })),
+            Err(error) => gov::os_error(&error),
+        }
+    }
+}
+
+// ─── install_package (RED) ─────────────────────────────────────────────────
 
 struct InstallPackage;
 
 #[async_trait]
 impl ToolHandler for InstallPackage {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: InstallPackageInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
-        };
-        let name = input.name.trim().to_string();
-        if name.is_empty() {
-            return ToolResult::err("name parameter is required");
-        };
-        let source = input.source.as_deref();
-
-        if let Err(e) = validate_name(&name) {
-            return ToolResult::err(e);
-        }
-
-        let pm = match resolve_pm(source) {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
-        };
-
-        info!(
-            "[packages] install_package: name={name} source={source:?} pm={:?}",
-            pm
-        );
-
-        // Mandatory idempotency pre-flight: skip apply when already installed.
-        if let Some(installed) = check_installed_with_pm(pm, &name).await {
-            info!("[packages] install_package: '{name}' already installed, no-op");
-            return ToolResult::ok(serde_json::json!({
-                "package": name,
-                "success": true,
-                "changed": false,
-                "already_in_desired_state": true,
-                "source": pm.as_str(),
-                "preflight": installed,
-                "message": format!("'{name}' is already installed; no action taken"),
-            }));
-        }
-
-        let priv_esc = match get_priv_esc(pm).await {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
-        };
-        info!("[packages] install_package: using priv_esc={priv_esc:?}");
-
-        let output = run_install(pm, &name, priv_esc).await;
-
-        match output {
-            Ok(out) => {
-                info!("[packages] install_package: SUCCESS for '{name}'");
-                ToolResult::ok(serde_json::json!({
-                    "package": name,
-                    "success": true,
-                    "changed": true,
-                    "already_in_desired_state": false,
-                    "source": pm.as_str(),
-                    "output": &out[..out.len().min(2000)],
-                    "message": format!("Successfully installed '{name}'"),
-                }))
-            }
-            Err(e) => {
-                error!("[packages] install_package: FAILED for '{name}': {e}");
-                ToolResult::err(format!("Installation of '{name}' failed: {e}"))
-            }
-        }
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "install_package")
     }
-}
 
-async fn run_install(pm: PackageManager, name: &str, priv_esc: PrivEsc) -> Result<String, String> {
-    info!("[packages] run_install: pm={pm:?} name={name} priv_esc={priv_esc:?}");
-    match pm {
-        PackageManager::Apt => run_priv_cmd(priv_esc, "apt-get", &["install", "-y", name]).await,
-        PackageManager::Dnf => run_priv_cmd(priv_esc, "dnf", &["install", "-y", name]).await,
-        PackageManager::Pacman => {
-            run_priv_cmd(priv_esc, "pacman", &["-S", "--noconfirm", name]).await
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let plan_digest = params["plan_digest"].as_str().unwrap_or("").trim();
+        if plan_digest.is_empty() {
+            return ToolResult::err(
+                "plan_digest parameter is required (call plan_package_changes first)",
+            );
         }
-        PackageManager::Zypper => run_priv_cmd(priv_esc, "zypper", &["install", "-y", name]).await,
-        PackageManager::Brew => {
-            info!("[packages] brew install: trying formula first");
-            match run_apply_cmd("brew", &["install", name]).await {
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    warn!("[packages] brew install formula failed ({e}), retrying as cask");
-                    run_apply_cmd("brew", &["install", "--cask", name]).await
-                }
-            }
-        }
-        PackageManager::Winget => {
-            run_apply_cmd(
-                "winget",
-                &[
-                    "install",
-                    "--accept-source-agreements",
-                    "--accept-package-agreements",
-                    name,
-                ],
+        // The governed PackageControl provider applies the approved,
+        // digest-bound plan exclusively through
+        // `BrokerOperation::ApplyPackagePlan` — never a direct pkexec/sudo
+        // subprocess from this handler.
+        let resolved = match gov::resolve(&ctx, "install_package") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("install_package") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "install_package") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let refs = package_refs(&params);
+        // Build the plan under the observation authority first, then refuse if it
+        // no longer matches the digest the caller approved — a plan that drifted
+        // since approval must not be applied silently.
+        let plan = match provider
+            .plan(
+                call.observation(),
+                crate::os_control::packages::PackageOperation::Install,
+                &refs,
             )
             .await
-        }
-        PackageManager::Choco => run_apply_cmd("choco", &["install", "-y", name]).await,
-        PackageManager::Snap => {
-            // snapd may allow install without root via the snapd socket;
-            // try without sudo first, fall back to privileged if it fails.
-            info!("[packages] snap install: trying without privilege escalation first");
-            match run_apply_cmd("snap", &["install", name]).await {
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    warn!("[packages] snap install without privilege failed ({e}), retrying with escalation");
-                    run_priv_cmd(priv_esc, "snap", &["install", name]).await
-                }
+        {
+            Ok(plan) => plan,
+            Err(error) => return gov::os_error(&error),
+        };
+        if let Some(approved) = params["plan_digest"].as_str() {
+            if approved != plan.digest().as_hex() {
+                return ToolResult::err(
+                    "PLAN_DIGEST_MISMATCH: the resolved package plan changed since approval",
+                );
             }
         }
-        PackageManager::Flatpak => {
-            // Try user install (no root) first.
-            info!("[packages] flatpak install: trying --user install first");
-            match run_apply_cmd("flatpak", &["install", "-y", "--user", name]).await {
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    warn!("[packages] flatpak --user install failed ({e}), retrying system-wide");
-                    run_priv_cmd(priv_esc, "flatpak", &["install", "-y", name]).await
-                }
-            }
-        }
+        let request = crate::os_control::packages::PackageRequest {
+            action: "install_package".to_string(),
+            params: params.clone(),
+            plan,
+        };
+        let desired = request.desired_state();
+        let plan_meta = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "install_package",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan_meta,
+        )
+        .await
     }
 }
 
-// ─── uninstall_package (RED) ──────────────────────────────────────────────────
+// ─── uninstall_package (RED) ───────────────────────────────────────────────
 
 struct UninstallPackage;
 
 #[async_trait]
 impl ToolHandler for UninstallPackage {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: UninstallPackageInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
-        };
-        let name = input.name.trim().to_string();
-        if name.is_empty() {
-            return ToolResult::err("name parameter is required");
-        };
-        let source = input.source.as_deref();
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "uninstall_package")
+    }
 
-        if let Err(e) = validate_name(&name) {
-            return ToolResult::err(e);
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let plan_digest = params["plan_digest"].as_str().unwrap_or("").trim();
+        if plan_digest.is_empty() {
+            return ToolResult::err(
+                "plan_digest parameter is required (call plan_package_changes first)",
+            );
         }
-
-        let pm = match resolve_pm(source) {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
+        // Same closed plan-apply operation as `install_package`, dispatched
+        // exclusively through `BrokerOperation::ApplyPackagePlan`.
+        let resolved = match gov::resolve(&ctx, "uninstall_package") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
         };
-
-        info!(
-            "[packages] uninstall_package: name={name} source={source:?} pm={:?}",
-            pm
-        );
-
-        // Mandatory idempotency pre-flight: skip apply when already absent.
-        let installed = check_installed_with_pm(pm, &name).await;
-        if installed.is_none() {
-            info!("[packages] uninstall_package: '{name}' is not installed, no-op");
-            return ToolResult::ok(serde_json::json!({
-                "package": name,
-                "success": true,
-                "changed": false,
-                "already_in_desired_state": true,
-                "source": pm.as_str(),
-                "message": format!("'{name}' is not installed; no action taken"),
-            }));
+        let provider = match resolved.runtime.packages("uninstall_package") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "uninstall_package") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let refs = package_refs(&params);
+        // Build the plan under the observation authority first, then refuse if it
+        // no longer matches the digest the caller approved — a plan that drifted
+        // since approval must not be applied silently.
+        let plan = match provider
+            .plan(
+                call.observation(),
+                crate::os_control::packages::PackageOperation::Remove,
+                &refs,
+            )
+            .await
+        {
+            Ok(plan) => plan,
+            Err(error) => return gov::os_error(&error),
+        };
+        if let Some(approved) = params["plan_digest"].as_str() {
+            if approved != plan.digest().as_hex() {
+                return ToolResult::err(
+                    "PLAN_DIGEST_MISMATCH: the resolved package plan changed since approval",
+                );
+            }
         }
-
-        let priv_esc = match get_priv_esc(pm).await {
-            Ok(p) => p,
-            Err(e) => return ToolResult::err(e),
+        let request = crate::os_control::packages::PackageRequest {
+            action: "uninstall_package".to_string(),
+            params: params.clone(),
+            plan,
         };
-        info!("[packages] uninstall_package: using priv_esc={priv_esc:?}");
+        let desired = request.desired_state();
+        let plan_meta = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "uninstall_package",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan_meta,
+        )
+        .await
+    }
+}
 
-        let output = run_uninstall(pm, &name, priv_esc).await;
+// ─── check_system_updates (GREEN) ──────────────────────────────────────────
 
-        match output {
-            Ok(out) => {
-                info!("[packages] uninstall_package: SUCCESS for '{name}'");
-                ToolResult::ok(serde_json::json!({
-                    "package": name,
-                    "success": true,
-                    "changed": true,
-                    "already_in_desired_state": false,
-                    "source": pm.as_str(),
-                    "output": &out[..out.len().min(2000)],
-                    "message": format!("Successfully uninstalled '{name}'"),
-                }))
-            }
-            Err(e) => {
-                error!("[packages] uninstall_package: FAILED for '{name}': {e}");
-                ToolResult::err(format!("Uninstallation of '{name}' failed: {e}"))
-            }
+struct CheckSystemUpdates;
+
+#[async_trait]
+impl ToolHandler for CheckSystemUpdates {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "check_system_updates")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        if let Err(err) = parse_optional_provider(&params) {
+            return err;
+        }
+        // The governed PackageControl provider owns the actual routine
+        // update assessment (security relevance, reboot likelihood) — never
+        // a fabricated guess when the provider doesn't supply it.
+        let resolved = match gov::resolve(&ctx, "check_system_updates") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("check_system_updates") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "check_system_updates") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        match provider.assess_updates(call.observation(), None).await {
+            Ok(a) => ToolResult::ok(serde_json::json!({
+                "provider": a.provider.as_str(),
+                "update_count": a.update_count,
+                "security_update_count": a.security_update_count,
+                "download_bytes": a.download_bytes,
+                "reboot_likely": a.reboot_likely,
+            })),
+            Err(error) => gov::os_error(&error),
         }
     }
 }
 
-async fn run_uninstall(
-    pm: PackageManager,
-    name: &str,
-    priv_esc: PrivEsc,
-) -> Result<String, String> {
-    info!("[packages] run_uninstall: pm={pm:?} name={name} priv_esc={priv_esc:?}");
-    match pm {
-        PackageManager::Apt => run_priv_cmd(priv_esc, "apt-get", &["remove", "-y", name]).await,
-        PackageManager::Dnf => run_priv_cmd(priv_esc, "dnf", &["remove", "-y", name]).await,
-        PackageManager::Pacman => {
-            run_priv_cmd(priv_esc, "pacman", &["-R", "--noconfirm", name]).await
-        }
-        PackageManager::Zypper => run_priv_cmd(priv_esc, "zypper", &["remove", "-y", name]).await,
-        PackageManager::Brew => match run_apply_cmd("brew", &["uninstall", name]).await {
-            Ok(out) => Ok(out),
-            Err(e) => {
-                warn!("[packages] brew uninstall formula failed ({e}), retrying as cask");
-                run_apply_cmd("brew", &["uninstall", "--cask", name]).await
-            }
-        },
-        PackageManager::Winget => run_apply_cmd("winget", &["uninstall", name]).await,
-        PackageManager::Choco => run_apply_cmd("choco", &["uninstall", "-y", name]).await,
-        PackageManager::Snap => {
-            // snap exits 0 even when the package is not installed, writing
-            // "snap '<name>' is not installed" to stderr. After our run_cmd
-            // fix, that message comes back as Ok(msg). Treat it as an error
-            // so the caller sees the real outcome instead of silent success.
-            match run_apply_cmd("snap", &["remove", name]).await {
-                Ok(out) if out.contains("is not installed") => {
-                    warn!("[packages] snap remove: {out}");
-                    Err(out)
-                }
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    warn!("[packages] snap remove without privilege failed ({e}), retrying with escalation");
-                    run_priv_cmd(priv_esc, "snap", &["remove", name]).await
-                }
-            }
-        }
-        PackageManager::Flatpak => {
-            match run_apply_cmd("flatpak", &["uninstall", "-y", "--user", name]).await {
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    warn!("[packages] flatpak --user uninstall failed ({e}), retrying system-wide");
-                    run_priv_cmd(priv_esc, "flatpak", &["uninstall", "-y", name]).await
-                }
-            }
+// ─── get_reboot_required (GREEN) ───────────────────────────────────────────
+
+struct GetRebootRequired;
+
+#[async_trait]
+impl ToolHandler for GetRebootRequired {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_packages_unavailable(None, "get_reboot_required")
+    }
+
+    async fn execute_with_context(
+        &self,
+        _params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        // The governed PackageControl provider owns the actual current
+        // reboot-required query through the runtime.
+        let resolved = match gov::resolve(&ctx, "get_reboot_required") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.packages("get_reboot_required") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_reboot_required") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        match provider.reboot_required(call.observation()).await {
+            Ok(r) => ToolResult::ok(serde_json::json!({
+                "required": r.required,
+                "reason_count": r.reason_count,
+            })),
+            Err(error) => gov::os_error(&error),
         }
     }
 }
 
-// ─── Register all tools ───────────────────────────────────────────────────────
+// ─── Register all tools ─────────────────────────────────────────────────────
 
 pub fn register(reg: &ToolRegistry) {
     let tools: Vec<(ToolDef, Arc<dyn ToolHandler>)> = vec![
-        // ── GREEN: query tools (auto-execute, no approval needed) ──
-        (ToolDef {
-            name: "list_installed_packages".into(),
-            description: "List installed packages/apps across apt, flatpak, and snap. Read-only. Use for 'list installed apps', 'show all packages', etc.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Green,
-            min_tier: "lite",
-            parameters: vec![
-                param("limit", "number", "Max packages per manager (default 500)", false),
-            ],
-        }, Arc::new(ListInstalledPackages)),
-        (ToolDef {
-            name: "search_package".into(),
-            description: "Search for OPERATING-SYSTEM software packages/applications across the system package managers (apt, dnf, snap, flatpak, brew, winget, choco) — e.g. htop, docker, vlc. This is ONLY for OS software, NOT for KRIA skills/tools/capabilities (for those use `search_marketplace`). Returns matching package names, descriptions and sources. Always call this before installing an OS package.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Green,
-            min_tier: "lite",
-            parameters: vec![
-                param("query",  "string", "Package name or keyword to search for", true),
-                param("name",   "string", "Alias for query (for compatibility with older calls)", false),
-                param("source", "string", "Specific source to search: apt, dnf, pacman, zypper, brew, winget, choco, snap, flatpak. Omit to search all available sources.", false),
-            ],
-        }, Arc::new(SearchPackage)),
-        (ToolDef {
-            name: "check_package_installed".into(),
-            description: "Check whether a package is already installed and get its current version. Always call this before installing to avoid reinstalling existing packages.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Green,
-            min_tier: "lite",
-            parameters: vec![
-                param("name", "string", "Exact package name to check", true),
-            ],
-        }, Arc::new(CheckPackageInstalled)),
-        (ToolDef {
-            name: "check_package_updates".into(),
-            description: "Check whether a newer version is available for an installed package. Returns installed and latest version numbers.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Green,
-            min_tier: "lite",
-            parameters: vec![
-                param("name", "string", "Package name to check for updates", true),
-            ],
-        }, Arc::new(CheckPackageUpdates)),
-        (ToolDef {
-            name: "get_package_info".into(),
-            description: "Get detailed metadata about a package: version, description, maintainer, homepage, dependencies, size. Use this to verify a package before installing, especially for unfamiliar packages.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Green,
-            min_tier: "lite",
-            parameters: vec![
-                param("name",   "string", "Package name", true),
-                param("source", "string", "Package source/manager to query: apt, dnf, pacman, zypper, brew, winget, choco, snap, flatpak", false),
-            ],
-        }, Arc::new(GetPackageInfo)),
-        // ── RED: action tools (require HITL approval) ──
-        (ToolDef {
-            name: "install_package".into(),
-            description: "Install an OPERATING-SYSTEM software package using the system package manager (apt/dnf/brew/winget/...) — e.g. htop, docker, vlc. This is ONLY for OS software, NOT for KRIA skills/tools/capabilities (to add a skill/tool/capability use `install_capability`). Requires user approval. Call search_package and check_package_installed first.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Red,
-            min_tier: "standard",
-            parameters: vec![
-                param("name",   "string", "Exact package name to install (as returned by search_package)", true),
-                param("source", "string", "Package manager to use: apt, dnf, pacman, zypper, brew, winget, choco, snap, flatpak. Omit to use system default.", false),
-            ],
-        }, Arc::new(InstallPackage)),
-        (ToolDef {
-            name: "uninstall_package".into(),
-            description: "Remove an installed package using the system package manager. Requires user approval. Call check_package_installed first to confirm the package is actually installed.".into(),
-            category: "packages".into(),
-            default_tier: RiskLevel::Red,
-            min_tier: "standard",
-            parameters: vec![
-                param("name",   "string", "Exact package name to uninstall", true),
-                param("source", "string", "Package manager to use: apt, dnf, pacman, zypper, brew, winget, choco, snap, flatpak. Omit to use system default.", false),
-            ],
-        }, Arc::new(UninstallPackage)),
+        // GREEN: query/planning tools (auto-execute, no approval needed)
+        (
+            ToolDef {
+                name: "search_package".into(),
+                description: "Search for OPERATING-SYSTEM software packages/applications across the system package providers (PackageKit/apt/dnf/pacman/zypper/snap/flatpak) — e.g. htop, docker, vlc. This is ONLY for OS software, NOT for KRIA skills/tools/capabilities (for those use `search_marketplace`). Returns matching package names, versions, origins and providers. Always call this before installing an OS package.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("query", "string", "Package name or keyword to search for", true),
+                    param("name", "string", "Alias for query (for compatibility with older calls)", false),
+                    param("provider", "string", "Specific provider to search: packagekit, apt, dnf, pacman, zypper, snap, flatpak. Omit to search all available providers.", false),
+                    param("cursor", "string", "Pagination cursor from a previous call", false),
+                    param("limit", "integer", "Maximum results per page", false),
+                ],
+            },
+            Arc::new(SearchPackage),
+        ),
+        (
+            ToolDef {
+                name: "get_package_info".into(),
+                description: "Get the normalized observation for one package: installed version, candidate version, origin, size, and dependency/reboot summary. Use this to verify a package before installing.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("package", "object", "Package identity {provider, name} (from search_package)", true),
+                ],
+            },
+            Arc::new(GetPackageInfo),
+        ),
+        (
+            ToolDef {
+                name: "list_installed_packages".into(),
+                description: "List installed packages/apps across available providers (PackageKit/apt/dnf/pacman/zypper/snap/flatpak). Read-only. Use for 'list installed apps', 'show all packages', etc.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("provider", "string", "Specific provider to list: packagekit, apt, dnf, pacman, zypper, snap, flatpak. Omit to list across all available providers.", false),
+                    param("cursor", "string", "Pagination cursor from a previous call", false),
+                    param("limit", "integer", "Maximum results per page", false),
+                ],
+            },
+            Arc::new(ListInstalledPackages),
+        ),
+        (
+            ToolDef {
+                name: "plan_package_changes".into(),
+                description: "Build the exact preflight plan for installing, removing, or updating one or more packages: the resolved install/upgrade/removal split plus download size, disk delta, security relevance, and reboot requirement. Call this before install_package/uninstall_package and show the plan to the user.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("operation", "string", "One of: install, remove, update", true),
+                    param("packages", "array", "Package identities {provider, name} to plan changes for", true),
+                ],
+            },
+            Arc::new(PlanPackageChanges),
+        ),
+        (
+            ToolDef {
+                name: "check_system_updates".into(),
+                description: "Assess routine available updates: count, security relevance (when known), download size, and reboot likelihood. Never fabricates security/reboot metadata the provider does not supply.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("provider", "string", "Specific provider to assess: packagekit, apt, dnf, pacman, zypper, snap, flatpak. Omit to assess across all available providers.", false),
+                ],
+            },
+            Arc::new(CheckSystemUpdates),
+        ),
+        (
+            ToolDef {
+                name: "get_reboot_required".into(),
+                description: "Check whether a reboot is currently required to complete already-applied package changes.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![],
+            },
+            Arc::new(GetRebootRequired),
+        ),
+        // RED: action tools (require HITL approval)
+        (
+            ToolDef {
+                name: "install_package".into(),
+                description: "Apply a previously built, approved package plan to install packages. Requires calling plan_package_changes first and passing its plan_digest. Requires user approval.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("plan_digest", "string", "The exact plan digest returned by plan_package_changes", true),
+                ],
+            },
+            Arc::new(InstallPackage),
+        ),
+        (
+            ToolDef {
+                name: "uninstall_package".into(),
+                description: "Apply a previously built, approved package plan to remove packages. Requires calling plan_package_changes first and passing its plan_digest. Requires user approval.".into(),
+                category: "packages".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("plan_digest", "string", "The exact plan digest returned by plan_package_changes", true),
+                ],
+            },
+            Arc::new(UninstallPackage),
+        ),
     ];
     for (def, handler) in tools {
         reg.register(def, handler);
     }
+}
+
+/// Parse the canonical package list into provider-neutral references.
+///
+/// PackageKit fronts whichever native manager the host uses, so a caller never
+/// has to name apt/dnf/pacman explicitly.
+fn package_refs(params: &serde_json::Value) -> Vec<crate::os_control::packages::PackageRef> {
+    let provider = crate::os_control::packages::PackageProviderId::PackageKit;
+    let single = params["name"].as_str().or_else(|| params["package"].as_str());
+    if let Some(name) = single {
+        return vec![crate::os_control::packages::PackageRef::new(provider, name)];
+    }
+    params["packages"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|name| crate::os_control::packages::PackageRef::new(provider, name))
+                .collect()
+        })
+        .unwrap_or_default()
 }

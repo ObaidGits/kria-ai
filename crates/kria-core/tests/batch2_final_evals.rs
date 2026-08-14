@@ -69,7 +69,7 @@ use std::sync::Arc;
 
 use kria_core::agent::execution_transparency::ExecutionTransparencyLayer;
 use kria_core::agent::execution_verifier::VerificationConfidenceTier;
-use kria_core::agent::goal_tree::{CompletionContract, GoalTree, Precondition};
+use kria_core::agent::goal_tree::{CompletionContract, GoalTree};
 use kria_core::agent::observable_completion::{
     infer_outcomes, AggregateVisibilityResult, CompletionVisibilityPolicy,
     ObservableCompletionEngine, ObservableOutcome, ObservableVerifyResult, VisibilityRequirement,
@@ -150,7 +150,7 @@ fn g3_recovery_plan_fallbacks_bounded() {
 fn g4_stage_executor_with_continuation_runtime_stores_runtime() {
     // Verify the builder does not panic and the type compiles correctly.
     use kria_core::agent::execution_verifier_bounded::BoundedExecutionVerifier;
-    use kria_core::agent::stage_executor::StageExecutor;
+    
 
     let rt = Arc::new(wcr());
     let verifier = Arc::new(BoundedExecutionVerifier::new());

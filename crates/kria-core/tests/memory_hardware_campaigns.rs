@@ -73,7 +73,7 @@ fn hc01_bfs_terminates_within_deadline() {
     use kria_core::memory::stores::ports::GraphStore;
     use kria_core::memory::stores::sqlite_graph::SqliteGraphStore;
     use kria_core::memory::types::Entity;
-    use std::sync::Arc;
+    
 
     let ms = make_system();
     let db = ms.database();

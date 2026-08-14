@@ -30,6 +30,8 @@ fn default_config() -> RoutingConfig {
     RoutingConfig::default()
 }
 
+// Test scaffolding: records the fixture's shape even where a particular test does not read it.
+#[allow(dead_code)]
 fn make_context_with_domain(domain: Domain) -> RoutingContext {
     let mut ctx = RoutingContext::default();
     ctx.record_turn(domain, None, IntentModality::Read, vec![0.1; 384]);

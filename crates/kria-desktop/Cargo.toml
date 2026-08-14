@@ -46,4 +46,25 @@ tower-http = { version = "0.6", features = ["cors"] }
 image = { workspace = true, features = ["png", "jpeg"] }
 
 [features]
+# LIVE OS control is ON by default: building or running the desktop app needs no
+# extra flag for a prompt to reach the host.
+#
+# What still governs every action, with the feature on:
+#   * risk policy and the execution gate (a RED action needs your approval),
+#   * a durable audit admission before anything runs,
+#   * write leases, so two actions cannot fight over the same resource,
+#   * observe -> apply -> verify, with a receipt, and rollback where a real
+#     inverse exists.
+# The feature decides whether providers are COMPOSED, not whether they are
+# governed. A domain whose backend is absent stays uncomposed and answers
+# `Unavailable` rather than degrading to a shell.
+#
+# Mutually exclusive with kria-core/os-control-test by a hard compile_error!, so
+# the deny-live test composition can never link a live transport. Test commands
+# therefore pass `--no-default-features --features os-control-test`.
+#
+# To build the app WITHOUT any ability to touch the host:
+#   cargo run -p kria-desktop --no-default-features
+default = ["os-control-live"]
 nvidia = ["kria-core/nvidia"]
+os-control-live = ["kria-core/os-control-live"]

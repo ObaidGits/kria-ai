@@ -394,7 +394,7 @@ fn batch_is_entity_authorized(
         truth_in = truth_in,
     );
 
-    let mut vis_params: Vec<rusqlite::types::Value> = entity_ids
+    let vis_params: Vec<rusqlite::types::Value> = entity_ids
         .iter()
         .map(|id| rusqlite::types::Value::Text(id.clone()))
         .collect();
@@ -896,6 +896,7 @@ fn resolve_authorized_seeds(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use crate::memory::db::Database;
     use crate::memory::ids::new_id;
 

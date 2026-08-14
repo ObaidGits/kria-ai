@@ -17,6 +17,31 @@ pub mod cognition_tools;
 pub mod communication;
 pub mod config_patch;
 pub mod desktop;
+/// Audio input, per-application stream, device-profile and MPRIS handlers.
+pub mod audio;
+
+/// VPN, hotspot, proxy and saved-credential handlers.
+pub mod connectivity;
+
+/// Trash restore, archive listing and ownership handlers.
+pub mod file_control;
+
+/// Battery health, logout and scheduled-shutdown handlers.
+pub mod power_session;
+
+/// Credential-store handlers: metadata listing, store, replace, delete.
+pub mod secrets;
+
+/// Scheduled-task patching and in-tree workflow handlers.
+pub mod automation_control;
+
+/// Printing, privacy controls and firewall handlers.
+pub mod print_privacy_firewall;
+
+/// Search, health, backup, scan, firmware and sensor handlers.
+pub mod system_services;
+
+pub mod desktop_state;
 pub mod developer;
 pub mod disk;
 pub mod documents;
@@ -36,6 +61,12 @@ pub mod mount_manager;
 pub mod n8n;
 pub mod news;
 pub mod packages;
+/// Bluetooth adapter and device lifecycle handlers (Task 3.7, OSC-021).
+pub mod bluetooth;
+
+/// Shared plumbing for canonical OS tool handlers: runtime resolution, governed
+/// mutation/read drivers, and the single receipt rendering shape.
+pub mod os_governed;
 pub mod power;
 pub mod precognitive;
 pub mod preflight;
@@ -90,6 +121,21 @@ pub struct ToolContext {
     /// whitelisted temp overrides applied on top. Dropped at turn end (never
     /// persisted) — so it auto-reverts on success, error, or crash.
     pub request_override: Option<Arc<crate::config::RequestOverride>>,
+    /// The governed OS-control runtime seam (linux-os-control-production Task 1.2).
+    /// Injected into every OS-facing handler so it reaches host effects only
+    /// through governed runtime methods — never raw `HostOsControl` or
+    /// `LocalEnvironment`. `None` only if a registry was built without the seam;
+    /// the standard builders always inject at least a detached runtime.
+    pub os_runtime: Option<Arc<crate::os_control::OsControlRuntime>>,
+    /// The governed-call bundle for ONE admitted canonical OS action
+    /// (linux-os-control-production Task 1.2/1.7): the grant, held write leases,
+    /// durable audit admission, and observation context.
+    ///
+    /// Attached by the agent's policy executor **only** for native-OS actions, so
+    /// non-OS tools never see admission material. Without it an OS handler can
+    /// still observe availability but cannot mutate — `run_mutation` requires
+    /// every artifact in here.
+    pub os_call: Option<Arc<crate::os_control::governed::OsGovernedCall>>,
 }
 
 impl ToolContext {
@@ -106,7 +152,44 @@ impl ToolContext {
             feature_control_backend: None,
             config: None,
             request_override: None,
+            os_runtime: None,
+            os_call: None,
         }
+    }
+
+    /// Attach the governed-call bundle for one admitted native-OS action.
+    ///
+    /// Only the agent's policy executor calls this, after the policy gate minted
+    /// the grant, the audit store admitted the action, and the write leases were
+    /// acquired. A handler that finds it present may perform a governed mutation.
+    #[must_use]
+    pub fn with_os_call(
+        mut self,
+        call: Arc<crate::os_control::governed::OsGovernedCall>,
+    ) -> Self {
+        self.os_call = Some(call);
+        self
+    }
+
+    /// The governed-call bundle for this action, if the action was admitted as a
+    /// native-OS mutation.
+    #[must_use]
+    pub fn os_call(&self) -> Option<&crate::os_control::governed::OsGovernedCall> {
+        self.os_call.as_deref()
+    }
+
+    /// Attach the governed OS-control runtime seam (builder-style, Task 1.2).
+    /// OS-facing handlers read it via [`ToolContext::os_runtime`] and reach host
+    /// effects only through it.
+    pub fn with_os_runtime(mut self, runtime: Arc<crate::os_control::OsControlRuntime>) -> Self {
+        self.os_runtime = Some(runtime);
+        self
+    }
+
+    /// The injected OS-control runtime seam, if any.
+    #[must_use]
+    pub fn os_runtime(&self) -> Option<Arc<crate::os_control::OsControlRuntime>> {
+        self.os_runtime.clone()
     }
 
     /// Set the trigger provenance (builder-style). The agent/turn boundary uses
@@ -184,90 +267,10 @@ impl ToolContext {
 }
 
 pub use mount_manager::ToolMountManager;
-pub use registry::{ToolDef, ToolHandler, ToolRegistry};
-
-/// Execute a shell command either locally or on the VM, depending on env vars.
-/// When KRIA_TEST_VM_HOST is set (and we're in test mode with KRIA_RUNNING_IN_VM=1),
-/// destructive commands are dispatched to the VM via SSH instead of running locally.
-/// This implements the "host=brain, VM=muscle" architecture.
-///
-/// When `use_sudo` is true, the command is prefixed with `sudo -n` (non-interactive)
-/// on the VM/Docker target. This is needed for privileged operations like shutdown.
-pub async fn vm_dispatch_command(cmd: &str) -> Result<(), String> {
-    vm_dispatch_command_with_sudo(cmd, false).await
-}
-
-pub async fn vm_dispatch_command_with_sudo(cmd: &str, use_sudo: bool) -> Result<(), String> {
-    let vm_host = std::env::var("KRIA_TEST_VM_HOST").ok();
-    let running_in_vm = std::env::var("KRIA_RUNNING_IN_VM").ok().as_deref() == Some("1");
-    let docker_container = std::env::var("KRIA_TEST_DOCKER_CONTAINER_ID").ok();
-
-    let effective_cmd = if use_sudo {
-        format!("sudo -n {}", cmd)
-    } else {
-        cmd.to_string()
-    };
-
-    // If VM env vars are set and we're in test mode, dispatch to VM/Docker
-    if (running_in_vm && vm_host.is_some()) || docker_container.is_some() {
-        if let Some(ref container_id) = docker_container {
-            // Docker dispatch
-            let output = tokio::process::Command::new("docker")
-                .args(["exec", container_id, "bash", "-c", &effective_cmd])
-                .output()
-                .await
-                .map_err(|e| format!("docker exec failed: {e}"))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("docker exec failed: {stderr}"));
-            }
-        } else if let Some(ref host) = vm_host {
-            // SSH dispatch
-            let port = std::env::var("KRIA_TEST_VM_PORT")
-                .ok()
-                .and_then(|v| v.parse::<u16>().ok())
-                .unwrap_or(22);
-            let user = std::env::var("KRIA_TEST_VM_USER").unwrap_or_else(|_| "obaid".to_string());
-            let ssh_key = std::env::var("KRIA_TEST_VM_SSH_KEY")
-                .unwrap_or_else(|_| "~/.ssh/kria_id".to_string());
-
-            let output = tokio::process::Command::new("ssh")
-                .args([
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "ConnectTimeout=10",
-                    "-o",
-                    "BatchMode=yes",
-                    "-i",
-                    &ssh_key,
-                    "-p",
-                    &port.to_string(),
-                    &format!("{}@{}", user, host),
-                    &effective_cmd,
-                ])
-                .output()
-                .await
-                .map_err(|e| format!("SSH dispatch failed: {e}"))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("SSH command failed: {stderr}"));
-            }
-        }
-    } else {
-        // Local execution
-        let output = tokio::process::Command::new("sh")
-            .args(["-c", &effective_cmd])
-            .output()
-            .await
-            .map_err(|e| format!("local command failed: {e}"))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("command failed: {stderr}"));
-        }
-    }
-    Ok(())
-}
+pub use registry::{
+    OsUnavailableHandler, ToolDef, ToolHandler, ToolRegistrationError, ToolRegistry,
+    ToolResumeCapability,
+};
 
 #[cfg(test)]
 mod provenance_tests {

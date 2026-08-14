@@ -35,7 +35,7 @@ use kria_core::agent::psdg::PsdgHandle;
 use kria_core::agent::stage_executor::StageOutcome;
 use kria_core::agent::turn_gate::{HazardHint, Operation};
 use kria_core::agent::workflow_continuation::{
-    InterruptionClass, InterruptionContext, RecoveryAction, WorkflowContinuationRuntime,
+    InterruptionClass, RecoveryAction, WorkflowContinuationRuntime,
     MAX_RECOVERY_DEPTH,
 };
 use kria_core::agent::workflow_expectation::{WorkflowCategory, WorkflowExpectationEngine};

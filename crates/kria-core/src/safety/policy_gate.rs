@@ -699,26 +699,26 @@ fn extract_shell_c_command(args: &[String]) -> Option<String> {
 
 impl PolicyGate for CapabilityPolicyGate {
     fn evaluate(&self, binary: &str, args: &[String]) -> PolicyDecision {
-        // 1. Check custom rules first (highest priority)
-        {
-            let rules = self.custom_rules.read().unwrap();
-            for rule in rules.iter() {
-                if rule.binary == binary {
-                    let matches = match &rule.arg_pattern {
-                        ArgPattern::Any => true,
-                        pattern => args.first().map(|a| pattern.matches(a)).unwrap_or(false),
-                    };
-                    if matches {
-                        // Check expiry
-                        if let Some(expires) = rule.expires_at {
-                            if std::time::Instant::now() > expires {
-                                continue;
-                            }
-                        }
-                        return rule.decision.clone();
-                    }
-                }
-            }
+        // Command policy is DEFENCE-IN-DEPTH, subordinate to `ExecutionGate`
+        // (design §2.1 / §6, OSC-001/OSC-002/OSC-004). Its hard prohibitions —
+        // BLACK-scope administration, blocked binaries, and blocked argument
+        // patterns — are evaluated BEFORE any runtime custom rule, so a custom
+        // rule can never un-block a prohibited command, substitute for action
+        // approval, or otherwise broaden authority. Custom rules apply only to
+        // otherwise-allowable commands (step 5, below).
+
+        // 1. BLACK-scope containment (OSC-030/OSC-004): a structured command that
+        //    reaches prohibited administration is permanently blocked before
+        //    capability resolution, custom rules, or approval. This mirrors the
+        //    PolicyEngine block so both admission paths agree.
+        if let Some(prohibited) = crate::safety::black_scope::classify_structured(binary, args) {
+            return PolicyDecision::Blocked {
+                reason: format!(
+                    "prohibited scope [{}]: {}",
+                    prohibited.id(),
+                    prohibited.boundary_explanation()
+                ),
+            };
         }
 
         // 2. Command-level granularity for shell interpreters.
@@ -728,6 +728,17 @@ impl PolicyGate for CapabilityPolicyGate {
         //    on tiering for the same command string (defense-in-depth).
         if matches!(binary, "bash" | "sh" | "zsh" | "fish" | "csh" | "tcsh") {
             if let Some(inner_cmd) = extract_shell_c_command(args) {
+                // Prohibited administration smuggled through `sh -c "…"` is
+                // blocked before any tiering decision.
+                if let Some(prohibited) = crate::safety::black_scope::classify_command(&inner_cmd) {
+                    return PolicyDecision::Blocked {
+                        reason: format!(
+                            "prohibited scope [{}]: {}",
+                            prohibited.id(),
+                            prohibited.boundary_explanation()
+                        ),
+                    };
+                }
                 let classification = crate::safety::command_classifier::classify(&inner_cmd);
                 return match classification.tier {
                     RiskLevel::Green => PolicyDecision::AutoApproved {
@@ -767,6 +778,31 @@ impl PolicyGate for CapabilityPolicyGate {
                         blocked_args.join(" ")
                     ),
                 };
+            }
+        }
+
+        // 4b. Runtime custom rules (subordinate). These can refine the decision
+        //     for an otherwise-allowable command, but they run only AFTER the
+        //     BLACK-scope / blocked-binary / blocked-pattern hard denials above,
+        //     so they cannot un-block a prohibited command or broaden authority.
+        {
+            let rules = self.custom_rules.read().unwrap();
+            for rule in rules.iter() {
+                if rule.binary == binary {
+                    let matches = match &rule.arg_pattern {
+                        ArgPattern::Any => true,
+                        pattern => args.first().map(|a| pattern.matches(a)).unwrap_or(false),
+                    };
+                    if matches {
+                        // Check expiry
+                        if let Some(expires) = rule.expires_at {
+                            if std::time::Instant::now() > expires {
+                                continue;
+                            }
+                        }
+                        return rule.decision.clone();
+                    }
+                }
             }
         }
 

@@ -785,7 +785,7 @@ mod tests {
         EdgeAuthorityClass, ProjectedNodeKind, TruncationReason,
     };
     use crate::memory::model::{EntityId, GraphRevision, TruthState};
-    use crate::memory::types::StalenessClass;
+    
 
     fn sample_policy() -> EffectivePolicySummary {
         EffectivePolicySummary {

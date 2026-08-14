@@ -417,6 +417,8 @@ fn background_task(description: &str) -> TaskRequest {
 }
 
 /// Build a Maintenance TaskRequest (P4).
+// Test scaffolding: kept because it records the fixture's shape.
+#[allow(dead_code)]
 fn maintenance_task(description: &str) -> TaskRequest {
     let description = description.to_string();
     TaskRequest::new(

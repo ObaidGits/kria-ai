@@ -157,12 +157,19 @@ async fn functional_sh06_execute_bash_df_h() {
 
 #[test]
 fn smoke_package_tools_registered() {
+    // linux-os-control-production Task 3.4: `check_package_installed`/
+    // `check_package_updates` are retired (folded into
+    // `get_package_info`/`list_installed_packages`, and renamed to
+    // `check_system_updates` respectively) per the frozen legacy-difference
+    // report.
     let reg = registry::build_default_registry();
     let required = [
-        "check_package_installed",
         "search_package",
         "get_package_info",
-        "check_package_updates",
+        "list_installed_packages",
+        "plan_package_changes",
+        "check_system_updates",
+        "get_reboot_required",
         "install_package",
         "uninstall_package",
     ];
@@ -200,12 +207,14 @@ fn policy_pkg07_uninstall_package_is_red() {
 
 #[test]
 fn routing_pkg01_check_installed_routes_correctly() {
-    // PROMPT-ID: PKG-01
+    // PROMPT-ID: PKG-01. `check_package_installed` is retired (folded into
+    // `get_package_info`); this only asserts the router doesn't panic on
+    // the prompt, not the specific (now-legacy) target tool.
     let r = IntentRouter::classify("Is git installed?");
     assert!(
-        matches!(&r.intent, Intent::DirectTool(t) if t == "check_package_installed")
+        matches!(&r.intent, Intent::DirectTool(t) if matches!(t.as_str(), "check_package_installed" | "get_package_info"))
             || matches!(r.intent, Intent::Conversation | Intent::ComplexTask),
-        "Package installed check should route to check_package_installed, got: {:?}",
+        "Package installed check should route to get_package_info, got: {:?}",
         r.intent
     );
 }
@@ -224,21 +233,24 @@ fn routing_pkg05_install_hinglish_routes_correctly() {
 
 #[tokio::test]
 async fn functional_pkg01_check_git_installed() {
-    // PROMPT-ID: PKG-01
+    // PROMPT-ID: PKG-01. `check_package_installed` is retired in favor of
+    // `get_package_info` (linux-os-control-production Task 3.4). No live
+    // PackageControl provider is composed in this test registry yet, so the
+    // governed handler fails closed with the frozen `Unavailable` envelope
+    // — this only asserts it never panics.
     let reg = registry::build_default_registry();
-    let handler = reg.get_handler("check_package_installed").unwrap().clone();
-    let result = handler.execute(serde_json::json!({ "name": "git" })).await;
+    let handler = reg.get_handler("get_package_info").unwrap().clone();
+    let ctx = reg.make_tool_context(tokio_util::sync::CancellationToken::new());
+    let result = handler
+        .execute_with_context(
+            serde_json::json!({ "package": { "provider": "apt", "name": "git" } }),
+            ctx,
+        )
+        .await;
     assert!(
-        result.success,
-        "check_package_installed for git should succeed: {:?}",
-        result.error
+        result.success || result.error.is_some(),
+        "get_package_info must not panic"
     );
-    // git is expected to be installed on this dev machine
-    let installed = result.data["installed"]
-        .as_bool()
-        .or(result.data["is_installed"].as_bool())
-        .unwrap_or(true);
-    assert!(installed, "git should be installed on the dev machine");
 }
 
 #[tokio::test]
@@ -246,7 +258,10 @@ async fn functional_pkg02_search_package_htop() {
     // PROMPT-ID: PKG-02
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("search_package").unwrap().clone();
-    let result = handler.execute(serde_json::json!({ "name": "htop" })).await;
+    let ctx = reg.make_tool_context(tokio_util::sync::CancellationToken::new());
+    let result = handler
+        .execute_with_context(serde_json::json!({ "query": "htop" }), ctx)
+        .await;
     assert!(
         result.success || result.error.is_some(),
         "search_package must not panic"
@@ -255,11 +270,18 @@ async fn functional_pkg02_search_package_htop() {
 
 #[tokio::test]
 async fn functional_pkg08_search_nonexistent_package() {
-    // PROMPT-ID: PKG-08 — searching a non-existent package must return clean not-found
+    // PROMPT-ID: PKG-08 — searching a non-existent package must return a
+    // clean failure/empty result, never panic. No live provider is composed
+    // in this test registry, so the governed handler fails closed with the
+    // frozen `Unavailable` envelope.
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("search_package").unwrap().clone();
+    let ctx = reg.make_tool_context(tokio_util::sync::CancellationToken::new());
     let result = handler
-        .execute(serde_json::json!({ "name": "xyz_nonexistent_package_99_kria_test" }))
+        .execute_with_context(
+            serde_json::json!({ "query": "xyz_nonexistent_package_99_kria_test" }),
+            ctx,
+        )
         .await;
     // Should either return success=false or success=true with empty results
     if result.success {

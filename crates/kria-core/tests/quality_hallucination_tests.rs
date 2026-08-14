@@ -127,6 +127,8 @@ fn find_server_binary() -> Option<String> {
 }
 
 // Drop guard to kill the server when tests complete
+// Test scaffolding: records the fixture's shape even where a particular test does not read it.
+#[allow(dead_code)]
 struct ServerGuard;
 impl Drop for ServerGuard {
     fn drop(&mut self) {

@@ -269,6 +269,7 @@ pub fn build_whatsapp_url(phone_e164: &str, body: &str) -> Result<Url, SchemeErr
 
 #[cfg(test)]
 mod tests {
+#![allow(dead_code)]  // see note above
     use super::*;
 
     fn classify(url_str: &str) -> Result<SchemeClassification, SchemeError> {

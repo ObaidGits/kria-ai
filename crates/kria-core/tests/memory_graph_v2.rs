@@ -26,6 +26,11 @@
 //!    attempts and schedules retry; mark_done transitions to applied; dead-letter
 //!    threshold reached correctly.
 
+// Test scaffolding: builders and fixtures record the shape a test relies on,
+// and not every test calls every helper. Scoped to the test module so it can
+// never hide dead code in shipped paths.
+#![allow(dead_code)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -132,7 +137,7 @@ fn current_meta_revision(db: &Arc<Database>) -> i64 {
 fn fault_injection_drop_before_any_write_rolls_back_all() {
     // **Validates: V-FAULT-01, V-AUTH-01 — all-or-none**
     let db = fresh_db();
-    let env = observe_env(&db, "fault-pre-write");
+    let _env = observe_env(&db, "fault-pre-write");
 
     {
         let tx = AuthorityTransaction::begin(&db).unwrap();
@@ -1354,7 +1359,7 @@ async fn lc_seed(
         encrypted: false,
         checksum: "ck".into(),
     };
-    let mut mem = lc_make_memory(ev.id, hash, ns);
+    let mem = lc_make_memory(ev.id, hash, ns);
     {
         let mut tx = db.begin().unwrap();
         tx.conn()
@@ -1591,7 +1596,7 @@ async fn lifecycle_expired_valid_until_excluded_from_current_reads() {
     use rusqlite::params;
 
     let db = lc_fresh_db();
-    let (lc, events, rel, vectors) = lc_setup(&db).await;
+    let (_lc, events, rel, vectors) = lc_setup(&db).await;
     let id = lc_seed(
         &db,
         &events,
@@ -2362,7 +2367,7 @@ async fn lifecycle_forget_is_idempotent() {
 
     lc.forget(&ForgetScope::Memory(id), None).unwrap();
     let rev_after_first = current_meta_revision(&db);
-    let audit_after_first = row_count(&db, "audit_records");
+    let _audit_after_first = row_count(&db, "audit_records");
 
     // Forget again — must not write duplicate rows.
     let n = lc.forget(&ForgetScope::Memory(id), None).unwrap();
@@ -3506,10 +3511,10 @@ async fn deletion_residue_zero_across_all_paths_after_reconciliation() {
 
 use kria_core::memory::stores::manifest::EmbeddingPartitionManifest;
 use kria_core::memory::stores::sqlite_fts_rebuild::{
-    compute_fts_membership_hash, rebuild_fts_from_stream, FtsRebuildOutcome, FtsRebuildRecord,
+    rebuild_fts_from_stream, FtsRebuildOutcome, FtsRebuildRecord,
 };
 use kria_core::memory::stores::sqlite_vector_rebuild::{
-    compute_membership_hash, load_rebuild_cursor, rebuild_partition, RebuildOutcome, RebuildRecord,
+    load_rebuild_cursor, rebuild_partition, RebuildOutcome, RebuildRecord,
     RebuildStatus,
 };
 use kria_core::memory::stores::sqlite_vectors::ensure_partition;
@@ -9844,7 +9849,6 @@ fn paired_world_cache_key_isolation_different_namespace_different_key() {
 use std::sync::atomic::AtomicU32;
 use tracing::Level;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 // ─── Mock tracing subscriber ──────────────────────────────────────────────────
 
@@ -9988,24 +9992,30 @@ async fn telemetry_recovery_mode_entry_uses_warn_level_code_site() {
     let db = fresh_db();
 
     // Corrupt the schema checksum for migration 1 so startup checker fails.
-    db.with_conn(|conn| {
-        conn.execute_batch(
-            "UPDATE schema_versions SET checksum = 'corrupted-by-s17-test' WHERE version = 1;",
-        )
-        .map_err(kria_core::memory::error::StorageError::Sqlite)
-    })
-    .expect("corrupt schema checksum");
+    // Uses `db.write()` and the `schema_version` table — the same access pattern
+    // the other recovery tests in this file use. `with_conn` and the
+    // `schema_versions` table name in the previous version of this test no longer
+    // exist.
+    {
+        let conn = db.write();
+        let rows = conn
+            .execute(
+                "UPDATE schema_version SET checksum = 'corrupted-by-s17-test' WHERE version = 1",
+                [],
+            )
+            .expect("schema_version row must exist");
+        assert!(rows > 0, "must have a schema_version row to corrupt");
+    }
 
-    // Assemble with corrupted schema → enters RecoveryMode.
-    // The tracing::warn! at api/mod.rs:530 is emitted here.
-    let sys = MemorySystem::assemble(
+    // Compose with corrupted schema → enters RecoveryMode.
+    // The tracing::warn! in the composition path is emitted here.
+    let sys = MemorySystem::compose(
         db.clone(),
         recovery_config(),
         recovery_embedder(),
         false, // spawn_worker = false (test)
     )
-    .await
-    .expect("assemble should succeed (RecoveryMode, not hard error)");
+    .expect("compose should succeed (RecoveryMode, not hard error)");
 
     // (a) System is in RecoveryMode.
     assert!(
@@ -10014,15 +10024,13 @@ async fn telemetry_recovery_mode_entry_uses_warn_level_code_site() {
     );
 
     // (b) Write-guard is active: remember() returns InRecoveryMode.
-    let write_result = sys
-        .remember(
-            kria_core::memory::types::WriteCandidate {
-                content: "telemetry test".to_string(),
-                ..Default::default()
-            },
-            Default::default(),
-        )
-        .await;
+    // `remember` is synchronous and takes a single `WriteCandidate`, built through
+    // its `user` constructor — `WriteCandidate` has no `Default` because a
+    // candidate with no session or source would be meaningless.
+    let write_result = sys.remember(WriteCandidate::user(
+        uuid::Uuid::new_v4(),
+        "telemetry test",
+    ));
     assert!(
         matches!(write_result, Err(MemoryError::InRecoveryMode { .. })),
         "S17.2: write-guard must return InRecoveryMode when in RecoveryMode, got: {:?}",
@@ -10030,7 +10038,8 @@ async fn telemetry_recovery_mode_entry_uses_warn_level_code_site() {
     );
 
     // (c) Health reports recovery_mode=true.
-    let health = sys.health();
+    // `health()` is async and fallible in the current API.
+    let health = sys.health().await.expect("health must be readable in RecoveryMode");
     assert!(
         health.recovery_mode,
         "S17.2: health().recovery_mode must be true when in RecoveryMode"

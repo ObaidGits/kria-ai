@@ -51,6 +51,7 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 
+#[allow(dead_code)] // test-only seam
 #[cfg(test)]
 struct TestN8nWorkflowDispatchGuard;
 
@@ -63,6 +64,7 @@ impl Drop for TestN8nWorkflowDispatchGuard {
     }
 }
 
+#[allow(dead_code)] // test-only seam
 #[cfg(test)]
 fn set_test_n8n_workflows_for_dispatch(
     workflows: Vec<crate::n8n::N8nWorkflowConfig>,
@@ -4763,6 +4765,7 @@ fn stable_session_uuid(session_id: &str) -> uuid::Uuid {
 
 #[cfg(test)]
 mod stable_session_uuid_tests {
+#![allow(dead_code)]  // see note above
     use super::stable_session_uuid;
 
     #[test]
@@ -10136,6 +10139,36 @@ impl AgentLoop {
                                 execution_cancel.clone(),
                                 call_provenance,
                             );
+                        // ── Native OS actions MUST go through the governed
+                        // executor ────────────────────────────────────────────
+                        // A canonical OS action needs an `OsActionGrant` minted by
+                        // ExecutionGate, plus the audit admission and write leases
+                        // that hang off it. Calling the handler directly leaves
+                        // `ToolContext::os_call` empty, and every OS mutation then
+                        // fails closed with `os_control.unavailable` — the handler
+                        // is reachable and the provider is composed, but the
+                        // governed call it needs was never assembled.
+                        //
+                        // Failing closed was correct; skipping the gate was not.
+                        // So route these through the same PolicyToolExecutor the
+                        // workflow path uses, which runs the full
+                        // policy -> approval -> grant -> lease -> audit sequence.
+                        if crate::agent::os_action_authority::is_native_os_action(&call.name) {
+                            use crate::agent::htn_executor::ToolExecutor as _;
+                            let governed =
+                                crate::agent::gui_wiring::build_policy_tool_executor(
+                                    Arc::clone(&self.tool_registry),
+                                    execution_cancel.clone(),
+                                    Arc::clone(&self.policy_engine),
+                                    Arc::clone(&self.hitl_gateway),
+                                    Arc::clone(&self.audit_logger),
+                                    session_id.to_string(),
+                                    last_user_text.clone(),
+                                    crate::routing::verbs::classify_modality(&last_user_text)
+                                        .destructive,
+                                );
+                            governed.execute(&call.name, &args).await
+                        } else {
                         run_isolated(
                             &isolation_name,
                             std::time::Duration::from_secs(timeout_secs),
@@ -10146,6 +10179,7 @@ impl AgentLoop {
                             },
                         )
                         .await
+                        }
                     } // end Authorized arm
                     } // end authority match
                     } // end preflight else

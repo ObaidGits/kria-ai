@@ -457,6 +457,7 @@ impl ToolEmbeddingIndex {
 
 #[cfg(test)]
 mod tests {
+#![allow(dead_code)]  // see note above
     use super::*;
     use crate::safety::RiskLevel;
 

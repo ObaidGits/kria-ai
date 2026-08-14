@@ -185,6 +185,7 @@ impl SchemaEntityIndex {
 
 #[cfg(test)]
 impl SchemaEntityIndex {
+    #[allow(dead_code)] // test-only seam
     /// Test-only seam (P8, no-hardcoding): inject a synthetic field so a sibling
     /// property-test module can prove the classifier resolves a brand-new field
     /// purely from its schema phrase/token, with ZERO per-field routing code.
@@ -207,6 +208,7 @@ impl SchemaEntityIndex {
 
 #[cfg(test)]
 mod tests {
+#![allow(dead_code)]  // see note above
     use super::*;
 
     #[test]

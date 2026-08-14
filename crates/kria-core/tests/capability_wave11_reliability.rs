@@ -16,7 +16,7 @@ use kria_core::capability::error::CapError;
 use kria_core::capability::events::CapabilityEventBus;
 use kria_core::capability::index::{Embedder, InMemoryFederatedIndex};
 use kria_core::capability::intelligence::{
-    Job, JobManager, JobState, JobStore, RetryPolicy, SqliteCapabilityKnowledge,
+    JobManager, JobState, JobStore, RetryPolicy, SqliteCapabilityKnowledge,
 };
 use kria_core::capability::platform::CapabilityPlatform;
 use kria_core::capability::protocol::{

@@ -1,3 +1,4 @@
+use crate::agent::os_action_authority::is_native_os_action;
 use crate::safety::RiskLevel;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -5,6 +6,38 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+
+use crate::os_control::redaction::ApprovalProjection;
+
+/// Build the **redacted, non-authoritative** [`ApprovalProjection`] carried to
+/// HITL for a native-OS action (linux-os-control-production Task 1.8, design
+/// §14, §15; OSC-007, OSC-029).
+///
+/// HITL is *not* the authority for a native-OS decision — the durable SQLite
+/// resolution is (see `collaborative_decision::DecisionStore`). This gateway
+/// therefore never surfaces raw OS parameters to the UI. The projection is
+/// produced by the **single shared sensitivity registry**
+/// ([`crate::os_control::redaction`]) that also governs durable audit and
+/// provider tracing: `PublicLocal` values are shown normalized, while
+/// `SensitiveMetadata`/`Content`/`Secret` values are reduced to digests /
+/// type-size metadata / reference digests and never leak their raw value.
+fn redacted_os_projection(
+    request_id: &str,
+    action: &str,
+    parameters: &serde_json::Value,
+    risk_level: RiskLevel,
+    description: &str,
+) -> serde_json::Value {
+    ApprovalProjection::build(
+        request_id,
+        None,
+        action,
+        risk_level,
+        description,
+        parameters,
+    )
+    .to_hitl_parameters()
+}
 
 /// Represents a pending HITL approval request.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -74,6 +107,15 @@ impl HitlGateway {
         description: &str,
         rollback_available: bool,
     ) -> oneshot::Receiver<ApprovalResponse> {
+        // Native-OS actions never surface raw parameters through HITL. HITL is a
+        // non-authoritative presentation surface for OS decisions; the durable
+        // SQLite resolution is the authority (OSC-001.9). Redact here so no OS
+        // entry point can leak parameter values to the UI.
+        let parameters = if is_native_os_action(action) {
+            redacted_os_projection(request_id, action, &parameters, risk_level, description)
+        } else {
+            parameters
+        };
         let request = ApprovalRequest {
             id: request_id.to_string(),
             action: action.to_string(),
@@ -219,5 +261,62 @@ mod tests {
             ApprovalResponse::Approved
         );
         assert!(gateway.pending_requests().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn os_action_approval_never_surfaces_raw_parameters() {
+        // Task 1.1 (OSC-001.9): a native-OS action's approval request must carry
+        // only a content-free redacted projection, never raw parameter values.
+        let gateway = HitlGateway::new(1);
+        let request_id = HitlGateway::generate_request_id();
+        let _rx = gateway
+            .prepare_approval_with_id(
+                &request_id,
+                "connect_wifi",
+                serde_json::json!({ "ssid": "SECRET-NET", "password": "hunter2" }),
+                RiskLevel::Red,
+                "connect wifi",
+                false,
+            )
+            .await;
+
+        let pending = gateway.pending_requests().await;
+        let req = pending.first().expect("request registered");
+        assert_eq!(
+            req.parameters.get("os_action").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            req.parameters.get("redacted").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        // No raw values may appear anywhere in the surfaced projection.
+        let serialized = serde_json::to_string(&req.parameters).unwrap();
+        assert!(!serialized.contains("SECRET-NET"));
+        assert!(!serialized.contains("hunter2"));
+    }
+
+    #[tokio::test]
+    async fn non_os_action_approval_keeps_raw_parameters() {
+        // Non-OS actions keep their existing behavior (no redaction here).
+        let gateway = HitlGateway::new(1);
+        let request_id = HitlGateway::generate_request_id();
+        let _rx = gateway
+            .prepare_approval_with_id(
+                &request_id,
+                "execute_bash",
+                serde_json::json!({ "command": "echo hello" }),
+                RiskLevel::Red,
+                "run command",
+                false,
+            )
+            .await;
+
+        let pending = gateway.pending_requests().await;
+        let req = pending.first().expect("request registered");
+        assert_eq!(
+            req.parameters.get("command").and_then(|v| v.as_str()),
+            Some("echo hello")
+        );
     }
 }

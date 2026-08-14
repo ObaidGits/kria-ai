@@ -489,7 +489,7 @@ pub fn new_bus() -> CognitionEventBusHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::broadcast::error::RecvError;
+    
 
     fn wf_started(id: &str) -> CognitionEvent {
         CognitionEvent::Workflow(WorkflowEvent {

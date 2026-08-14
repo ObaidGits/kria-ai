@@ -180,6 +180,41 @@ impl VerificationEvidenceSource {
             Self::Unknown => 0,
         }
     }
+
+    /// Bridge an OS-control evidence source into this shared verifier taxonomy
+    /// (additive; linux-os-control-production Task 1.7, OSC-005). Existing
+    /// variants and their ranks are unchanged. The authoritative *OS-state*
+    /// ordering is defined by [`os_control_authority_rank`], not by
+    /// [`Self::authority_rank`], because the GUI ranks treat filesystem and shell
+    /// output equally whereas OS-state verification must rank authoritative
+    /// service/filesystem state strictly above structured-command (shell) output.
+    #[must_use]
+    pub fn from_os_evidence(source: crate::os_control::contract::OsEvidenceSource) -> Self {
+        use crate::os_control::contract::OsEvidenceSource as S;
+        match source {
+            S::AuthoritativeServiceState => Self::FileSystem,
+            S::IndependentProviderQuery => Self::ProcessTable,
+            S::StructuredCommandQuery => Self::ShellOutput,
+            S::UserAttestation => Self::Hitl,
+        }
+    }
+}
+
+/// OS-state evidence authority rank (additive; linux-os-control-production Task
+/// 1.7, OSC-005 §13). Authoritative service/property or filesystem state
+/// strictly outranks an independent provider query, which strictly outranks
+/// structured-command (shell) query output, which outranks user attestation.
+/// Because these ranks are strictly ordered, **shell output can never outrank
+/// authoritative OS state**.
+#[must_use]
+pub fn os_control_authority_rank(source: crate::os_control::contract::OsEvidenceSource) -> u8 {
+    use crate::os_control::contract::OsEvidenceSource as S;
+    match source {
+        S::AuthoritativeServiceState => 100,
+        S::IndependentProviderQuery => 80,
+        S::StructuredCommandQuery => 50,
+        S::UserAttestation => 20,
+    }
 }
 
 /// Evidence reliability is deliberately coarse. The runtime should not pretend

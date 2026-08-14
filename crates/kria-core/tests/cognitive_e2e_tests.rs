@@ -1,3 +1,8 @@
+
+// Test scaffolding: builders and fixtures record the shape a test relies on,
+// and not every test calls every helper. Scoped to the test module so it can
+// never hide dead code in shipped paths.
+#![allow(dead_code)]
 // ─────────────────────────────────────────────────────────────────────────────
 //  cognitive_e2e_tests.rs
 //
@@ -43,6 +48,8 @@ struct CognitiveResult {
     expected_tool: String,
     actual_tool: Option<String>,
     pass: bool,
+    // Test scaffolding: records the fixture's shape even where a particular test does not read it.
+    #[allow(dead_code)]
     source: String, // "TestPrompts" or "VMTestPrompts"
 }
 

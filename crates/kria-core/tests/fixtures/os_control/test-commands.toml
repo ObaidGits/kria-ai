@@ -1,0 +1,55 @@
+# Focused test-command manifest — linux-os-control-production Task 0.4
+# (OSC-033.8 "deny-live composition", design §18).
+#
+# This is the authoritative list of Cargo invocations for running / gating this
+# spec's non-disruptive completion tests. The manifest linter
+# (`kria_core::os_control::testing::lint_test_command`) is exercised against it
+# by `tests/os_control_test_safety.rs`:
+#
+#   * every `[[allowed]]` command MUST pass the linter;
+#   * every `[[rejected]]` command MUST be flagged unsafe.
+#
+# Rule summary enforced by the linter:
+#   * A completion-test (`cargo test`) or deny-live compile gate (`cargo check`)
+#     MUST pass `--no-default-features` and `--features os-control-test`.
+#   * No invocation may enable both `os-control-test` and `os-control-live`
+#     (they are a hard `compile_error!`).
+#   * A completion-test command may never enable `os-control-live`.
+
+# ── Allowed: the mandated deny-live invocations ─────────────────────────────
+[[allowed]]
+description = "Run the full OS-control completion-test suite (deny-live)"
+command = "cargo test -p kria-core --no-default-features --features os-control-test"
+
+[[allowed]]
+description = "Deny-live compile gate escalation for a phase boundary"
+command = "cargo check -p kria-core --no-default-features --features os-control-test"
+
+[[allowed]]
+description = "Run a single named OS-control test under the mandated invocation"
+command = "cargo test -p kria-core --no-default-features --features os-control-test os_control_test_safety"
+
+[[allowed]]
+description = "Live desktop composition build (composition root, not a test)"
+command = "cargo build -p kria-desktop --features os-control-live"
+
+# ── Rejected: unsafe invocations the linter must catch ──────────────────────
+[[rejected]]
+description = "No os-control-test feature: may link default/live composition into tests"
+command = "cargo test -p kria-core"
+
+[[rejected]]
+description = "Combines the two mutually exclusive composition features (compile_error!)"
+command = "cargo test -p kria-core --no-default-features --features os-control-test,os-control-live"
+
+[[rejected]]
+description = "Enables the live composition inside a test invocation"
+command = "cargo test -p kria-core --features os-control-live"
+
+[[rejected]]
+description = "Omits --no-default-features, so default features leak into completion tests"
+command = "cargo test -p kria-core --features os-control-test"
+
+[[rejected]]
+description = "Deny-live check gate missing the required test feature"
+command = "cargo check -p kria-core --no-default-features"

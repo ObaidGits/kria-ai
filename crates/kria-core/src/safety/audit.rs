@@ -49,24 +49,6 @@ impl DecidedBy {
     }
 }
 
-/// Execution result status.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
-pub enum ExecResult {
-    Success,
-    Failed,
-    RolledBack,
-}
-
-impl ExecResult {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Success => "SUCCESS",
-            Self::Failed => "FAILED",
-            Self::RolledBack => "ROLLED_BACK",
-        }
-    }
-}
-
 /// Structured audit logger backed by SQLite.
 pub struct AuditLogger {
     conn: Mutex<Connection>,
@@ -122,6 +104,13 @@ impl AuditLogger {
     ///
     /// Each row is hash-chained: `row_hash = SHA-256(prev_hash || timestamp || session_id || action || parameters || decision)`.
     /// The first row in the log has `prev_hash = "GENESIS"`.
+    ///
+    /// For **native-OS actions** (linux-os-control-production Task 1.8, design
+    /// §14; OSC-007/OSC-029) the raw parameter object is never stored durably:
+    /// it is reduced to the shared redaction registry's redacted metadata + a
+    /// canonical digest, so no SSID/secret/clipboard/notification/file content
+    /// value enters this durable, cross-session log. Non-OS actions (config
+    /// changes, remote-desktop events) keep their existing raw parameters.
     pub fn log(
         &self,
         session_id: &str,
@@ -146,7 +135,15 @@ impl AuditLogger {
         let timestamp = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
-        let params_str = parameters.to_string();
+        // Native-OS actions never store raw parameters durably (design §14).
+        let params_str = if crate::agent::os_action_authority::is_native_os_action(action) {
+            serde_json::to_string(&crate::os_control::redaction::redact_parameters(
+                action, parameters,
+            ))
+            .unwrap_or_else(|_| "{}".to_string())
+        } else {
+            parameters.to_string()
+        };
 
         // Compute row_hash = SHA-256(prev_hash || timestamp || session_id || action || params || decision).
         let row_hash = {
@@ -182,28 +179,13 @@ impl AuditLogger {
         );
     }
 
-    /// Update the result of an already-logged action (post-execution).
-    pub fn update_result(
-        &self,
-        action_id: i64,
-        result: ExecResult,
-        error_msg: Option<&str>,
-        rollback_id: Option<&str>,
-        duration_ms: Option<i64>,
-    ) {
-        let conn = self.conn.lock().unwrap();
-        let _ = conn.execute(
-            "UPDATE audit_log SET result = ?1, error_msg = ?2, rollback_id = ?3, duration_ms = ?4
-             WHERE id = ?5",
-            params![
-                result.as_str(),
-                error_msg,
-                rollback_id,
-                duration_ms,
-                action_id,
-            ],
-        );
-    }
+    // NOTE: The in-place `update_result` completion mutation was deleted in
+    // linux-os-control-production Task 1.8 (design §14): mutated completion
+    // columns are not covered by the original row hash and an ignored update
+    // cannot fail closed. OS-action outcomes are now durable, append-only, and
+    // integrity-linked in `os_control::audit::OsAuditStore` (one admission +
+    // one idempotent terminal record). This logger retains only the append-only
+    // `log` path used by non-OS audit (config-change history, remote desktop).
 
     /// Query audit log entries.
     pub fn query(
@@ -424,5 +406,42 @@ mod config_history_tests {
             DecidedBy::Policy,
         );
         assert!(logger.config_change_history(10).is_empty());
+    }
+
+    #[test]
+    fn native_os_action_params_are_redacted_in_durable_log() {
+        // Task 1.8 (OSC-007/OSC-029): a native-OS action's raw params (SSID,
+        // password) must never enter the durable audit_log's `parameters`
+        // column; only redacted metadata + a digest is stored.
+        let path = std::env::temp_dir().join(format!("kria-audit-{}.db", uuid::Uuid::new_v4()));
+        {
+            let logger = AuditLogger::new(rusqlite::Connection::open(&path).unwrap());
+            logger.log(
+                "sess",
+                "connect_wifi",
+                &serde_json::json!({ "ssid": "SECRET-SSID", "password": "top-secret-pw" }),
+                RiskLevel::Red,
+                Decision::Approved,
+                DecidedBy::UserGui,
+            );
+            assert!(logger.verify_chain().is_ok());
+        }
+        // Read the raw stored `parameters` column on a second connection.
+        let reader = rusqlite::Connection::open(&path).unwrap();
+        let stored: String = reader
+            .query_row(
+                "SELECT parameters FROM audit_log WHERE action = 'connect_wifi' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!stored.contains("SECRET-SSID"), "ssid leaked: {stored}");
+        assert!(
+            !stored.contains("top-secret-pw"),
+            "password leaked: {stored}"
+        );
+        // The redacted metadata + digest IS present.
+        assert!(stored.contains("parameter_digest"));
+        let _ = std::fs::remove_file(&path);
     }
 }

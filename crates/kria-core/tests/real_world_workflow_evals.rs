@@ -1,3 +1,8 @@
+
+// Test scaffolding: builders and fixtures record the shape a test relies on,
+// and not every test calls every helper. Scoped to the test module so it can
+// never hide dead code in shipped paths.
+#![allow(dead_code)]
 // ─────────────────────────────────────────────────────────────────────────────
 //  real_world_workflow_evals.rs  (API-correct version)
 //

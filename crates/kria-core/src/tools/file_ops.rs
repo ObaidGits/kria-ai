@@ -5,6 +5,7 @@ use crate::infra::sandbox::resolve_path;
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::os_governed as gov;
 use crate::tools::ToolContext;
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -244,9 +245,72 @@ struct DeleteDirectoryInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct TrashFileInput {
+    path: String,
+}
+
+fn default_restore_resolution() -> String {
+    "fail".to_string()
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RestoreFromTrashInput {
+    item_id: String,
+    #[serde(default = "default_restore_resolution")]
+    resolution: String,
+}
+
+fn default_archive_format() -> String {
+    "zip".to_string()
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateArchiveInput {
+    sources: Vec<String>,
+    destination: String,
+    #[serde(default = "default_archive_format")]
+    format: String,
+}
+
+fn default_archive_list_limit() -> usize {
+    256
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListArchiveContentsInput {
+    path: String,
+    #[serde(default)]
+    cursor: usize,
+    #[serde(default = "default_archive_list_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExtractArchiveInput {
+    archive: String,
+    destination: String,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct MoveFileInput {
     source: String,
     destination: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetFileOwnerInput {
+    path: String,
+    /// The target local account name (existing identity only — the broker
+    /// verifies it exists; this never accepts an arbitrary uid).
+    owner: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -320,7 +384,7 @@ impl ToolHandler for ReadFile {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: ReadFileInput = match parse_input(params) {
+        let input: ReadFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -355,7 +419,7 @@ impl ToolHandler for SearchFiles {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: SearchFilesInput = match parse_input(params) {
+        let input: SearchFilesInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -405,7 +469,7 @@ impl ToolHandler for ListDirectory {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: ListDirectoryInput = match parse_input(params) {
+        let input: ListDirectoryInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -453,7 +517,7 @@ impl ToolHandler for GetFileInfo {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: GetFileInfoInput = match parse_input(params) {
+        let input: GetFileInfoInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -493,7 +557,7 @@ impl ToolHandler for CalculateDirSize {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: CalculateDirSizeInput = match parse_input(params) {
+        let input: CalculateDirSizeInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -527,7 +591,7 @@ impl ToolHandler for WriteFile {
     ) -> ToolResult {
         const MAX_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-        let input: WriteFileInput = match parse_input(params) {
+        let input: WriteFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -601,7 +665,7 @@ impl ToolHandler for CreateDirectory {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: CreateDirectoryInput = match parse_input(params) {
+        let input: CreateDirectoryInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -652,7 +716,7 @@ impl ToolHandler for RenameFile {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: RenameFileInput = match parse_input(params) {
+        let input: RenameFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -687,7 +751,7 @@ impl ToolHandler for CopyFile {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: CopyFileInput = match parse_input(params) {
+        let input: CopyFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -723,7 +787,7 @@ impl ToolHandler for DeleteFile {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: DeleteFileInput = match parse_input(params) {
+        let input: DeleteFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -775,7 +839,7 @@ impl ToolHandler for DeleteDirectory {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: DeleteDirectoryInput = match parse_input(params) {
+        let input: DeleteDirectoryInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -819,6 +883,280 @@ impl ToolHandler for DeleteDirectory {
     }
 }
 
+/// The real freedesktop.org Trash root this process uses for `trash_file`/
+/// `restore_from_trash`. Resolves `$XDG_DATA_HOME/Trash` (defaulting to
+/// `~/.local/share/Trash`) via
+/// [`crate::os_control::linux::providers::files::live_trash_root`] — never a
+/// hardcoded path — so a future composition root can override it without
+/// touching this file.
+fn open_trash_transport() -> Result<crate::os_control::RealTrashTransport, ToolResult> {
+    let root = crate::os_control::linux::providers::files::live_trash_root();
+    crate::os_control::RealTrashTransport::new(root)
+        .map_err(|error| io_error("trash_file", "Trash root", error))
+}
+
+struct TrashFile;
+#[async_trait]
+impl ToolHandler for TrashFile {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: TrashFileInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let resolved_path = resolve_path(&input.path);
+        let _ = &ctx;
+
+        if !resolved_path.exists() && resolved_path.symlink_metadata().is_err() {
+            return ToolResult::ok(serde_json::json!({
+                "path": input.path,
+                "trashed": false,
+                "changed": false,
+                "already_in_desired_state": true,
+            }));
+        }
+
+        let transport = match open_trash_transport() {
+            Ok(transport) => transport,
+            Err(error) => return error,
+        };
+
+        match transport.trash_now(&resolved_path) {
+            Ok(crate::os_control::TrashMoveOutcome::Done(item)) => {
+                ToolResult::ok(serde_json::json!({
+                    "path": input.path,
+                    "trashed": true,
+                    "changed": true,
+                    "already_in_desired_state": false,
+                    "item_id": item.item_id.as_str(),
+                    "trashed_at_unix": item.trashed_at_unix,
+                }))
+            }
+            Ok(crate::os_control::TrashMoveOutcome::PartialResidue {
+                item,
+                cleanup_error,
+            }) => op_error(
+                "trash_file",
+                format!(
+                    "moved '{}' into Trash (item_id={}) but could not remove the \
+                         original path (partial state, cleanup evidence retained): {cleanup_error}",
+                    input.path,
+                    item.item_id.as_str(),
+                ),
+            ),
+            Err(error) => op_error("trash_file", error.message().as_str().to_string()),
+        }
+    }
+}
+
+struct RestoreFromTrash;
+#[async_trait]
+impl ToolHandler for RestoreFromTrash {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: RestoreFromTrashInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.item_id, "item_id") {
+            return error;
+        }
+
+        let resolution = match input.resolution.as_str() {
+            "fail" => crate::os_control::RestoreResolution::Fail,
+            "rename" => crate::os_control::RestoreResolution::Rename,
+            "replace" => crate::os_control::RestoreResolution::Replace,
+            other => {
+                return op_error(
+                    "restore_from_trash",
+                    format!("unknown resolution '{other}' (expected fail, rename, or replace)"),
+                );
+            }
+        };
+
+        let _ = &ctx;
+        let transport = match open_trash_transport() {
+            Ok(transport) => transport,
+            Err(error) => return error,
+        };
+        let item_id = crate::os_control::TrashItemId::new(&input.item_id);
+
+        match transport.restore_now(&item_id, resolution) {
+            Ok(crate::os_control::RestoreMoveOutcome::Done(target)) => {
+                ToolResult::ok(serde_json::json!({
+                    "item_id": input.item_id,
+                    "restored": true,
+                    "restored_to": target.to_string_lossy(),
+                }))
+            }
+            Ok(crate::os_control::RestoreMoveOutcome::PartialResidue {
+                target,
+                cleanup_error,
+            }) => op_error(
+                "restore_from_trash",
+                format!(
+                    "restored '{}' to '{}' but could not remove the Trash residue \
+                         (partial state, cleanup evidence retained): {cleanup_error}",
+                    input.item_id,
+                    target.to_string_lossy(),
+                ),
+            ),
+            // Occupied-without-resolution and unknown-item are structured,
+            // caller-actionable outcomes (OSC-011.4) — never a silent
+            // overwrite/rename.
+            Err(error) => op_error("restore_from_trash", error.message().as_str().to_string()),
+        }
+    }
+}
+
+struct CreateArchive;
+#[async_trait]
+impl ToolHandler for CreateArchive {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: CreateArchiveInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if input.sources.is_empty() {
+            return op_error("create_archive", "sources must contain at least one path");
+        }
+        if let Err(error) = require_non_empty(&input.destination, "destination") {
+            return error;
+        }
+
+        let format = match crate::os_control::ArchiveFormat::parse(&input.format) {
+            Some(format) => format,
+            None => {
+                return op_error(
+                    "create_archive",
+                    format!(
+                        "unsupported archive format '{}' (only zip is supported)",
+                        input.format
+                    ),
+                );
+            }
+        };
+
+        let sources: Vec<PathBuf> = input.sources.iter().map(|s| resolve_path(s)).collect();
+        let destination = resolve_path(&input.destination);
+        let _ = &ctx;
+
+        let transport = crate::os_control::RealArchiveTransport::new();
+        match transport.create_now(&sources, &destination, format) {
+            Ok(entry_count) => ToolResult::ok(serde_json::json!({
+                "destination": input.destination,
+                "created": true,
+                "entry_count": entry_count,
+            })),
+            Err(error) => op_error("create_archive", error.message().as_str().to_string()),
+        }
+    }
+}
+
+struct ListArchiveContents;
+#[async_trait]
+impl ToolHandler for ListArchiveContents {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ListArchiveContentsInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+
+        let resolved_path = resolve_path(&input.path);
+        let _ = &ctx;
+
+        let transport = crate::os_control::RealArchiveTransport::new();
+        match transport.list_now(&resolved_path, input.cursor, input.limit) {
+            Ok(page) => {
+                let entries: Vec<serde_json::Value> = page
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        serde_json::json!({
+                            "name": entry.name,
+                            "uncompressed_size": entry.uncompressed_size,
+                            "compressed_size": entry.compressed_size,
+                            "is_dir": entry.is_dir,
+                        })
+                    })
+                    .collect();
+                ToolResult::ok(serde_json::json!({
+                    "path": input.path,
+                    "entries": entries,
+                    "count": entries.len(),
+                    "total_entries": page.total_entries,
+                }))
+            }
+            Err(error) => op_error(
+                "list_archive_contents",
+                error.message().as_str().to_string(),
+            ),
+        }
+    }
+}
+
+struct ExtractArchive;
+#[async_trait]
+impl ToolHandler for ExtractArchive {
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ExtractArchiveInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if let Err(error) = require_non_empty(&input.archive, "archive") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.destination, "destination") {
+            return error;
+        }
+
+        let resolved_archive = resolve_path(&input.archive);
+        let resolved_destination = resolve_path(&input.destination);
+        let _ = &ctx;
+
+        let transport = crate::os_control::RealArchiveTransport::new();
+        match transport.extract_now(&resolved_archive, &resolved_destination, input.overwrite) {
+            Ok(entry_count) => ToolResult::ok(serde_json::json!({
+                "archive": input.archive,
+                "destination": input.destination,
+                "extracted": true,
+                "entry_count": entry_count,
+            })),
+            Err(error) => op_error("extract_archive", error.message().as_str().to_string()),
+        }
+    }
+}
+
 struct MoveFile;
 #[async_trait]
 impl ToolHandler for MoveFile {
@@ -827,7 +1165,7 @@ impl ToolHandler for MoveFile {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: MoveFileInput = match parse_input(params) {
+        let input: MoveFileInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -852,11 +1190,63 @@ impl ToolHandler for MoveFile {
                 }));
             }
             Err(error) => {
-                let is_cross_device_rename = error.raw_os_error() == Some(18);
+                let is_cross_device_rename = error.raw_os_error() == Some(libc::EXDEV);
                 if !is_cross_device_rename {
                     return io_error("move_file", operation_path, error);
                 }
             }
+        }
+
+        // Cross-device (EXDEV) fallback. `std::fs::rename` cannot move across
+        // filesystems; design §9.1's cross-device move algorithm is
+        // copy-verify-delete. A directory requires a *recursive* copy (the
+        // single-file `std::fs::copy` fallback below never recurses), with
+        // partial-failure reporting when cleanup after a failed copy also
+        // fails (OSC-010.3).
+        let source_is_dir = match std::fs::symlink_metadata(&resolved_source) {
+            Ok(metadata) => metadata.is_dir(),
+            Err(error) => return io_error("move_file", input.source.clone(), error),
+        };
+
+        if source_is_dir {
+            if let Err(error) = crate::os_control::files::trash::copy_dir_recursive(
+                &resolved_source,
+                &resolved_destination,
+            ) {
+                // Partial copy: retain cleanup evidence rather than silently
+                // leaving a half-copied tree with no diagnostic (OSC-010.3
+                // failure/degraded behavior — "partial copies retain cleanup
+                // evidence").
+                let cleanup_error = std::fs::remove_dir_all(&resolved_destination).err();
+                return op_error(
+                    "move_file",
+                    format!(
+                        "cross-device directory move failed during copy: {error}; \
+                         destination cleanup {}",
+                        match cleanup_error {
+                            Some(cleanup) => format!("also failed: {cleanup}"),
+                            None => "succeeded".to_string(),
+                        }
+                    ),
+                );
+            }
+            if let Err(error) = std::fs::remove_dir_all(&resolved_source) {
+                // The copy landed at the destination but the source could not
+                // be removed: known residue, report partial state precisely
+                // rather than claiming full success.
+                return op_error(
+                    "move_file",
+                    format!(
+                        "cross-device directory move copied to destination but removing the \
+                         source failed (partial state, source retained): {error}"
+                    ),
+                );
+            }
+            return ToolResult::ok(serde_json::json!({
+                "source": input.source,
+                "destination": input.destination,
+                "cross_device": true,
+            }));
         }
 
         match std::fs::copy(&resolved_source, &resolved_destination) {
@@ -864,11 +1254,110 @@ impl ToolHandler for MoveFile {
                 Ok(_) => ToolResult::ok(serde_json::json!({
                     "source": input.source,
                     "destination": input.destination,
+                    "cross_device": true,
                 })),
                 Err(error) => io_error("move_file", input.source, error),
             },
             Err(error) => io_error("move_file", operation_path, error),
         }
+    }
+}
+
+/// Return the governed OS-control `Unavailable` envelope for `set_file_owner`.
+///
+/// linux-os-control-production **Task 3.1**: `set_file_owner` never calls
+/// `chown`/`chown(2)` directly. Ownership changes require privilege and RED
+/// approval (OSC-010.5) and dispatch **exclusively** through the existing
+/// typed `BrokerOperation::SetBoundPathOwnership` (Task 1.5) — which requires
+/// the full governed `ExecutionGrant` + resource-lease + audit-admission
+/// chain (`AdmittedMutationContext`) that plain `ToolContext` does not carry
+/// (the same Tasks 2.1–2.5 scoping decision `set_process_priority` and
+/// `set_clipboard` follow). Until the desktop composition root wires that
+/// full chain for this tool, the handler fails closed with this frozen
+/// envelope — never an ungoverned local `chown` fallback. The governed
+/// `OwnershipControl` lifecycle itself (broker dispatch, verification) is
+/// unit-tested against a scripted broker transport in
+/// `os_control::files::ownership`.
+fn os_ownership_unavailable(
+    runtime: Option<&Arc<crate::os_control::OsControlRuntime>>,
+    tool: &str,
+) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => crate::os_control::OsControlError::Unavailable {
+            provider: None,
+            reason: crate::os_control::contract::SafeText::new(
+                "OS control runtime is not injected in this build",
+            ),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
+}
+
+struct SetFileOwner;
+#[async_trait]
+impl ToolHandler for SetFileOwner {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_ownership_unavailable(None, "set_file_owner")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: SetFileOwnerInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+        if let Err(error) = require_non_empty(&input.path, "path") {
+            return error;
+        }
+        if let Err(error) = require_non_empty(&input.owner, "owner") {
+            return error;
+        }
+        // The governed OwnershipControl provider owns the actual
+        // BrokerOperation::SetBoundPathOwnership dispatch + verification
+        // through the runtime.
+        let resolved = match gov::resolve(&ctx, "set_file_owner") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.ownership("set_file_owner") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "set_file_owner") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        // The owner must already exist locally: the provider verifies the identity
+        // before applying, so a typo cannot create or orphan an account.
+        let owner = crate::os_control::broker::protocol::ExistingLocalIdentity {
+            uid: params["uid"].as_u64().unwrap_or(0) as u32,
+            name: crate::os_control::contract::SafeText::new(
+                params["owner"].as_str().unwrap_or_default(),
+            ),
+        };
+        let request = crate::os_control::files::OwnershipRequest {
+            action: "set_file_owner".to_string(),
+            params: params.clone(),
+            path: std::path::PathBuf::from(params["path"].as_str().unwrap_or_default()),
+            owner,
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "set_file_owner",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
@@ -882,7 +1371,7 @@ impl ToolHandler for SearchFileContents {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: SearchFileContentsInput = match parse_input(params) {
+        let input: SearchFileContentsInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -989,7 +1478,7 @@ impl ToolHandler for FindFilesByPattern {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: FindFilesByPatternInput = match parse_input(params) {
+        let input: FindFilesByPatternInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1075,7 +1564,7 @@ impl ToolHandler for GetProjectStructure {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: GetProjectStructureInput = match parse_input(params) {
+        let input: GetProjectStructureInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1170,7 +1659,7 @@ impl ToolHandler for CountLinesOfCode {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: CountLinesOfCodeInput = match parse_input(params) {
+        let input: CountLinesOfCodeInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1236,7 +1725,7 @@ impl ToolHandler for DiffFiles {
         params: serde_json::Value,
         ctx: ToolContext,
     ) -> ToolResult {
-        let input: DiffFilesInput = match parse_input(params) {
+        let input: DiffFilesInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1293,7 +1782,7 @@ impl ToolHandler for FindTodos {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: FindTodosInput = match parse_input(params) {
+        let input: FindTodosInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1384,7 +1873,7 @@ impl ToolHandler for AnalyzeCode {
         params: serde_json::Value,
         _ctx: ToolContext,
     ) -> ToolResult {
-        let input: AnalyzeCodeInput = match parse_input(params) {
+        let input: AnalyzeCodeInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1541,11 +2030,95 @@ pub fn register(reg: &ToolRegistry) {
             },
             Arc::new(CopyFile),
         ),
+        // YELLOW: default delete path — moves to the desktop Trash, never
+        // permanent (OSC-011.1). Prompts like "delete this file" should
+        // route here, not to `delete_file`.
+        (
+            ToolDef {
+                name: "trash_file".into(),
+                description: "Move a file or directory to the desktop Trash (recoverable). This is the DEFAULT way to delete something the user asks to remove — use this, not delete_file/delete_directory, unless the user explicitly says 'permanently' or 'forever'.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![param("path", "string", "File or directory path", true)],
+            },
+            Arc::new(TrashFile),
+        ),
+        (
+            ToolDef {
+                name: "restore_from_trash".into(),
+                description: "Restore a previously trashed file or directory by its Trash item_id (returned by trash_file). If the original location is occupied, specify resolution: fail (default), rename, or replace.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("item_id", "string", "The Trash item id to restore", true),
+                    param(
+                        "resolution",
+                        "string",
+                        "fail|rename|replace when the original path is occupied (default fail)",
+                        false,
+                    ),
+                ],
+            },
+            Arc::new(RestoreFromTrash),
+        ),
+        (
+            ToolDef {
+                name: "create_archive".into(),
+                description: "Create a zip archive from one or more source files/directories.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("sources", "array", "Source file/directory paths to include", true),
+                    param("destination", "string", "Output archive path", true),
+                    param("format", "string", "Archive format (only 'zip' is supported)", false),
+                ],
+            },
+            Arc::new(CreateArchive),
+        ),
+        (
+            ToolDef {
+                name: "extract_archive".into(),
+                description: "Extract a zip archive into a destination directory, with bounded zip-bomb/traversal protection.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("archive", "string", "Path to the archive to extract", true),
+                    param("destination", "string", "Destination directory", true),
+                    param(
+                        "overwrite",
+                        "boolean",
+                        "Allow replacing an existing destination (default false)",
+                        false,
+                    ),
+                ],
+            },
+            Arc::new(ExtractArchive),
+        ),
+        // GREEN
+        (
+            ToolDef {
+                name: "list_archive_contents".into(),
+                description: "List the entries inside a zip archive without extracting it.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("path", "string", "Path to the archive", true),
+                    param("cursor", "integer", "Starting entry index (default 0)", false),
+                    param("limit", "integer", "Max entries to return (default 256)", false),
+                ],
+            },
+            Arc::new(ListArchiveContents),
+        ),
         // RED
         (
             ToolDef {
                 name: "delete_file".into(),
-                description: "Delete a file permanently".into(),
+                description: "PERMANENTLY delete a file — bypasses the Trash and cannot be undone. Only use when the user explicitly asks for permanent/irreversible deletion; otherwise use trash_file.".into(),
                 category: "file_ops".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "lite",
@@ -1556,7 +2129,7 @@ pub fn register(reg: &ToolRegistry) {
         (
             ToolDef {
                 name: "delete_directory".into(),
-                description: "Delete a directory and all its contents".into(),
+                description: "PERMANENTLY delete a directory and all its contents — bypasses the Trash and cannot be undone. Only use when the user explicitly asks for permanent/irreversible deletion; otherwise use trash_file.".into(),
                 category: "file_ops".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "lite",
@@ -1577,6 +2150,20 @@ pub fn register(reg: &ToolRegistry) {
                 ],
             },
             Arc::new(MoveFile),
+        ),
+        (
+            ToolDef {
+                name: "set_file_owner".into(),
+                description: "Change the owner of a file or directory to an existing local user account. Requires privilege and explicit approval.".into(),
+                category: "file_ops".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "lite",
+                parameters: vec![
+                    param("path", "string", "File or directory path", true),
+                    param("owner", "string", "Existing local account name to assign as owner", true),
+                ],
+            },
+            Arc::new(SetFileOwner),
         ),
         // Phase 3: Enhanced file search
         (
@@ -1710,5 +2297,316 @@ pub fn register(reg: &ToolRegistry) {
 
     for (def, handler) in tools {
         reg.register(def, handler);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::environment::LocalEnvironment;
+    use crate::tools::registry::ToolHandler;
+    use tokio_util::sync::CancellationToken;
+
+    fn test_ctx() -> ToolContext {
+        ToolContext::new(
+            Arc::new(LocalEnvironment::new()),
+            Arc::new(tokio::sync::Mutex::new(
+                crate::infra::environment::ShellState {
+                    cwd: std::env::current_dir().unwrap(),
+                    env_vars: HashMap::new(),
+                    generation: 0,
+                },
+            )),
+            CancellationToken::new(),
+        )
+    }
+
+    /// Process-wide lock serializing tests that mutate `XDG_DATA_HOME`
+    /// (Trash root discovery), since env vars are process-global state.
+    static TRASH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII guard that points `trash_file`/`restore_from_trash` at a fresh
+    /// temp Trash root for its lifetime (Task 3.1: provider tests use
+    /// temporary directories only, OSC-010.7), restoring the previous
+    /// `XDG_DATA_HOME` on drop.
+    struct TempTrashEnv {
+        _dir: tempfile::TempDir,
+        previous: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TempTrashEnv {
+        fn new() -> Self {
+            let guard = TRASH_ENV_LOCK.lock().unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            let previous = std::env::var_os("XDG_DATA_HOME");
+            std::env::set_var("XDG_DATA_HOME", dir.path());
+            Self {
+                _dir: dir,
+                previous,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for TempTrashEnv {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn trash_file_moves_present_file_and_reports_absent_as_unchanged() {
+        let _trash_env = TempTrashEnv::new();
+        let workspace = tempfile::tempdir().unwrap();
+        let target = workspace.path().join("doc.txt");
+        std::fs::write(&target, b"hello").unwrap();
+
+        let result = TrashFile
+            .execute_with_context(
+                serde_json::json!({ "path": target.to_string_lossy() }),
+                test_ctx(),
+            )
+            .await;
+        assert!(result.success, "{:?}", result.data);
+        assert!(!target.exists());
+        let item_id = result.data["item_id"].as_str().unwrap().to_string();
+        assert!(!item_id.is_empty());
+
+        // Absent path is Unchanged (idempotent), never an error.
+        let result2 = TrashFile
+            .execute_with_context(
+                serde_json::json!({ "path": target.to_string_lossy() }),
+                test_ctx(),
+            )
+            .await;
+        assert!(result2.success);
+        assert_eq!(result2.data["already_in_desired_state"], true);
+    }
+
+    #[tokio::test]
+    async fn trash_and_restore_round_trip_recovers_original_content() {
+        let _trash_env = TempTrashEnv::new();
+        let workspace = tempfile::tempdir().unwrap();
+        let target = workspace.path().join("report.txt");
+        std::fs::write(&target, b"important").unwrap();
+
+        let trashed = TrashFile
+            .execute_with_context(
+                serde_json::json!({ "path": target.to_string_lossy() }),
+                test_ctx(),
+            )
+            .await;
+        assert!(trashed.success);
+        let item_id = trashed.data["item_id"].as_str().unwrap().to_string();
+
+        let restored = RestoreFromTrash
+            .execute_with_context(serde_json::json!({ "item_id": item_id }), test_ctx())
+            .await;
+        assert!(restored.success, "{:?}", restored.data);
+        assert_eq!(std::fs::read(&target).unwrap(), b"important");
+    }
+
+    #[tokio::test]
+    async fn restore_occupied_target_without_resolution_fails_safely() {
+        let _trash_env = TempTrashEnv::new();
+        let workspace = tempfile::tempdir().unwrap();
+        let target = workspace.path().join("dup.txt");
+        std::fs::write(&target, b"original").unwrap();
+
+        let trashed = TrashFile
+            .execute_with_context(
+                serde_json::json!({ "path": target.to_string_lossy() }),
+                test_ctx(),
+            )
+            .await;
+        let item_id = trashed.data["item_id"].as_str().unwrap().to_string();
+
+        // Something new now occupies the original path.
+        std::fs::write(&target, b"new-occupant").unwrap();
+
+        let restore_fail = RestoreFromTrash
+            .execute_with_context(
+                serde_json::json!({ "item_id": item_id.clone() }),
+                test_ctx(),
+            )
+            .await;
+        assert!(!restore_fail.success);
+        assert_eq!(std::fs::read(&target).unwrap(), b"new-occupant");
+
+        let restore_rename = RestoreFromTrash
+            .execute_with_context(
+                serde_json::json!({ "item_id": item_id, "resolution": "rename" }),
+                test_ctx(),
+            )
+            .await;
+        assert!(restore_rename.success, "{:?}", restore_rename.data);
+        // Occupant untouched; restored content lives at a sibling path.
+        assert_eq!(std::fs::read(&target).unwrap(), b"new-occupant");
+        let restored_to = restore_rename.data["restored_to"].as_str().unwrap();
+        assert_ne!(restored_to, target.to_string_lossy());
+        assert_eq!(std::fs::read(restored_to).unwrap(), b"original");
+    }
+
+    #[tokio::test]
+    async fn restore_unknown_item_id_fails_safely() {
+        let _trash_env = TempTrashEnv::new();
+        let result = RestoreFromTrash
+            .execute_with_context(
+                serde_json::json!({ "item_id": "does-not-exist" }),
+                test_ctx(),
+            )
+            .await;
+        assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn create_list_and_extract_archive_round_trip() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source_dir = workspace.path().join("src");
+        std::fs::create_dir_all(source_dir.join("nested")).unwrap();
+        std::fs::write(source_dir.join("a.txt"), b"hello").unwrap();
+        std::fs::write(source_dir.join("nested/b.txt"), b"world").unwrap();
+
+        let archive_path = workspace.path().join("out.zip");
+        let created = CreateArchive
+            .execute_with_context(
+                serde_json::json!({
+                    "sources": [source_dir.to_string_lossy()],
+                    "destination": archive_path.to_string_lossy(),
+                }),
+                test_ctx(),
+            )
+            .await;
+        assert!(created.success, "{:?}", created.data);
+        assert!(archive_path.exists());
+
+        let listed = ListArchiveContents
+            .execute_with_context(
+                serde_json::json!({ "path": archive_path.to_string_lossy() }),
+                test_ctx(),
+            )
+            .await;
+        assert!(listed.success);
+        assert!(listed.data["total_entries"].as_u64().unwrap() >= 2);
+
+        let dest_dir = workspace.path().join("extracted");
+        let extracted = ExtractArchive
+            .execute_with_context(
+                serde_json::json!({
+                    "archive": archive_path.to_string_lossy(),
+                    "destination": dest_dir.to_string_lossy(),
+                }),
+                test_ctx(),
+            )
+            .await;
+        assert!(extracted.success, "{:?}", extracted.data);
+        assert_eq!(
+            std::fs::read_to_string(dest_dir.join("src/a.txt")).unwrap(),
+            "hello"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest_dir.join("src/nested/b.txt")).unwrap(),
+            "world"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_archive_rejects_traversal_entry_before_creating_destination() {
+        let workspace = tempfile::tempdir().unwrap();
+        let archive_path = workspace.path().join("evil.zip");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("../../escape.txt", options).unwrap();
+        use std::io::Write as _;
+        writer.write_all(b"pwned").unwrap();
+        writer.finish().unwrap();
+
+        let dest_dir = workspace.path().join("dest");
+        let result = ExtractArchive
+            .execute_with_context(
+                serde_json::json!({
+                    "archive": archive_path.to_string_lossy(),
+                    "destination": dest_dir.to_string_lossy(),
+                }),
+                test_ctx(),
+            )
+            .await;
+        assert!(!result.success);
+        assert!(
+            !dest_dir.exists(),
+            "destination must not be created on traversal rejection"
+        );
+        assert!(!workspace.path().join("escape.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn create_archive_rejects_unsupported_format() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("a.txt");
+        std::fs::write(&source, b"x").unwrap();
+
+        let result = CreateArchive
+            .execute_with_context(
+                serde_json::json!({
+                    "sources": [source.to_string_lossy()],
+                    "destination": workspace.path().join("out.tar").to_string_lossy(),
+                    "format": "tar",
+                }),
+                test_ctx(),
+            )
+            .await;
+        assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn move_file_cross_device_directory_uses_recursive_copy_then_delete() {
+        // We cannot force a genuine EXDEV in this environment, so this test
+        // exercises the same-filesystem happy path for a directory move
+        // (proving MoveFile now handles directories at all — previously the
+        // fallback only called `std::fs::copy`, which errors on a directory)
+        // while the EXDEV-specific recursive-copy correctness is proven
+        // directly against `copy_dir_recursive` in
+        // `os_control::files::trash::tests` and the
+        // `os_control_files_lifecycle` integration test.
+        let workspace = tempfile::tempdir().unwrap();
+        let source_dir = workspace.path().join("proj");
+        std::fs::create_dir_all(source_dir.join("nested")).unwrap();
+        std::fs::write(source_dir.join("a.txt"), b"a").unwrap();
+        std::fs::write(source_dir.join("nested/b.txt"), b"b").unwrap();
+
+        let dest_dir = workspace.path().join("proj_moved");
+        let result = MoveFile
+            .execute_with_context(
+                serde_json::json!({
+                    "source": source_dir.to_string_lossy(),
+                    "destination": dest_dir.to_string_lossy(),
+                }),
+                test_ctx(),
+            )
+            .await;
+        assert!(result.success, "{:?}", result.data);
+        assert!(!source_dir.exists());
+        assert_eq!(std::fs::read(dest_dir.join("a.txt")).unwrap(), b"a");
+        assert_eq!(std::fs::read(dest_dir.join("nested/b.txt")).unwrap(), b"b");
+    }
+
+    #[tokio::test]
+    async fn set_file_owner_fails_closed_with_unavailable_envelope() {
+        // No OS-control runtime provider is composed in a bare ToolContext,
+        // so the handler must fail closed rather than calling `chown`
+        // directly — the completion proof for OSC-010.5's "ownership
+        // changes require privilege and RED approval".
+        let result = SetFileOwner
+            .execute_with_context(
+                serde_json::json!({ "path": "/tmp/whatever", "owner": "alice" }),
+                test_ctx(),
+            )
+            .await;
+        assert!(!result.success);
     }
 }

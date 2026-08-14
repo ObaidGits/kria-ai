@@ -111,7 +111,7 @@ use kria_core::agent::workflow_continuation::{
     InterruptionClass, InterruptionContext, WorkflowContinuationRuntime, MAX_RECOVERY_DEPTH,
 };
 use kria_core::agent::workflow_expectation::{WorkflowCategory, WorkflowExpectationEngine};
-use kria_core::agent::workspace_memory::{BuildStatus, GitContext, WorkspaceInfo, WorkspaceMemory};
+use kria_core::agent::workspace_memory::WorkspaceMemory;
 use kria_core::agent::world_model::FactSource;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;

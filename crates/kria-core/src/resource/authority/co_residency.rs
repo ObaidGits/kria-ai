@@ -577,7 +577,7 @@ impl Drop for CoResidencyLease {
 mod tests {
     use super::*;
     use crate::resource::authority::lifecycle::{
-        ModelDescriptor, ModelHealth, ModelLifecycle, ResidencyState,
+        ModelDescriptor, ModelHealth, ModelLifecycle,
     };
     use crate::resource::authority::planner::PolicyProfile;
     use crate::resource::authority::types::{Constraints, ConsumerId, ResourceNeed, TurnId};

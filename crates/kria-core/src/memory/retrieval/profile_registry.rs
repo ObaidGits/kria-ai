@@ -158,8 +158,7 @@ mod tests {
             fuse_candidates, StrategyAvailability, StrategyCandidate, StrategyInput, StrategyKind,
         },
         rrf_profile::{
-            DEFAULT_RRF_K, PROFILE_ACTIVE_GOAL, PROFILE_ENTITY_RELATION, PROFILE_EXACT_PHRASE,
-            PROFILE_EXPLORATORY, PROFILE_IDENTIFIER, PROFILE_TEMPORAL,
+            DEFAULT_RRF_K, PROFILE_IDENTIFIER,
         },
     };
 

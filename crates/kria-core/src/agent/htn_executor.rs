@@ -3154,7 +3154,7 @@ mod tests {
         assert_eq!(initial_budget, 25, "Initial budget should be 25");
 
         // Step 1: Simulate prerequisite failure detection
-        let prereq_result = PrerequisiteResult::Failed {
+        let _prereq_result = PrerequisiteResult::Failed {
             prereq_id: "gedit_open".to_string(),
             reason: "Application not running".to_string(),
         };
@@ -3237,7 +3237,7 @@ mod tests {
     async fn test_gated_sensing_to_visual_reasoner_wiring() {
         use crate::agent::visual_reasoning::{AppContext, EvidenceWrapper, VisualReasoner};
         use crate::tools::vision_automation::OmniElement;
-        use crate::tools::vision_automation::{GatedSensing, SaliencyDiffResult, SaliencyRegion};
+        use crate::tools::vision_automation::GatedSensing;
 
         // Create mock screen state
         let screen_width = 1920u32;
@@ -3276,7 +3276,7 @@ mod tests {
 
         // Simulate significant screen change (SSIM < 0.85 scenario)
         // In production this would come from actual screenshot comparison
-        let current_hash = 0xfedcba0987654321u64; // Very different hash
+        let _current_hash = 0xfedcba0987654321u64; // Very different hash
 
         // Force invalidation to simulate structural change
         let needs_resense = gated_sensing.needs_resense(true); // force = true simulates SSIM < 0.85

@@ -231,6 +231,8 @@ fn gpu_denied_by_default_granted_when_declared() {
 
 // ── Approval (escalation / reduction) ──────────────────────────────────────────
 
+// Test scaffolding: records the fixture's shape even where a particular test does not read it.
+#[allow(dead_code)]
 fn net(scope: Vec<&str>) -> Capability {
     Capability {
         kind: CapabilityKind::Network,

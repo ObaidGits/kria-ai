@@ -1,18 +1,15 @@
 use crate::infra::ToolResult;
+use crate::os_control::contract::SafeText;
+use crate::os_control::{OsControlError, OsControlRuntime};
 use crate::safety::RiskLevel;
-use crate::tools::exec::{CommandOutput, ExecWrapper, ToolExecutionError};
+use crate::tools::os_governed as gov;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::ToolContext;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::de::{self, DeserializeOwned};
 use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Duration;
-use tracing::warn;
-
-const QUERY_TIMEOUT_SECS: u64 = 15;
-const APPLY_TIMEOUT_SECS: u64 = 30;
-const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
 fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     ParamDef {
@@ -105,14 +102,24 @@ struct EmptyInput {}
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SetVolumeInput {
-    #[serde(default = "default_percent_level")]
+    // Accept the frozen-manifest name `percent` as well as the pre-migration
+    // `level` for wire compatibility.
+    #[serde(default = "default_percent_level", alias = "percent")]
     level: PercentLevel,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct SetAudioMuteInput {
+    muted: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SetBrightnessInput {
-    #[serde(default = "default_percent_level")]
+    // Accept the frozen-manifest name `percent` as well as the pre-migration
+    // `level` for wire compatibility.
+    #[serde(default = "default_percent_level", alias = "percent")]
     level: PercentLevel,
 }
 
@@ -136,6 +143,32 @@ struct ConnectWifiInput {
     ssid: String,
     #[serde(default)]
     password: Option<String>,
+    /// The frozen manifest's typed `credential?:SecretRef` parameter (Task
+    /// 3.5, OSC-015.3): an opaque reference to a stored credential, resolved
+    /// through `CredentialStore` — never a plaintext value. Mutually
+    /// exclusive with `password`.
+    #[serde(default)]
+    credential: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DisconnectWifiInput {
+    device: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ForgetWifiInput {
+    profile: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ActivateNetworkProfileInput {
+    profile: String,
+    #[serde(default)]
+    device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -149,159 +182,6 @@ struct SetEnvironmentVariableInput {
 #[serde(deny_unknown_fields)]
 struct EnvironmentVariableInput {
     name: String,
-}
-
-fn exec_wrapper(timeout_secs: u64) -> ExecWrapper {
-    ExecWrapper::new()
-        .with_timeout(Duration::from_secs(timeout_secs))
-        .with_max_output_bytes(MAX_OUTPUT_BYTES)
-}
-
-fn preferred_output(output: &CommandOutput) -> String {
-    if output.stdout.trim().is_empty() {
-        output.stderr.trim().to_string()
-    } else {
-        output.stdout.trim().to_string()
-    }
-}
-
-fn non_zero_error(stderr: String, stdout: String) -> String {
-    let stderr = stderr.trim().to_string();
-    if stderr.is_empty() {
-        stdout.trim().to_string()
-    } else {
-        stderr
-    }
-}
-
-fn format_exec_error(error: ToolExecutionError) -> String {
-    match error {
-        ToolExecutionError::NonZeroExit { stderr, stdout, .. } => {
-            let details = non_zero_error(stderr, stdout);
-            if details.is_empty() {
-                "command exited with non-zero status".to_string()
-            } else {
-                details
-            }
-        }
-        ToolExecutionError::TimedOut {
-            timeout_secs,
-            stderr,
-            stdout,
-            ..
-        } => {
-            let details = non_zero_error(stderr, stdout);
-            if details.is_empty() {
-                format!("command timed out after {timeout_secs}s")
-            } else {
-                format!("command timed out after {timeout_secs}s: {details}")
-            }
-        }
-        other => other.to_string(),
-    }
-}
-
-async fn run_cmd(program: &str, args: &[&str], timeout_secs: u64) -> Result<CommandOutput, String> {
-    exec_wrapper(timeout_secs)
-        .execute(program, args)
-        .await
-        .map_err(format_exec_error)
-}
-
-async fn run_query(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = run_cmd(program, args, QUERY_TIMEOUT_SECS).await?;
-    Ok(preferred_output(&output))
-}
-
-async fn run_apply(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = run_cmd(program, args, APPLY_TIMEOUT_SECS).await?;
-    Ok(preferred_output(&output))
-}
-
-fn summarize_failures(prefix: &str, failures: &[(String, String)]) -> String {
-    if failures.is_empty() {
-        return prefix.to_string();
-    }
-
-    let details = failures
-        .iter()
-        .map(|(backend, error)| format!("{backend}: {error}"))
-        .collect::<Vec<_>>()
-        .join("; ");
-
-    format!("{prefix}: {details}")
-}
-
-fn parse_percent_token(token: &str) -> Option<u8> {
-    let cleaned = token
-        .trim()
-        .trim_matches(|c: char| matches!(c, '[' | ']' | '(' | ')' | ','));
-    let without_percent = cleaned.strip_suffix('%')?;
-    let value = without_percent.trim().parse::<f64>().ok()?;
-    if !value.is_finite() {
-        return None;
-    }
-    Some(value.round().clamp(0.0, 100.0) as u8)
-}
-
-fn parse_wpctl_percent(output: &str) -> Option<u8> {
-    for token in output.split_whitespace() {
-        let cleaned = token.trim_matches(|c: char| matches!(c, ',' | ';'));
-
-        if let Ok(value) = cleaned.parse::<f64>() {
-            if value.is_finite() && (0.0..=1.5).contains(&value) {
-                return Some((value * 100.0).round().clamp(0.0, 100.0) as u8);
-            }
-        }
-
-        if let Some(percent) = parse_percent_token(cleaned) {
-            return Some(percent);
-        }
-    }
-    None
-}
-
-fn parse_any_percent(output: &str) -> Option<u8> {
-    output.split_whitespace().find_map(parse_percent_token)
-}
-
-fn parse_u64_output(output: &str) -> Option<u64> {
-    output
-        .lines()
-        .find_map(|line| line.trim().parse::<u64>().ok())
-}
-
-fn parse_gdbus_brightness_percent(output: &str) -> Option<u8> {
-    let normalized: String = output
-        .chars()
-        .map(|c| if c.is_ascii_digit() { c } else { ' ' })
-        .collect();
-
-    normalized
-        .split_whitespace()
-        .find_map(|part| part.parse::<u64>().ok())
-        .map(clamp_percent)
-}
-
-fn parse_xrandr_brightness_percent(output: &str) -> Option<u8> {
-    for line in output.lines() {
-        if let Some((_, value)) = line.split_once("Brightness:") {
-            if let Ok(fraction) = value.trim().parse::<f64>() {
-                if fraction.is_finite() {
-                    return Some((fraction * 100.0).round().clamp(0.0, 100.0) as u8);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn first_connected_display(xrandr_output: &str) -> Option<String> {
-    xrandr_output
-        .lines()
-        .find(|line| line.contains(" connected"))
-        .and_then(|line| line.split_whitespace().next())
-        .map(str::to_string)
 }
 
 fn validate_env_name(name: &str) -> Result<(), String> {
@@ -326,292 +206,71 @@ fn validate_env_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn query_current_volume() -> Result<(u8, &'static str), String> {
-    let mut failures: Vec<(String, String)> = Vec::new();
-
-    match run_query("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"]).await {
-        Ok(output) => {
-            if let Some(volume) = parse_wpctl_percent(&output) {
-                return Ok((volume, "wpctl"));
-            }
-            failures.push((
-                "wpctl".into(),
-                format!("unparseable volume output: {}", output.trim()),
-            ));
-        }
-        Err(error) => failures.push(("wpctl".into(), error)),
-    }
-
-    match run_query("pactl", &["get-sink-volume", "@DEFAULT_SINK@"]).await {
-        Ok(output) => {
-            if let Some(volume) = parse_any_percent(&output) {
-                return Ok((volume, "pactl"));
-            }
-            failures.push((
-                "pactl".into(),
-                format!("unparseable volume output: {}", output.trim()),
-            ));
-        }
-        Err(error) => failures.push(("pactl".into(), error)),
-    }
-
-    match run_query("amixer", &["get", "Master"]).await {
-        Ok(output) => {
-            if let Some(volume) = parse_any_percent(&output) {
-                return Ok((volume, "amixer"));
-            }
-            failures.push((
-                "amixer".into(),
-                format!("unparseable volume output: {}", output.trim()),
-            ));
-        }
-        Err(error) => failures.push(("amixer".into(), error)),
-    }
-
-    Err(summarize_failures(
-        "failed to query current volume",
-        &failures,
-    ))
+/// Return the governed OS-control `Unavailable` envelope for an audio tool.
+///
+/// Migrated audio handlers reach host effects **only** through the injected
+/// [`OsControlRuntime`] + `os_control::audio::AudioControl` provider — never a
+/// direct subprocess (Task 2.1 completion proof). Until a live audio provider is
+/// composed into the runtime (desktop startup root), the handlers fail closed
+/// with this frozen envelope rather than falling back to `wpctl`/`pactl`/`amixer`.
+/// Render a governed mutation receipt as a tool result.
+///
+/// Shared by every canonical OS handler so the surfaced shape is identical across
+/// domains. It reports only what the receipt actually proves — `changed` and the
+/// lifecycle come from the runtime's verification, never from the fact that a
+/// command was dispatched — and it states whether the terminal audit record landed
+/// durably, so a caller can tell a recorded action from one pending recovery.
+fn render_os_receipt<O>(
+    tool: &str,
+    outcome: &crate::os_control::governed::GovernedOutcome<O>,
+) -> ToolResult {
+    let summary = outcome.receipt.safe_summary();
+    ToolResult::ok(serde_json::json!({
+        "tool": tool,
+        "lifecycle": summary.lifecycle().as_str(),
+        "changed": summary.changed(),
+        "verified": matches!(
+            summary.lifecycle(),
+            crate::os_control::ActionLifecycle::Verified
+        ),
+        "rollback_available": outcome.receipt.rollback_available(),
+        "durably_recorded": outcome.durably_recorded(),
+        "incident_codes": summary
+            .incident_codes()
+            .iter()
+            .map(|code| code.as_str().to_string())
+            .collect::<Vec<_>>(),
+    }))
 }
 
-async fn apply_volume(level: u8) -> Result<&'static str, String> {
-    let mut failures: Vec<(String, String)> = Vec::new();
-    let volume = format!("{level}%");
-
-    match run_apply("wpctl", &["set-volume", "@DEFAULT_AUDIO_SINK@", &volume]).await {
-        Ok(_) => return Ok("wpctl"),
-        Err(error) => failures.push(("wpctl".into(), error)),
-    }
-
-    match run_apply("pactl", &["set-sink-volume", "@DEFAULT_SINK@", &volume]).await {
-        Ok(_) => return Ok("pactl"),
-        Err(error) => failures.push(("pactl".into(), error)),
-    }
-
-    let amixer_value = format!("{level}% unmute");
-    match run_apply("amixer", &["set", "Master", &amixer_value]).await {
-        Ok(_) => return Ok("amixer"),
-        Err(error) => failures.push(("amixer".into(), error)),
-    }
-
-    Err(summarize_failures("failed to set volume", &failures))
-}
-
-async fn query_current_brightness() -> Result<(u8, &'static str), String> {
-    let mut failures: Vec<(String, String)> = Vec::new();
-
-    let current_result = run_query("brightnessctl", &["get"]).await;
-    let max_result = run_query("brightnessctl", &["max"]).await;
-    match (current_result, max_result) {
-        (Ok(current), Ok(max)) => {
-            if let (Some(current_value), Some(max_value)) =
-                (parse_u64_output(&current), parse_u64_output(&max))
-            {
-                if max_value > 0 {
-                    let percent = ((current_value as f64 / max_value as f64) * 100.0)
-                        .round()
-                        .clamp(0.0, 100.0) as u8;
-                    return Ok((percent, "brightnessctl"));
-                }
-            }
-            failures.push((
-                "brightnessctl".into(),
-                format!(
-                    "unparseable get/max output: get='{}' max='{}'",
-                    current.trim(),
-                    max.trim()
-                ),
-            ));
-        }
-        (Err(current_error), Err(max_error)) => {
-            failures.push((
-                "brightnessctl".into(),
-                format!("get failed: {current_error}; max failed: {max_error}"),
-            ));
-        }
-        (Err(current_error), _) => {
-            failures.push((
-                "brightnessctl".into(),
-                format!("get failed: {current_error}"),
-            ));
-        }
-        (_, Err(max_error)) => {
-            failures.push(("brightnessctl".into(), format!("max failed: {max_error}")));
-        }
-    }
-
-    match run_query(
-        "gdbus",
-        &[
-            "call",
-            "--session",
-            "--dest",
-            "org.gnome.SettingsDaemon.Power",
-            "--object-path",
-            "/org/gnome/SettingsDaemon/Power",
-            "--method",
-            "org.freedesktop.DBus.Properties.Get",
-            "org.gnome.SettingsDaemon.Power.Screen",
-            "Brightness",
-        ],
-    )
-    .await
-    {
-        Ok(output) => {
-            if let Some(percent) = parse_gdbus_brightness_percent(&output) {
-                return Ok((percent, "gnome-settingsd"));
-            }
-            failures.push((
-                "gdbus".into(),
-                format!("unparseable brightness output: {}", output.trim()),
-            ));
-        }
-        Err(error) => failures.push(("gdbus".into(), error)),
-    }
-
-    match run_query("xrandr", &["--verbose"]).await {
-        Ok(output) => {
-            if let Some(percent) = parse_xrandr_brightness_percent(&output) {
-                return Ok((percent, "xrandr-gamma"));
-            }
-            failures.push((
-                "xrandr".into(),
-                format!("unparseable brightness output: {}", output.trim()),
-            ));
-        }
-        Err(error) => failures.push(("xrandr".into(), error)),
-    }
-
-    Err(summarize_failures(
-        "failed to query current brightness",
-        &failures,
-    ))
-}
-
-async fn apply_brightness(level: u8) -> Result<&'static str, String> {
-    let mut failures: Vec<(String, String)> = Vec::new();
-
-    let gdbus_value = format!("<int32 {level}>");
-    match run_apply(
-        "gdbus",
-        &[
-            "call",
-            "--session",
-            "--dest",
-            "org.gnome.SettingsDaemon.Power",
-            "--object-path",
-            "/org/gnome/SettingsDaemon/Power",
-            "--method",
-            "org.freedesktop.DBus.Properties.Set",
-            "org.gnome.SettingsDaemon.Power.Screen",
-            "Brightness",
-            &gdbus_value,
-        ],
-    )
-    .await
-    {
-        Ok(_) => return Ok("gnome-settingsd"),
-        Err(error) => failures.push(("gdbus".into(), error)),
-    }
-
-    let brightness = format!("{level}%");
-    match run_apply("brightnessctl", &["set", &brightness]).await {
-        Ok(_) => return Ok("brightnessctl"),
-        Err(error) => failures.push(("brightnessctl".into(), error)),
-    }
-
-    let xrandr_output = run_query("xrandr", &[]).await;
-    match xrandr_output {
-        Ok(output) => {
-            if let Some(display) = first_connected_display(&output) {
-                let fraction = format!("{:.2}", level as f64 / 100.0);
-                match run_apply("xrandr", &["--output", &display, "--brightness", &fraction]).await
-                {
-                    Ok(_) => return Ok("xrandr-gamma"),
-                    Err(error) => failures.push(("xrandr".into(), error)),
-                }
-            } else {
-                failures.push(("xrandr".into(), "no connected display found".into()));
-            }
-        }
-        Err(error) => failures.push(("xrandr".into(), error)),
-    }
-
-    Err(summarize_failures("failed to set brightness", &failures))
-}
-
-async fn query_wifi_enabled() -> Result<bool, String> {
-    let output = run_query("nmcli", &["radio", "wifi"]).await?;
-    let normalized = output.trim().to_lowercase();
-
-    if normalized.contains("enabled") || normalized == "on" {
-        Ok(true)
-    } else if normalized.contains("disabled") || normalized == "off" {
-        Ok(false)
-    } else {
-        Err(format!(
-            "unable to parse wifi state from nmcli output: {output}"
-        ))
-    }
-}
-
-async fn apply_wifi(enable: bool) -> Result<(), String> {
-    let state = if enable { "on" } else { "off" };
-    run_apply("nmcli", &["radio", "wifi", state]).await?;
-    Ok(())
-}
-
-async fn query_power_plan() -> Result<String, String> {
-    let output = run_query("powerprofilesctl", &["get"]).await?;
-    Ok(output.trim().to_string())
-}
-
-async fn apply_power_plan(plan: &str) -> Result<(), String> {
-    run_apply("powerprofilesctl", &["set", plan]).await?;
-    Ok(())
-}
-
-async fn query_active_wifi_ssid() -> Result<Option<String>, String> {
-    let output = run_query(
-        "nmcli",
-        &["-t", "-f", "ACTIVE,SSID", "device", "wifi", "list"],
-    )
-    .await?;
-
-    for line in output.lines() {
-        let mut parts = line.splitn(2, ':');
-        let active = parts.next().unwrap_or_default().trim();
-        let ssid = parts.next().unwrap_or_default().trim();
-        if active.eq_ignore_ascii_case("yes") && !ssid.is_empty() {
-            return Ok(Some(ssid.to_string()));
-        }
-    }
-
-    Ok(None)
-}
-
-async fn apply_connect_wifi(ssid: &str, password: Option<&str>) -> Result<String, String> {
-    let mut args: Vec<String> = vec![
-        "device".into(),
-        "wifi".into(),
-        "connect".into(),
-        ssid.into(),
-    ];
-    if let Some(password) = password {
-        args.push("password".into());
-        args.push(password.into());
-    }
-
-    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_apply("nmcli", &refs).await
+fn os_audio_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
 }
 
 struct SetVolume;
 
 #[async_trait]
 impl ToolHandler for SetVolume {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: SetVolumeInput = match parse_input(params) {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        // No context path: cannot reach the governed runtime; fail closed with
+        // the frozen envelope rather than invoking any process directly.
+        os_audio_unavailable(None, "set_volume")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: SetVolumeInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -620,40 +279,248 @@ impl ToolHandler for SetVolume {
             return ToolResult::err("set_volume not implemented for this OS");
         }
 
+        // The governed AudioControl provider owns the actual set/verify/rollback;
+        // this handler only parses, builds the domain request/plan, and renders the
+        // receipt. It never touches a process, a bus, or the audio device.
         let requested = input.level.as_u8();
 
-        match query_current_volume().await {
-            Ok((current, backend)) if current == requested => {
-                return ToolResult::ok(serde_json::json!({
-                    "volume": requested,
-                    "backend": backend,
-                    "changed": false,
-                    "already_in_desired_state": true,
-                    "message": format!("volume already set to {requested}%"),
-                }));
-            }
-            Ok(_) => {}
-            Err(error) => warn!("set_volume pre-flight query failed: {error}"),
-        }
+        let Some(runtime) = ctx.os_runtime.clone() else {
+            return os_audio_unavailable(None, "set_volume");
+        };
+        let provider = match runtime.audio("set_volume") {
+            Ok(provider) => provider,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
+        // No governed call means the policy gate did not admit a host mutation
+        // (blocked, awaiting approval, or a non-admitted path). Fail closed with the
+        // frozen envelope rather than mutating.
+        let Some(call) = ctx.os_call() else {
+            return os_audio_unavailable(Some(&runtime), "set_volume");
+        };
+        let provider_id = match runtime.probe_provider("set_volume") {
+            Ok(id) => id,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
 
-        match apply_volume(requested).await {
-            Ok(backend) => ToolResult::ok(serde_json::json!({
-                "volume": requested,
-                "backend": backend,
-                "changed": true,
-                "already_in_desired_state": false,
-            })),
-            Err(error) => ToolResult::err(error),
+        let request = crate::os_control::audio::AudioRequest {
+            action: "set_volume".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::audio::AudioOp::SetOutputLevel(requested),
+            endpoint: crate::os_control::audio::AudioEndpointKind::Output,
+        };
+        let Some(desired) = request.desired_state() else {
+            return ToolResult::err("set_volume produced no desired state");
+        };
+
+        let plan = crate::os_control::runtime::MutationPlan {
+            receipt_id: crate::os_control::ReceiptId::new(uuid::Uuid::now_v7().to_string()),
+            provider: provider_id,
+            // Volume is numeric, so an observation within tolerance counts as
+            // satisfied — this is what makes a repeat request idempotent instead of
+            // dispatching a redundant command.
+            comparator: crate::os_control::ComparatorKind::WithinTolerance,
+            tolerance: Some(crate::os_control::Tolerance { abs: 2.0 }),
+            deadline_ms: 500,
+            // No rollback token is minted for volume yet; never advertise an
+            // inverse the runtime cannot actually perform.
+            rollback: crate::os_control::runtime::RollbackPlan::Unavailable,
+            latency_ms: 0,
+        };
+
+        match crate::os_control::governed::execute_governed_mutation(
+            &runtime,
+            provider,
+            call,
+            crate::os_control::governed::audit_store(),
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+        {
+            Ok(outcome) => render_os_receipt("set_volume", &outcome),
+            Err(error) => ToolResult::err_with_data(error.code(), error.to_envelope()),
         }
     }
+}
+
+struct SetAudioMute;
+
+#[async_trait]
+impl ToolHandler for SetAudioMute {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_audio_unavailable(None, "set_audio_mute")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: SetAudioMuteInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("set_audio_mute not implemented for this OS");
+        }
+
+        // Mute is a boolean, so it verifies with the Exact comparator (no
+        // tolerance): the observed state either matches the desired state or the
+        // runtime treats it as a contradiction.
+        let requested_muted = input.muted;
+
+        let Some(runtime) = ctx.os_runtime.clone() else {
+            return os_audio_unavailable(None, "set_audio_mute");
+        };
+        let provider = match runtime.audio("set_audio_mute") {
+            Ok(provider) => provider,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
+        let Some(call) = ctx.os_call() else {
+            return os_audio_unavailable(Some(&runtime), "set_audio_mute");
+        };
+        let provider_id = match runtime.probe_provider("set_audio_mute") {
+            Ok(id) => id,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
+
+        let request = crate::os_control::audio::AudioRequest {
+            action: "set_audio_mute".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::audio::AudioOp::SetOutputMute(requested_muted),
+            endpoint: crate::os_control::audio::AudioEndpointKind::Output,
+        };
+        let Some(desired) = request.desired_state() else {
+            return ToolResult::err("set_audio_mute produced no desired state");
+        };
+
+        let plan = crate::os_control::runtime::MutationPlan {
+            receipt_id: crate::os_control::ReceiptId::new(uuid::Uuid::now_v7().to_string()),
+            provider: provider_id,
+            comparator: crate::os_control::ComparatorKind::Exact,
+            tolerance: None,
+            deadline_ms: 500,
+            rollback: crate::os_control::runtime::RollbackPlan::Unavailable,
+            latency_ms: 0,
+        };
+
+        match crate::os_control::governed::execute_governed_mutation(
+            &runtime,
+            provider,
+            call,
+            crate::os_control::governed::audit_store(),
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+        {
+            Ok(outcome) => render_os_receipt("set_audio_mute", &outcome),
+            Err(error) => ToolResult::err_with_data(error.code(), error.to_envelope()),
+        }
+    }
+}
+
+struct GetAudioState;
+
+#[async_trait]
+impl ToolHandler for GetAudioState {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_audio_unavailable(None, "get_audio_state")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::ok(serde_json::json!({ "backend": "unsupported" }));
+        }
+
+        let resolved = match gov::resolve(&ctx, "get_audio_state") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.audio("get_audio_state") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_audio_state") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::audio::AudioRequest {
+            action: "get_audio_state".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::audio::AudioOp::GetState,
+            endpoint: crate::os_control::audio::AudioEndpointKind::Output,
+        };
+        gov::run_read(provider, call, &request, |state| {
+            serde_json::json!({
+                "volume_percent": state.volume_percent,
+                "muted": state.muted,
+            })
+        })
+        .await
+    }
+}
+
+/// Return the governed OS-control `Unavailable` envelope for a display tool.
+///
+/// Migrated display handlers reach host effects **only** through the injected
+/// [`OsControlRuntime`] + `os_control::display::DisplayControl` provider —
+/// never a direct subprocess (Task 2.2 completion proof). Until a live display
+/// provider is composed into the runtime (desktop startup root), the handlers
+/// fail closed with this frozen envelope rather than falling back to
+/// `gdbus`/`brightnessctl`/`xrandr`.
+fn os_display_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
 }
 
 struct SetBrightness;
 
 #[async_trait]
 impl ToolHandler for SetBrightness {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: SetBrightnessInput = match parse_input(params) {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        // No context path: cannot reach the governed runtime; fail closed with
+        // the frozen envelope rather than invoking any process directly.
+        os_display_unavailable(None, "set_brightness")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: SetBrightnessInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -662,40 +529,186 @@ impl ToolHandler for SetBrightness {
             return ToolResult::err("set_brightness not implemented for this OS");
         }
 
+        // The governed DisplayControl provider owns set/verify/rollback and the
+        // backend choice — it distinguishes physical backlight from X11-only
+        // XRandR gamma and never selects XRandR on Wayland (OSC-019.3/OSC-032.3).
         let requested = input.level.as_u8();
 
-        match query_current_brightness().await {
-            Ok((current, backend)) if current == requested => {
-                return ToolResult::ok(serde_json::json!({
-                    "brightness": requested,
-                    "backend": backend,
-                    "changed": false,
-                    "already_in_desired_state": true,
-                    "message": format!("brightness already set to {requested}%"),
-                }));
-            }
-            Ok(_) => {}
-            Err(error) => warn!("set_brightness pre-flight query failed: {error}"),
-        }
+        let Some(runtime) = ctx.os_runtime.clone() else {
+            return os_display_unavailable(None, "set_brightness");
+        };
+        let provider = match runtime.display("set_brightness") {
+            Ok(provider) => provider,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
+        let Some(call) = ctx.os_call() else {
+            return os_display_unavailable(Some(&runtime), "set_brightness");
+        };
+        let provider_id = match runtime.probe_provider("set_brightness") {
+            Ok(id) => id,
+            Err(error) => return ToolResult::err_with_data(error.code(), error.to_envelope()),
+        };
 
-        match apply_brightness(requested).await {
-            Ok(backend) => ToolResult::ok(serde_json::json!({
-                "brightness": requested,
-                "backend": backend,
-                "changed": true,
-                "already_in_desired_state": false,
-            })),
-            Err(error) => ToolResult::err(error),
+        let request = crate::os_control::display::DisplayRequest {
+            action: "set_brightness".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::display::DisplayOp::SetBrightness(requested),
+        };
+        // The desired state depends on which backend actually applies, so it is
+        // read from the composed port rather than assumed.
+        let Some(desired) = request.desired_state(provider.backend()) else {
+            return ToolResult::err("set_brightness produced no desired state");
+        };
+
+        let plan = crate::os_control::runtime::MutationPlan {
+            receipt_id: crate::os_control::ReceiptId::new(uuid::Uuid::now_v7().to_string()),
+            provider: provider_id,
+            // Comparator and tolerance come from the request's own frozen rule
+            // rather than being restated here.
+            comparator: request.comparator(),
+            tolerance: request.tolerance(),
+            deadline_ms: 500,
+            rollback: crate::os_control::runtime::RollbackPlan::Unavailable,
+            latency_ms: 0,
+        };
+
+        match crate::os_control::governed::execute_governed_mutation(
+            &runtime,
+            provider,
+            call,
+            crate::os_control::governed::audit_store(),
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+        {
+            Ok(outcome) => render_os_receipt("set_brightness", &outcome),
+            Err(error) => ToolResult::err_with_data(error.code(), error.to_envelope()),
         }
     }
+}
+
+struct GetDisplayState;
+
+#[async_trait]
+impl ToolHandler for GetDisplayState {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_display_unavailable(None, "get_display_state")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::ok(serde_json::json!({ "backend": "unsupported" }));
+        }
+
+        let resolved = match gov::resolve(&ctx, "get_display_state") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.display("get_display_state") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_display_state") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::display::DisplayRequest {
+            action: "get_display_state".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::display::DisplayOp::GetState,
+        };
+        gov::run_read(provider, call, &request, |state| {
+            serde_json::json!({
+                "brightness_percent": state.brightness_percent,
+                "backend": state.backend.as_str(),
+            })
+        })
+        .await
+    }
+}
+
+/// Return the governed OS-control `Unavailable` envelope for a connectivity
+/// (Wi-Fi) tool.
+///
+/// Migrated connectivity handlers reach host effects **only** through the
+/// injected [`OsControlRuntime`] +
+/// `os_control::connectivity::ConnectivityControl` provider — never a direct
+/// subprocess (Task 2.3 completion proof). Until a live NetworkManager
+/// provider is composed into the runtime (desktop startup root), the handlers
+/// fail closed with this frozen envelope rather than falling back to `nmcli`.
+/// This mirrors `os_audio_unavailable`/`os_display_unavailable`: `ToolContext`
+/// deliberately does not carry the `ExecutionGrant`/resource-lease/audit-
+/// admission plumbing a real mutation requires (Tasks 2.1/2.2 scoping), so a
+/// tool handler's only reachable outcome is either this frozen envelope or, in
+/// a later task that wires that plumbing, a governed receipt.
+fn os_connectivity_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
+}
+
+/// Return the governed OS-control `Unavailable` envelope for a power-profile
+/// tool.
+///
+/// Migrated power-profile handlers reach host effects **only** through the
+/// injected [`OsControlRuntime`] + `os_control::power::PowerControl` provider
+/// — never a direct subprocess (Task 2.3 completion proof). Until a live
+/// power-profiles provider is composed into the runtime (desktop startup
+/// root), the handlers fail closed with this frozen envelope rather than
+/// falling back to `powerprofilesctl`.
+fn os_power_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
 }
 
 struct ToggleWifi;
 
 #[async_trait]
 impl ToolHandler for ToggleWifi {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: ToggleWifiInput = match parse_input(params) {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        // No context path: cannot reach the governed runtime; fail closed with
+        // the frozen envelope rather than invoking any process directly.
+        os_connectivity_unavailable(None, "toggle_wifi")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ToggleWifiInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -704,91 +717,43 @@ impl ToolHandler for ToggleWifi {
             return ToolResult::err("toggle_wifi not implemented for this OS");
         }
 
-        match query_wifi_enabled().await {
-            Ok(current) if current == input.enable => {
-                return ToolResult::ok(serde_json::json!({
-                    "wifi": if input.enable { "on" } else { "off" },
-                    "changed": false,
-                    "already_in_desired_state": true,
-                }));
-            }
-            Ok(_) => {}
-            Err(error) => warn!("toggle_wifi pre-flight query failed: {error}"),
-        }
-
-        match apply_wifi(input.enable).await {
-            Ok(()) => ToolResult::ok(serde_json::json!({
-                "wifi": if input.enable { "on" } else { "off" },
-                "changed": true,
-                "already_in_desired_state": false,
-            })),
-            Err(error) => ToolResult::err(format!("failed to toggle wifi (nmcli): {error}")),
-        }
-    }
-}
-
-struct SetPowerPlan;
-
-#[async_trait]
-impl ToolHandler for SetPowerPlan {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: SetPowerPlanInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
+        // The governed ConnectivityControl provider owns set/verify/rollback.
+        let requested_enabled = input.enable;
+        let resolved = match gov::resolve(&ctx, "toggle_wifi") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
         };
-
-        if !cfg!(target_os = "linux") {
-            return ToolResult::err("set_power_plan not implemented for this OS");
-        }
-
-        let requested = input.plan.trim();
-        if requested.is_empty() {
-            return ToolResult::err("plan parameter is required");
-        }
-
-        match query_power_plan().await {
-            Ok(current) if current == requested => {
-                return ToolResult::ok(serde_json::json!({
-                    "power_plan": requested,
-                    "changed": false,
-                    "already_in_desired_state": true,
-                }));
-            }
-            Ok(_) => {}
-            Err(error) => warn!("set_power_plan pre-flight query failed: {error}"),
-        }
-
-        match apply_power_plan(requested).await {
-            Ok(()) => ToolResult::ok(serde_json::json!({
-                "power_plan": requested,
-                "changed": true,
-                "already_in_desired_state": false,
-            })),
-            Err(error) => ToolResult::err(format!(
-                "failed to set power plan (powerprofilesctl): {error}"
-            )),
-        }
-    }
-}
-
-struct GetPowerPlan;
-
-#[async_trait]
-impl ToolHandler for GetPowerPlan {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let _input: EmptyInput = match parse_input(params) {
-            Ok(input) => input,
-            Err(error) => return error,
+        let provider = match resolved.runtime.connectivity("toggle_wifi") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
         };
-
-        if !cfg!(target_os = "linux") {
-            return ToolResult::ok(serde_json::json!({ "power_plan": "unsupported" }));
-        }
-
-        match query_power_plan().await {
-            Ok(plan) => ToolResult::ok(serde_json::json!({ "power_plan": plan })),
-            Err(_) => ToolResult::ok(serde_json::json!({ "power_plan": "unknown" })),
-        }
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "toggle_wifi") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::connectivity::ConnectivityRequest {
+            action: "toggle_wifi".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::connectivity::ConnectivityOp::ToggleRadio(
+                requested_enabled,
+            ),
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "toggle_wifi",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
@@ -796,8 +761,16 @@ struct ConnectWifi;
 
 #[async_trait]
 impl ToolHandler for ConnectWifi {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: ConnectWifiInput = match parse_input(params) {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "connect_wifi")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ConnectWifiInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -811,27 +784,75 @@ impl ToolHandler for ConnectWifi {
             return ToolResult::err("ssid parameter is required");
         }
 
-        match query_active_wifi_ssid().await {
-            Ok(Some(current)) if current == ssid => {
-                return ToolResult::ok(serde_json::json!({
-                    "connected": ssid,
-                    "changed": false,
-                    "already_in_desired_state": true,
-                }));
-            }
-            Ok(_) => {}
-            Err(error) => warn!("connect_wifi pre-flight query failed: {error}"),
+        if input.password.is_some() && input.credential.is_some() {
+            return ToolResult::err("password and credential are mutually exclusive");
         }
 
-        match apply_connect_wifi(ssid, input.password.as_deref()).await {
-            Ok(output) => ToolResult::ok(serde_json::json!({
-                "connected": ssid,
-                "changed": true,
-                "already_in_desired_state": false,
-                "output": output,
-            })),
-            Err(error) => ToolResult::err(format!("connect_wifi failed: {error}")),
-        }
+        // The password (if any) is accepted only as an ephemeral value for
+        // this one request; it is never logged, stored on `self`, or placed in
+        // any DTO/plan field. `credential` (Task 3.5) is the frozen manifest's
+        // typed `SecretRef` — the governed ConnectivityControl provider
+        // resolves it through `CredentialStore::resolve_for_operation` under
+        // the admitted mutation context, scoped to `SecretPurpose::
+        // WifiPassword` and this SSID, before dispatch. In both cases the
+        // secret value is used only as a literal, non-shell argv element for
+        // this one dispatch, redacted from every captured summary/trace
+        // (OSC-025.4, OSC-029).
+        let _password_present = input.password.is_some();
+        let _credential_present = input.credential.is_some();
+        let resolved = match gov::resolve(&ctx, "connect_wifi") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("connect_wifi") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "connect_wifi") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let ssid = params["ssid"].as_str().unwrap_or_default().to_string();
+        // The raw password never enters the canonical params (OSC-025.4). When the
+        // caller supplies a stored reference instead, the provider resolves it
+        // through the Secret Service under the admitted mutation context, scoped to
+        // WifiPassword — the plaintext never reaches the model, plan, or audit.
+        let credential = params["credential"]
+            .as_str()
+            .map(crate::os_control::secrets::SecretRef::new);
+        let password = params["password"]
+            .as_str()
+            .map(|raw| {
+                crate::os_control::secrets::SecretPayload::new(raw.as_bytes().to_vec())
+            });
+        let request = crate::os_control::connectivity::ConnectivityRequest {
+            action: "connect_wifi".to_string(),
+            // Canonical params carry the SSID only — never the secret.
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::connectivity::ConnectivityOp::ConnectWifi(
+                crate::os_control::connectivity::ConnectWifiOp {
+                    ssid: ssid.clone(),
+                    password,
+                    credential,
+                },
+            ),
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "connect_wifi",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
@@ -839,36 +860,452 @@ struct GetWifiNetworks;
 
 #[async_trait]
 impl ToolHandler for GetWifiNetworks {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let _input: EmptyInput = match parse_input(params) {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "get_wifi_networks")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
 
-        match run_query(
-            "nmcli",
-            &["-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"],
+        if !cfg!(target_os = "linux") {
+            return ToolResult::ok(serde_json::json!({ "networks": [] }));
+        }
+
+        // Scanning is a read passthrough on the port, outside the mutation
+        // lifecycle: it never seals a permit and never dispatches a command.
+        let resolved = match gov::resolve(&ctx, "get_wifi_networks") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("get_wifi_networks") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_wifi_networks") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        match provider.scan_wifi(call.observation()).await {
+            Ok(rows) => ToolResult::ok(serde_json::json!({
+                "networks": rows
+                    .iter()
+                    .map(|row| serde_json::json!({
+                        "ssid": row.ssid,
+                        "bssid": row.bssid,
+                        "signal_percent": row.signal_percent,
+                        "security": row.security,
+                    }))
+                    .collect::<Vec<_>>(),
+            })),
+            Err(error) => gov::os_error(&error),
+        }
+    }
+}
+
+struct GetNetworkState;
+
+#[async_trait]
+impl ToolHandler for GetNetworkState {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "get_network_state")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::ok(serde_json::json!({ "devices": [], "profiles": [] }));
+        }
+
+        // The governed ConnectivityControl provider owns the actual
+        // device/profile catalog read through the runtime.
+        let resolved = match gov::resolve(&ctx, "get_network_state") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("get_network_state") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_network_state") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let devices = match provider.list_devices(call.observation()).await {
+            Ok(rows) => rows,
+            Err(error) => return gov::os_error(&error),
+        };
+        let profiles = match provider.list_profiles(call.observation()).await {
+            Ok(rows) => rows,
+            Err(error) => return gov::os_error(&error),
+        };
+        ToolResult::ok(serde_json::json!({
+            "devices": devices
+                .iter()
+                .map(|d| serde_json::json!({
+                    "name": d.name,
+                    "type": d.device_type,
+                    "state": d.state,
+                    "connected": d.is_connected(),
+                }))
+                .collect::<Vec<_>>(),
+            "profiles": profiles
+                .iter()
+                .map(|p| serde_json::json!({
+                    "name": p.name,
+                    "uuid": p.uuid,
+                    "type": p.connection_type,
+                    "device": p.device,
+                }))
+                .collect::<Vec<_>>(),
+        }))
+    }
+}
+
+struct DisconnectWifi;
+
+#[async_trait]
+impl ToolHandler for DisconnectWifi {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "disconnect_wifi")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: DisconnectWifiInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("disconnect_wifi not implemented for this OS");
+        }
+
+        let device = input.device.trim();
+        if device.is_empty() {
+            return ToolResult::err("device parameter is required");
+        }
+
+        // The governed ConnectivityControl provider owns the actual
+        // disconnect dispatch + fresh device-state verification through the
+        // runtime. `disconnect_wifi` never claims rollback (design §13.1:
+        // `RollbackClaim::None`).
+        let resolved = match gov::resolve(&ctx, "disconnect_wifi") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("disconnect_wifi") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "disconnect_wifi") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let device = crate::os_control::connectivity::NetworkDeviceId::new(
+            params["device"].as_str().unwrap_or_default(),
+        );
+        let request = crate::os_control::connectivity::ConnectivityRequest {
+            action: "disconnect_wifi".to_string(),
+            params: params.clone(),
+            // Never claims rollback: disconnecting has no reliably restorable
+            // prior positive action (design §13.1).
+            op: crate::os_control::connectivity::ConnectivityOp::DisconnectWifi(device),
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "disconnect_wifi",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
         )
         .await
-        {
-            Ok(output) => {
-                let networks: Vec<serde_json::Value> = output
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .map(|line| {
-                        let parts: Vec<&str> = line.splitn(3, ':').collect();
-                        serde_json::json!({
-                            "ssid": parts.first().copied().unwrap_or_default(),
-                            "signal": parts.get(1).copied().unwrap_or_default(),
-                            "security": parts.get(2).copied().unwrap_or_default(),
-                        })
-                    })
-                    .collect();
+    }
+}
 
-                ToolResult::ok(serde_json::json!({ "networks": networks }))
-            }
-            Err(error) => ToolResult::err(format!("failed to list wifi networks (nmcli): {error}")),
+struct ForgetWifi;
+
+#[async_trait]
+impl ToolHandler for ForgetWifi {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "forget_wifi")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ForgetWifiInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("forget_wifi not implemented for this OS");
         }
+
+        let profile = input.profile.trim();
+        if profile.is_empty() {
+            return ToolResult::err("profile parameter is required");
+        }
+
+        // The governed ConnectivityControl provider owns the actual profile
+        // deletion + fresh profile-catalog verification through the runtime.
+        // `forget_wifi` is RED and never claims rollback (design §13.1:
+        // `RollbackClaim::None`) — the forget confirmation is enforced by the
+        // RED approval gate, not by a second in-tool prompt.
+        let resolved = match gov::resolve(&ctx, "forget_wifi") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("forget_wifi") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "forget_wifi") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let profile = crate::os_control::connectivity::NetworkProfileId::new(
+            params["profile"]
+                .as_str()
+                .or_else(|| params["ssid"].as_str())
+                .unwrap_or_default(),
+        );
+        let request = crate::os_control::connectivity::ConnectivityRequest {
+            action: "forget_wifi".to_string(),
+            params: params.clone(),
+            // RED and irreversible (design §13.1): the saved profile is deleted, so
+            // the gate must have obtained explicit confirmation before this point.
+            op: crate::os_control::connectivity::ConnectivityOp::ForgetProfile(profile),
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "forget_wifi",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+    }
+}
+
+struct ActivateNetworkProfile;
+
+#[async_trait]
+impl ToolHandler for ActivateNetworkProfile {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_connectivity_unavailable(None, "activate_network_profile")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let input: ActivateNetworkProfileInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("activate_network_profile not implemented for this OS");
+        }
+
+        let profile = input.profile.trim();
+        if profile.is_empty() {
+            return ToolResult::err("profile parameter is required");
+        }
+
+        // The governed ConnectivityControl provider owns device resolution,
+        // duplicate-device disambiguation, dispatch, and fresh active-profile
+        // verification through the runtime. Ethernet activation reuses this
+        // exact tool — there is no separate Ethernet "connect" tool.
+        let _device = input.device;
+        let resolved = match gov::resolve(&ctx, "activate_network_profile") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.connectivity("activate_network_profile") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "activate_network_profile") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let profile = crate::os_control::connectivity::NetworkProfileId::new(
+            params["profile"].as_str().unwrap_or_default(),
+        );
+        // Ethernet has no separate connect operation — it is just another saved
+        // profile activated through this same variant (OSC-015.7).
+        let device = params["device"]
+            .as_str()
+            .map(crate::os_control::connectivity::NetworkDeviceId::new);
+        let request = crate::os_control::connectivity::ConnectivityRequest {
+            action: "activate_network_profile".to_string(),
+            params: params.clone(),
+            op: crate::os_control::connectivity::ConnectivityOp::ActivateProfile {
+                profile,
+                device,
+            },
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "activate_network_profile",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+    }
+}
+
+struct SetPowerPlan;
+
+#[async_trait]
+impl ToolHandler for SetPowerPlan {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_power_unavailable(None, "set_power_plan")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        // Cloned because the canonical params are also bound into the governed
+        // request, where they must reproduce the grant's parameter digest.
+        let input: SetPowerPlanInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::err("set_power_plan not implemented for this OS");
+        }
+
+        let requested = input.plan.trim();
+        if requested.is_empty() {
+            return ToolResult::err("plan parameter is required");
+        }
+        let Some(profile) = crate::os_control::PowerProfile::parse(requested) else {
+            return ToolResult::err(format!("unrecognized power plan '{requested}'"));
+        };
+
+        // The governed PowerControl provider owns the actual set/verify/
+        // rollback through the runtime.
+        let resolved = match gov::resolve(&ctx, "set_power_plan") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.power("set_power_plan") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "set_power_plan") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::power::PowerProfileRequest {
+            action: "set_power_plan".to_string(),
+            params: params.clone(),
+            op: crate::os_control::power::PowerProfileOp::SetProfile(profile),
+        };
+        let Some(desired) = request.desired_state() else {
+            return ToolResult::err("set_power_plan produced no desired state");
+        };
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "set_power_plan",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+    }
+}
+
+struct GetPowerPlan;
+
+#[async_trait]
+impl ToolHandler for GetPowerPlan {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_power_unavailable(None, "get_power_plan")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let _input: EmptyInput = match parse_input(params.clone()) {
+            Ok(input) => input,
+            Err(error) => return error,
+        };
+
+        if !cfg!(target_os = "linux") {
+            return ToolResult::ok(serde_json::json!({ "power_plan": "unsupported" }));
+        }
+
+        let resolved = match gov::resolve(&ctx, "get_power_plan") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.power("get_power_plan") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_power_plan") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::power::PowerProfileRequest {
+            action: "get_power_plan".to_string(),
+            // The caller's ORIGINAL parameters: the grant's params digest was
+            // taken from these, and rebuilding the object here would make the
+            // binding check fail with grant_invalid. The normalized value
+            // travels in the typed desired-state instead.
+            params: params.clone(),
+            op: crate::os_control::power::PowerProfileOp::GetProfile,
+        };
+        gov::run_read(provider, call, &request, |state| {
+            serde_json::json!({ "profile": state.profile.as_str() })
+        })
+        .await
     }
 }
 
@@ -877,7 +1314,7 @@ struct SetEnvironmentVariable;
 #[async_trait]
 impl ToolHandler for SetEnvironmentVariable {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: SetEnvironmentVariableInput = match parse_input(params) {
+        let input: SetEnvironmentVariableInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -913,7 +1350,7 @@ struct GetEnvironmentVariable;
 #[async_trait]
 impl ToolHandler for GetEnvironmentVariable {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let input: EnvironmentVariableInput = match parse_input(params) {
+        let input: EnvironmentVariableInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -933,7 +1370,7 @@ struct ListEnvironmentVariables;
 #[async_trait]
 impl ToolHandler for ListEnvironmentVariables {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let _input: EmptyInput = match parse_input(params) {
+        let _input: EmptyInput = match parse_input(params.clone()) {
             Ok(input) => input,
             Err(error) => return error,
         };
@@ -1002,6 +1439,39 @@ pub fn register(reg: &ToolRegistry) {
             },
             Arc::new(GetWifiNetworks),
         ),
+        (
+            ToolDef {
+                name: "get_network_state".into(),
+                description: "Get Wi-Fi/Ethernet adapters, saved profiles, active profile, and connectivity status using stable typed device/profile identifiers.".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![],
+            },
+            Arc::new(GetNetworkState),
+        ),
+        (
+            ToolDef {
+                name: "get_audio_state".into(),
+                description: "Get the default audio output volume and mute state".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![],
+            },
+            Arc::new(GetAudioState),
+        ),
+        (
+            ToolDef {
+                name: "get_display_state".into(),
+                description: "Get the current display brightness and backend".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![],
+            },
+            Arc::new(GetDisplayState),
+        ),
         // YELLOW
         (
             ToolDef {
@@ -1013,6 +1483,17 @@ pub fn register(reg: &ToolRegistry) {
                 parameters: vec![param("level", "integer", "Volume 0-100", true)],
             },
             Arc::new(SetVolume),
+        ),
+        (
+            ToolDef {
+                name: "set_audio_mute".into(),
+                description: "Mute or unmute the default audio output".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![param("muted", "boolean", "true=mute, false=unmute", true)],
+            },
+            Arc::new(SetAudioMute),
         ),
         (
             ToolDef {
@@ -1057,11 +1538,48 @@ pub fn register(reg: &ToolRegistry) {
                 parameters: vec![
                     param("ssid", "string", "Network name", true),
                     param("password", "string", "Network password", false),
+                    param("credential", "string", "Opaque Secret_Reference to a stored Wi-Fi credential (mutually exclusive with password)", false),
                 ],
             },
             Arc::new(ConnectWifi),
         ),
+        (
+            ToolDef {
+                name: "disconnect_wifi".into(),
+                description: "Disconnect a network device by its typed device identifier (from get_network_state).".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![param("device", "string", "Typed network device identifier (from get_network_state)", true)],
+            },
+            Arc::new(DisconnectWifi),
+        ),
+        (
+            ToolDef {
+                name: "activate_network_profile".into(),
+                description: "Activate an existing saved Wi-Fi or Ethernet profile by its typed profile identifier (from get_network_state). Ethernet has no separate connect tool — this is it.".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![
+                    param("profile", "string", "Typed saved network profile identifier (from get_network_state)", true),
+                    param("device", "string", "Typed network device identifier to activate on, if the profile does not already bind one", false),
+                ],
+            },
+            Arc::new(ActivateNetworkProfile),
+        ),
         // RED
+        (
+            ToolDef {
+                name: "forget_wifi".into(),
+                description: "Permanently forget (delete) a saved Wi-Fi profile by its typed profile identifier (from get_network_state). Irreversible — never claims rollback.".into(),
+                category: "system_config".into(),
+                default_tier: RiskLevel::Red,
+                min_tier: "standard",
+                parameters: vec![param("profile", "string", "Typed saved network profile identifier (from get_network_state)", true)],
+            },
+            Arc::new(ForgetWifi),
+        ),
         (
             ToolDef {
                 name: "set_environment_variable".into(),

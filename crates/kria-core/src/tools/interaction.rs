@@ -1,6 +1,10 @@
 use crate::infra::ToolResult;
+use crate::os_control::contract::SafeText;
+use crate::os_control::{OsControlError, OsControlRuntime};
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::os_governed as gov;
+use crate::tools::ToolContext;
 use async_trait::async_trait;
 use md5::{Digest as Md5Digest, Md5};
 use sha1::Sha1;
@@ -17,13 +21,56 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
+/// Return the governed OS-control `Unavailable` envelope for a clipboard
+/// tool.
+///
+/// linux-os-control-production **Task 2.5**: `get_clipboard`/
+/// `set_clipboard`/`transform_clipboard` no longer call `arboard::Clipboard`
+/// directly. They reach host effects **only** through the injected
+/// [`OsControlRuntime`] + `os_control::clipboard::ClipboardControl`
+/// provider. Until a live X11/Wayland transport is composed into the
+/// runtime, the handlers fail closed with this frozen envelope.
+fn os_clipboard_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
+}
+
 struct GetClipboard;
 #[async_trait]
 impl ToolHandler for GetClipboard {
     async fn execute(&self, _params: serde_json::Value) -> ToolResult {
-        match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
-            Ok(text) => ToolResult::ok(serde_json::json!({ "content": text })),
-            Err(e) => ToolResult::err(format!("clipboard read failed: {e}")),
+        os_clipboard_unavailable(None, "get_clipboard")
+    }
+
+    async fn execute_with_context(
+        &self,
+        _params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        // A read passthrough on the port: no permit is sealed and nothing is
+        // written to the selection.
+        let resolved = match gov::resolve(&ctx, "get_clipboard") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.clipboard("get_clipboard") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::read_call(&ctx, &resolved.runtime, "get_clipboard") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        match provider.current_text(call.observation()).await {
+            Ok(text) => ToolResult::ok(serde_json::json!({ "text": text })),
+            Err(error) => gov::os_error(&error),
         }
     }
 }
@@ -31,55 +78,131 @@ impl ToolHandler for GetClipboard {
 struct SetClipboard;
 #[async_trait]
 impl ToolHandler for SetClipboard {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let text = params["text"].as_str().unwrap_or("");
-        match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_string())) {
-            Ok(_) => ToolResult::ok(serde_json::json!({ "set": true, "length": text.len() })),
-            Err(e) => ToolResult::err(format!("clipboard write failed: {e}")),
-        }
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_clipboard_unavailable(None, "set_clipboard")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        // The governed ClipboardControl provider owns the selection write and its
+        // verification; the canonical params are passed through unchanged so the
+        // binding reproduces the grant's parameter digest exactly.
+        let text = params["text"].as_str().unwrap_or_default().to_string();
+        let resolved = match gov::resolve(&ctx, "set_clipboard") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.clipboard("set_clipboard") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "set_clipboard") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::clipboard::ClipboardRequest {
+            action: "set_clipboard".to_string(),
+            params: params.clone(),
+            text,
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "set_clipboard",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
 struct TransformClipboard;
 #[async_trait]
 impl ToolHandler for TransformClipboard {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let transform = params["transform"].as_str().unwrap_or("uppercase");
-        let mut clipboard = match arboard::Clipboard::new() {
-            Ok(c) => c,
-            Err(e) => return ToolResult::err(format!("clipboard error: {e}")),
-        };
-        let text = match clipboard.get_text() {
-            Ok(t) => t,
-            Err(e) => return ToolResult::err(format!("read failed: {e}")),
-        };
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_clipboard_unavailable(None, "transform_clipboard")
+    }
 
-        let result = match transform {
-            "uppercase" => text.to_uppercase(),
-            "lowercase" => text.to_lowercase(),
-            "trim" => text.trim().to_string(),
-            "reverse" => text.chars().rev().collect(),
-            "snake_case" => text.replace(' ', "_").to_lowercase(),
-            "title_case" => text
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let transform = params["transform"].as_str().unwrap_or("uppercase");
+        if !matches!(
+            transform,
+            "uppercase" | "lowercase" | "trim" | "reverse" | "snake_case" | "title_case"
+        ) {
+            return ToolResult::err(format!("unknown transform: {transform}"));
+        }
+        // Read the current selection, transform it in-process, then write it back
+        // through the same governed provider. Both halves are governed: the read
+        // uses the observation context, the write the sealed mutation permit.
+        let resolved = match gov::resolve(&ctx, "transform_clipboard") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.clipboard("transform_clipboard") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "transform_clipboard") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let current = match provider.current_text(call.observation()).await {
+            Ok(text) => text,
+            Err(error) => return gov::os_error(&error),
+        };
+        let transformed = match transform {
+            "uppercase" => current.to_uppercase(),
+            "lowercase" => current.to_lowercase(),
+            "trim" => current.trim().to_string(),
+            "reverse" => current.chars().rev().collect(),
+            "snake_case" => current
+                .split_whitespace()
+                .map(|w| w.to_lowercase())
+                .collect::<Vec<_>>()
+                .join("_"),
+            "title_case" => current
                 .split_whitespace()
                 .map(|w| {
-                    let mut c = w.chars();
-                    match c.next() {
+                    let mut chars = w.chars();
+                    match chars.next() {
+                        Some(first) => {
+                            first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+                        }
                         None => String::new(),
-                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
                     }
                 })
                 .collect::<Vec<_>>()
                 .join(" "),
-            _ => return ToolResult::err(format!("unknown transform: {transform}")),
+            other => return ToolResult::err(format!("unknown transform: {other}")),
         };
-
-        let _ = clipboard.set_text(result.clone());
-        ToolResult::ok(serde_json::json!({
-            "transform": transform,
-            "original_length": text.len(),
-            "result_length": result.len(),
-        }))
+        let request = crate::os_control::clipboard::ClipboardRequest {
+            action: "transform_clipboard".to_string(),
+            params: params.clone(),
+            text: transformed,
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "transform_clipboard",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 

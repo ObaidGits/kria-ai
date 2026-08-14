@@ -1032,6 +1032,7 @@ mod tests {
             .unwrap()
     }
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn rejects_legacy_decision_without_binding() {
         let store = test_decision_store();
@@ -1060,6 +1061,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn verifies_and_records_one_action() {
         let temp = tempfile::tempdir().unwrap();
@@ -1099,7 +1101,14 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[tokio::test]
+    // Serialized: this test's verification step re-reads a temp file and was
+    // observed returning `VerificationFailed` under heavy parallel load (~2 of 4
+    // full-suite runs) while passing 3/3 in isolation. `#[serial]` must precede
+    // `#[tokio::test]` so it wraps the generated runtime body. Serializing makes
+    // the gate deterministic; it does NOT prove the verifier is load-insensitive,
+    // which is worth investigating separately.
     async fn duplicate_continuation_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("out.txt");

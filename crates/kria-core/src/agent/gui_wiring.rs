@@ -1096,60 +1096,87 @@ impl ToolExecutor for PolicyToolExecutor {
         });
 
         let decision = gate_evaluation.policy_decision.clone();
+        // Captured up front: `decision` is partially moved further down, but the
+        // read-admission path below still needs the risk level.
+        let decision_risk = decision
+            .as_ref()
+            .map_or(crate::safety::RiskLevel::Green, |d| d.risk_level);
         let action_proposal = gate_evaluation.action_proposal.clone();
-        let resource_requirements = gate_evaluation.resource_requirements.clone();
 
-        // ── Phase 1 Environment Override ──────────────────────────────────────
-        // If the legacy gate blocks or requires approval due to "Target mismatch"
-        // but the new environment validation says the tool is allowed (because
-        // Browser/Mcp/CloudProvider all map to Host), override to Proceed.
-        let gate_outcome = match &gate_evaluation.outcome {
-            ExecutionGateOutcome::Block { reason }
-                if reason.contains("Target mismatch") || reason.contains("EXECUTION_BLOCKED") =>
-            {
-                let turn_target =
-                    crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
-                let env_check =
-                    crate::agent::execution_environment::validate_environment(action, turn_target);
-                if env_check.is_allowed() {
-                    tracing::info!(
-                        target: "authority_trace",
-                        action = action,
-                        legacy_reason = %reason,
-                        "PolicyToolExecutor: legacy target-mismatch BLOCK overridden"
-                    );
-                    ExecutionGateOutcome::Proceed
-                } else {
-                    gate_evaluation.outcome.clone()
-                }
-            }
-            ExecutionGateOutcome::RequiresApproval { .. } => {
-                // Check if this approval is triggered by target-mismatch logic
-                // (browser/desktop tools should not require approval just because
-                // the turn target is "Browser")
-                let turn_target =
-                    crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
-                let env_check =
-                    crate::agent::execution_environment::validate_environment(action, turn_target);
-                if env_check.is_allowed()
-                    && matches!(
-                        turn_target,
-                        crate::agent::turn_memory::ExecutionTarget::Browser
-                            | crate::agent::turn_memory::ExecutionTarget::Mcp
-                            | crate::agent::turn_memory::ExecutionTarget::CloudProvider
-                    )
+        // ── Native-OS authority: NO override (design §2.1, OSC-001/OSC-004) ───
+        // A typed native-OS action is admitted only by `ExecutionGate`. Its
+        // block / approval decision can never be overridden-and-continued by the
+        // legacy target-mismatch environment shim below; doing so would create a
+        // second admission authority for host mutations. Non-OS tools keep the
+        // legacy Browser/Mcp/Cloud → Host convenience override.
+        // Set by the RequiresApproval branch once approval commits, so the grant
+        // minted there reaches the governed-call assembly below.
+        let mut os_action_grant_after_approval: Option<
+            crate::agent::execution_gate::OsActionGrant,
+        > = None;
+        let mut resource_requirements = gate_evaluation.resource_requirements.clone();
+
+        let gate_outcome = if crate::agent::os_action_authority::is_native_os_action(action) {
+            gate_evaluation.outcome.clone()
+        } else {
+            // ── Phase 1 Environment Override ──────────────────────────────────
+            // If the legacy gate blocks or requires approval due to "Target
+            // mismatch" but the new environment validation says the tool is
+            // allowed (Browser/Mcp/CloudProvider all map to Host), override to
+            // Proceed.
+            match &gate_evaluation.outcome {
+                ExecutionGateOutcome::Block { reason }
+                    if reason.contains("Target mismatch")
+                        || reason.contains("EXECUTION_BLOCKED") =>
                 {
-                    tracing::info!(
-                        target: "authority_trace",
-                        action = action,
-                        "PolicyToolExecutor: legacy HITL approval overridden (browser/desktop tool on Host)"
+                    let turn_target =
+                        crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                    let env_check = crate::agent::execution_environment::validate_environment(
+                        action,
+                        turn_target,
                     );
-                    ExecutionGateOutcome::Proceed
-                } else {
-                    gate_evaluation.outcome.clone()
+                    if env_check.is_allowed() {
+                        tracing::info!(
+                            target: "authority_trace",
+                            action = action,
+                            legacy_reason = %reason,
+                            "PolicyToolExecutor: legacy target-mismatch BLOCK overridden"
+                        );
+                        ExecutionGateOutcome::Proceed
+                    } else {
+                        gate_evaluation.outcome.clone()
+                    }
                 }
+                ExecutionGateOutcome::RequiresApproval { .. } => {
+                    // Check if this approval is triggered by target-mismatch logic
+                    // (browser/desktop tools should not require approval just because
+                    // the turn target is "Browser")
+                    let turn_target =
+                        crate::agent::turn_memory::ExecutionTarget::infer(&self.user_text, action);
+                    let env_check = crate::agent::execution_environment::validate_environment(
+                        action,
+                        turn_target,
+                    );
+                    if env_check.is_allowed()
+                        && matches!(
+                            turn_target,
+                            crate::agent::turn_memory::ExecutionTarget::Browser
+                                | crate::agent::turn_memory::ExecutionTarget::Mcp
+                                | crate::agent::turn_memory::ExecutionTarget::CloudProvider
+                        )
+                    {
+                        tracing::info!(
+                            target: "authority_trace",
+                            action = action,
+                            "PolicyToolExecutor: legacy HITL approval overridden (browser/desktop tool on Host)"
+                        );
+                        ExecutionGateOutcome::Proceed
+                    } else {
+                        gate_evaluation.outcome.clone()
+                    }
+                }
+                _ => gate_evaluation.outcome.clone(),
             }
-            _ => gate_evaluation.outcome.clone(),
         };
 
         match gate_outcome {
@@ -1203,6 +1230,16 @@ impl ToolExecutor for PolicyToolExecutor {
                     );
                 };
                 let request_id = HitlGateway::generate_request_id();
+                // A native-OS action must not leak raw parameters through the
+                // HITL description either (the gateway redacts `parameters`; keep
+                // the description content-free too). Full ApprovalProjection is
+                // Task 1.8.
+                let description = if crate::agent::os_action_authority::is_native_os_action(action)
+                {
+                    format!("Approve native-OS action '{action}' (parameters redacted)")
+                } else {
+                    format!("Execute {} with params: {}", action, params)
+                };
                 let approval = self
                     .hitl_gateway
                     .request_approval_with_id(
@@ -1210,7 +1247,7 @@ impl ToolExecutor for PolicyToolExecutor {
                         action,
                         params.clone(),
                         decision.risk_level,
-                        &format!("Execute {} with params: {}", action, params),
+                        &description,
                         true,
                     )
                     .await;
@@ -1249,7 +1286,32 @@ impl ToolExecutor for PolicyToolExecutor {
                         "user_gui",
                     )
                 };
+                // The resolved decision carries the committed approval, which is
+                // what the gate must re-validate against.
+                let resolved_decision = match &store_result {
+                    Ok(decision) => decision.clone(),
+                    Err(_) => None,
+                };
                 if let Err(error) = store_result {
+                    // ── OS decisions: durable resolution IS the authority ─────
+                    // For a native-OS action a UI approval is ineffective until
+                    // its resolution commits to SQLite (OSC-001.9, design §2.1).
+                    // If the commit fails we FAIL CLOSED and never continue —
+                    // continuing here would let a raw UI approval mutate the host
+                    // without a committed (grantable) resolution.
+                    if crate::agent::os_action_authority::is_native_os_action(action) {
+                        tracing::warn!(
+                            target: "authority_trace",
+                            action = action,
+                            decision_id = %durable_decision.id,
+                            error = %error,
+                            "OS decision resolution failed to commit; failing closed"
+                        );
+                        return ToolResult::err(format!(
+                            "OS_DECISION_NOT_COMMITTED: durable resolution for '{action}' did not \
+                             commit ({error}); no host mutation performed"
+                        ));
+                    }
                     tracing::warn!(
                         target: "authority_trace",
                         action = action,
@@ -1276,6 +1338,43 @@ impl ToolExecutor for PolicyToolExecutor {
                     );
                     return ToolResult::err(format!("HITL_DENIED: {denial_reason}"));
                 }
+
+                // ── Mint the OS grant now that approval is durably committed ──
+                //
+                // `evaluate` returns `os_action_grant: None` on the
+                // RequiresApproval path, because at that moment nothing was
+                // authorized yet. Approval has now committed, so the grant is
+                // minted here from the **resolved** decision — re-validating
+                // against the pre-resolution snapshot would simply ask for
+                // approval again.
+                //
+                // Without this, every approval-gated OS mutation failed: the
+                // handler received a governed call with no grant, `mutation_call`
+                // refused it, and the user saw "provider is not composed" — an
+                // error pointing at the wrong layer entirely.
+                //
+                // A failure here is NOT fatal: reads are admitted without a grant
+                // further down, and refusing outright would break every OS read.
+                // The mutation path fails closed on its own when no grant arrives.
+                if crate::agent::os_action_authority::is_native_os_action(action) {
+                    if let Some(resolved_decision) = resolved_decision {
+                        let resumed =
+                            gate.revalidate_resume(&resolved_decision, self.destructive_hint);
+                        match resumed.os_action_grant {
+                            Some(grant) => {
+                                os_action_grant_after_approval = Some(grant);
+                                resource_requirements = resumed.resource_requirements;
+                            }
+                            None => tracing::warn!(
+                                target: "authority_trace",
+                                action = action,
+                                outcome = ?resumed.outcome,
+                                "post-approval re-validation issued no OS grant; a mutation will \
+                                 fail closed, a read proceeds without one"
+                            ),
+                        }
+                    }
+                }
             }
             ExecutionGateOutcome::Proceed => {
                 let Some(decision) = decision else {
@@ -1294,7 +1393,13 @@ impl ToolExecutor for PolicyToolExecutor {
             }
         }
 
-        let lease_guards = if resource_requirements.is_empty() {
+        // A canonical native-OS action takes its write leases through the OS
+        // resource coordinator, because `run_mutation` requires the resulting
+        // `AcquiredResourceLeaseSet`. Acquiring the agent-level guards for the
+        // SAME resources as well would make this executor conflict with itself.
+        let native_os_action = crate::agent::os_action_authority::is_native_os_action(action);
+
+        let lease_guards = if native_os_action || resource_requirements.is_empty() {
             Vec::new()
         } else {
             let Some(action_proposal) = action_proposal.as_ref() else {
@@ -1323,11 +1428,147 @@ impl ToolExecutor for PolicyToolExecutor {
             }
         };
 
+        // ── Governed-call assembly for native OS actions ───────────────────────
+        // Durably admit the action, acquire its OS write leases in canonical
+        // order, and build the observation context. Every field of the binding is
+        // taken from the grant itself, so the binding the runtime re-validates
+        // cannot drift from what was actually approved.
+        let os_call = if native_os_action {
+            match os_action_grant_after_approval
+                .clone()
+                .or_else(|| gate_evaluation.os_action_grant.clone())
+            {
+                Some(grant) => {
+                    // Copy the binding facts out of the grant before it moves into
+                    // `admit`, so the request borrows only locals.
+                    let session_id = grant.session_id().to_string();
+                    let target = grant.target();
+                    let risk = grant.risk_level();
+                    let snapshot_revision = grant.capability_snapshot_revision();
+                    let request = crate::os_control::governed::OsCallRequest {
+                        session_id: &session_id,
+                        correlation_id: crate::os_control::contract::CorrelationId::new(
+                            uuid::Uuid::now_v7().to_string(),
+                        ),
+                        action_id: crate::os_control::contract::ActionId::new(
+                            uuid::Uuid::now_v7().to_string(),
+                        ),
+                        action,
+                        params,
+                        target,
+                        risk,
+                        requirements: resource_requirements.clone(),
+                        snapshot_revision,
+                        cancellation: self.cancellation.clone(),
+                        deadline: Instant::now() + Duration::from_secs(30),
+                        redaction: crate::os_control::context::RedactionPolicy::default(),
+                        // Probe-confirmed facts, when the live root probed the host.
+                        snapshot: self
+                            .registry
+                            .os_runtime()
+                            .and_then(|rt| rt.capability_snapshot()),
+                    };
+                    match crate::os_control::governed::OsGovernedCall::admit(
+                        crate::os_control::governed::audit_store(),
+                        // Coordinate over THIS executor's lease manager, not a
+                        // separate one: two arbiters would not exclude each other,
+                        // so a lease held by the agent would fail to block an OS
+                        // action over the same resource.
+                        &crate::os_control::resource::OsResourceCoordinator::new(
+                            self.resource_lease.clone(),
+                        ),
+                        grant,
+                        request,
+                    )
+                    .await
+                    {
+                        Ok(call) => Some(Arc::new(call)),
+                        Err(error) => {
+                            tracing::warn!(
+                                target: "authority_trace",
+                                action = action,
+                                code = error.code(),
+                                "OS governed-call admission failed; refusing the action"
+                            );
+                            return ToolResult::err_with_data(error.code(), error.to_envelope());
+                        }
+                    }
+                }
+                // No grant means the gate did not admit a host MUTATION. If the
+                // frozen manifest derives no exclusive write resources for this
+                // action it is a read, so admit it read-only: reads still get one
+                // durable admission (design §14.1) and an observation context, but
+                // no grant and no leases, so they cannot mutate. A blocked
+                // mutation derives write resources and therefore stays absent,
+                // leaving its handler to fail closed.
+                None => {
+                    if crate::os_control::resource::os_write_requirements(action, params).is_empty()
+                    {
+                        let session_id = self.session_id.clone();
+                        let risk = decision_risk;
+                        let probe_snapshot = self
+                            .registry
+                            .os_runtime()
+                            .and_then(|rt| rt.capability_snapshot());
+                        let request = crate::os_control::governed::OsCallRequest {
+                            session_id: &session_id,
+                            correlation_id: crate::os_control::contract::CorrelationId::new(
+                                uuid::Uuid::now_v7().to_string(),
+                            ),
+                            action_id: crate::os_control::contract::ActionId::new(
+                                uuid::Uuid::now_v7().to_string(),
+                            ),
+                            action,
+                            params,
+                            target: crate::agent::turn_memory::ExecutionTarget::Host,
+                            risk,
+                            requirements: Vec::new(),
+                            // Bind the read to the capability state it was decided
+                            // under when the host was probed.
+                            snapshot_revision: probe_snapshot
+                                .as_ref()
+                                .map_or(crate::os_control::contract::SnapshotRevision(0), |s| {
+                                    s.revision
+                                }),
+                            cancellation: self.cancellation.clone(),
+                            deadline: Instant::now() + Duration::from_secs(30),
+                            redaction: crate::os_control::context::RedactionPolicy::default(),
+                            snapshot: probe_snapshot,
+                        };
+                        // RED reads are privacy-sensitive and fail closed when the
+                        // audit ledger is unhealthy; plain reads may continue.
+                        let privacy_sensitive =
+                            matches!(risk, crate::safety::RiskLevel::Red);
+                        match crate::os_control::governed::OsGovernedCall::admit_read(
+                            crate::os_control::governed::audit_store(),
+                            request,
+                            privacy_sensitive,
+                        ) {
+                            Ok(call) => Some(Arc::new(call)),
+                            Err(error) => {
+                                return ToolResult::err_with_data(
+                                    error.code(),
+                                    error.to_envelope(),
+                                );
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
         if let Some(handler) = self.registry.get_handler(action) {
             // AUDIT FIX #10/#24: Use the workflow-level cancellation token instead
             // of a fresh unconnected token. This allows running tools to be
             // cancelled when the workflow is cancelled.
-            let ctx = self.registry.make_tool_context(self.cancellation.clone());
+            let mut ctx = self.registry.make_tool_context(self.cancellation.clone());
+            if let Some(call) = os_call.clone() {
+                ctx = ctx.with_os_call(call);
+            }
             let execution_id = uuid::Uuid::now_v7().to_string();
             let started = Instant::now();
             tracing::info!(
@@ -1536,14 +1777,20 @@ mod tests {
         let path = crate::agent::gui_substrate_planner::generated_files_dir()
             .join(format!("kria-lease-conflict-{}.txt", uuid::Uuid::new_v4()));
         let path_str = path.to_string_lossy().to_string();
+        // `write_file` is a canonical native-OS action, so Task 1.6 derives its
+        // resource set from the frozen manifest: one EXCLUSIVE `OsControl`
+        // resource keyed `path/<value>` (see
+        // `execution_gate::tests::declares_gui_input_and_filesystem_requirements`).
+        // Hold exactly that identity so the conflict is the real one the runtime
+        // checks — leasing a raw `FilesystemPath` scope would not collide.
         let _held = lease_manager
             .acquire(ResourceLeaseRequest {
                 workflow_id: "other-workflow".to_string(),
                 stage_id: Some("stage-1".to_string()),
                 action_hash: "other-action".to_string(),
-                kind: ResourceKind::FilesystemPath,
-                scope: path_str.clone(),
-                access_mode: AccessMode::Write,
+                kind: ResourceKind::OsControl,
+                scope: format!("path/{path_str}"),
+                access_mode: AccessMode::Exclusive,
                 owner: "test".to_string(),
                 ttl: Duration::from_secs(30),
                 preemptible: false,
@@ -1577,11 +1824,15 @@ mod tests {
             .await;
 
         assert!(!result.success);
-        assert!(result
-            .error
-            .as_deref()
-            .unwrap_or("")
-            .contains("RESOURCE_LEASE_DENIED"));
+        // A canonical native-OS action now fails closed through the FROZEN OS
+        // error envelope rather than the legacy ad-hoc string: its leases are
+        // taken by the OS resource coordinator, so a conflict surfaces as
+        // `os_control.resource_busy`.
+        let error = result.error.as_deref().unwrap_or("");
+        assert!(
+            error.contains("resource_busy") || error.contains("RESOURCE_LEASE_DENIED"),
+            "expected a governed resource-conflict envelope, got: {error}"
+        );
         assert!(!path.exists());
     }
 
@@ -1661,5 +1912,89 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(artifact);
+    }
+
+    /// Bypass-negative (Task 1.1, OSC-001.9): for a native-OS action that
+    /// requires approval, a granted UI approval whose durable resolution FAILS
+    /// to commit must FAIL CLOSED — the executor must not run the handler.
+    /// Proves gui_wiring cannot "log a failed decision update then continue" for
+    /// an OS decision.
+    #[tokio::test]
+    async fn os_action_fails_closed_when_resolution_commit_fails() {
+        use crate::tools::registry::ToolRegistry;
+        let reg = Arc::new(ToolRegistry::new());
+        crate::tools::file_ops::register(&reg);
+
+        // Healthy in-memory SQLite OS authority so decision *creation* succeeds.
+        let decision_store = Arc::new(DecisionStore::in_memory());
+        let hitl_gateway = Arc::new(HitlGateway::new(5));
+        let executor = PolicyToolExecutor {
+            registry: Arc::clone(&reg),
+            cancellation: tokio_util::sync::CancellationToken::new(),
+            policy_engine: Arc::new(PolicyEngine::new()),
+            hitl_gateway: Arc::clone(&hitl_gateway),
+            audit_logger: Arc::new(AuditLogger::new(
+                rusqlite::Connection::open_in_memory().expect("open in-memory audit db"),
+            )),
+            session_id: "gui_wiring_os_test".to_string(),
+            // Explicit local-machine target → Authorized(Host) without target
+            // clarification, so a RED native-OS action reaches the approval path.
+            user_text: "uninstall cowsay on my local machine".to_string(),
+            destructive_hint: true,
+            decision_store: Arc::clone(&decision_store),
+            resource_lease: ResourceLeaseManager::new(),
+        };
+
+        assert!(crate::agent::os_action_authority::is_native_os_action(
+            "uninstall_package"
+        ));
+
+        // Concurrent approver: once the OS approval request appears, force the
+        // decision store's next commit (the resolution) to fail, THEN approve.
+        let responder_store = Arc::clone(&decision_store);
+        let responder_gw = Arc::clone(&hitl_gateway);
+        let approver = tokio::spawn(async move {
+            for _ in 0..200 {
+                let pending = responder_gw.pending_requests().await;
+                if let Some(req) = pending.first() {
+                    // Raw parameters must never be surfaced for an OS action.
+                    assert_eq!(
+                        req.parameters.get("os_action").and_then(|v| v.as_bool()),
+                        Some(true),
+                        "OS approval must carry the redacted projection, not raw params"
+                    );
+                    assert!(req.parameters.get("name").is_none());
+                    responder_store.force_os_persistence_failure();
+                    responder_gw
+                        .respond(&req.id, ApprovalResponse::Approved)
+                        .await;
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            panic!("OS approval request never appeared");
+        });
+
+        let result = executor
+            .execute(
+                "uninstall_package",
+                &serde_json::json!({ "name": "cowsay" }),
+            )
+            .await;
+        approver.await.unwrap();
+
+        assert!(
+            !result.success,
+            "an OS action with an uncommitted resolution must not execute"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("OS_DECISION_NOT_COMMITTED"),
+            "expected fail-closed OS_DECISION_NOT_COMMITTED, got: {:?}",
+            result.error
+        );
     }
 }

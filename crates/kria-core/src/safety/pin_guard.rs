@@ -140,6 +140,7 @@ impl Default for PinGuard {
 
 #[cfg(test)]
 mod tests {
+#![allow(dead_code)]  // see note above
     use super::*;
 
     const SESSION: &str = "test-session";

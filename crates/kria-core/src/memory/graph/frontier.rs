@@ -347,7 +347,6 @@ mod tests {
     use super::*;
     use crate::memory::graph::projection::{
         DirectionClass, EdgeAuthorityClass, NodeMetadata, ProjectedItemId, ProjectedNodeKind,
-        TruncationReason,
     };
     use crate::memory::model::{GraphRevision, RecordId, TruthState};
 

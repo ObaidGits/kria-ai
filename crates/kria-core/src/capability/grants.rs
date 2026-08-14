@@ -156,7 +156,19 @@ impl GrantStore {
     }
 
     /// Persist a grant.
+    ///
+    /// Native host-OS effects are refused (design §2.1, OSC-001): the extension
+    /// grant store must never durably authorize a native OS mutation. Such
+    /// authority exists only as an `ExecutionGate`-minted `OsActionGrant`, never
+    /// as a persisted extension grant.
     pub fn insert(&self, grant: &ScopedGrant) -> Result<(), CapError> {
+        if crate::agent::os_action_authority::effects_request_native_os(&grant.effects) {
+            return Err(CapError::Permission(format!(
+                "refusing to persist grant {}: native host-OS effects cannot be authorized by the \
+                 extension grant store",
+                grant.grant_id
+            )));
+        }
         let conn = self
             .conn
             .lock()

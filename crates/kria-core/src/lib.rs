@@ -17,6 +17,7 @@ pub mod n8n;
 pub mod notify;
 pub mod openclaw;
 pub mod orchestrator;
+pub mod os_control;
 pub mod platform;
 pub mod plugin;
 pub mod preprocessing;

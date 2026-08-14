@@ -68,6 +68,15 @@ pub struct CapabilityPlatform {
     quarantine: Option<Mutex<Quarantine>>,
 }
 
+/// True when a capability descriptor declares (or requests) a native host-OS
+/// effect and must therefore be excluded from the extension/marketplace plane
+/// (design §2.1). Both the descriptor's declared effect classes and its
+/// runtime-requested `permissions` are inspected.
+fn descriptor_requests_native_os(descriptor: &CapabilityDescriptor) -> bool {
+    crate::agent::os_action_authority::effects_request_native_os(&descriptor.effects.classes)
+        || crate::agent::os_action_authority::effects_request_native_os(&descriptor.permissions)
+}
+
 impl CapabilityPlatform {
     /// Build over a provider registry (which owns the federated index).
     pub fn new(registry: Arc<ProviderRegistry>) -> Self {
@@ -341,8 +350,15 @@ impl CapabilityPlatform {
     }
 
     /// Discover the top-k capabilities across all providers for a goal query.
+    ///
+    /// Native host-OS descriptors are **excluded** from this plane (design §2.1,
+    /// OSC-001): they are never surfaced, selected, or executed here. An extension
+    /// that needs a host effect must re-enter a canonical registered OS tool
+    /// through `ExecutionGate`.
     pub fn discover(&self, query: &str, k: usize) -> Result<Vec<ScoredDescriptor>, CapError> {
-        self.registry.search(query, k)
+        let mut hits = self.registry.search(query, k)?;
+        hits.retain(|s| !descriptor_requests_native_os(&s.descriptor));
+        Ok(hits)
     }
 
     /// Look up a single indexed descriptor by its `(provider_id, capability_id)`
@@ -1184,6 +1200,35 @@ impl CapabilityPlatform {
         let correlation_id = req.context.correlation_id.clone();
         let provider_id = req.provider_id.clone();
         let capability_id = req.capability_id.clone();
+
+        // Native-OS authority exclusion (design §2.1, OSC-001/OSC-002): the
+        // extension/marketplace plane can NEVER own or invoke a native host-OS
+        // (`HostOsControl`) operation. A request whose granted effects — or whose
+        // descriptor's declared effects/permissions — reach a native host effect
+        // is refused here before any provider is touched. The only native-OS
+        // admission path is a canonical registered OS tool via `ExecutionGate`.
+        if crate::agent::os_action_authority::effects_request_native_os(&req.granted_effects)
+            || self
+                .descriptor(&provider_id, &capability_id)
+                .ok()
+                .flatten()
+                .map(|d| descriptor_requests_native_os(&d))
+                .unwrap_or(false)
+        {
+            self.emit(CapabilityEvent::new(
+                &correlation_id,
+                &provider_id,
+                Some(capability_id.clone()),
+                Stage::Execute,
+                Outcome::Failed,
+                "refused: native host-OS effects are excluded from the capability plane",
+            ));
+            return Err(CapError::Permission(format!(
+                "capability '{capability_id}' requests a native host-OS effect; the extension \
+                 plane cannot execute it — a host effect must re-enter a canonical OS tool \
+                 through ExecutionGate"
+            )));
+        }
 
         // Trust/integrity gate (spec R8.3): a quarantined capability must never
         // execute, even if a stale grant/index entry references it.

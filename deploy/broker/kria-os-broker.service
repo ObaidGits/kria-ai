@@ -1,0 +1,87 @@
+[Unit]
+Description=KRIA typed privilege broker
+Documentation=file:///media/obaid/SSD/KRIA/deploy/broker/README.md
+# Polkit must be up: without it every request is denied, which is a confusing
+# failure rather than a useful one.
+After=polkit.service
+Requires=polkit.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/kria/kria-os-broker
+Restart=on-failure
+RestartSec=2
+
+# ── Why root, and what it is bounded to ──────────────────────────────────────
+# The broker performs exactly five fixed operations. Each needs a different
+# privilege, and the bounding set below is the union of only those:
+#
+#   set_bound_path_ownership    CAP_CHOWN, CAP_FOWNER, CAP_DAC_READ_SEARCH
+#   set_battery_charge_thresholds  write /sys/class/power_supply
+#   set_firewall_enabled        CAP_NET_ADMIN, CAP_NET_RAW  (ufw / firewall-cmd)
+#   configure_discovered_printer   talk to cupsd, write /etc/cups
+#   set_privacy_control         refused outright — a per-user setting must not be
+#                               written by root, so it needs no privilege at all
+#
+# A bug in the broker therefore cannot become a general root compromise: it has
+# no ability to load modules, mount filesystems, change time, or trace processes.
+User=root
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=yes
+
+# ── Network ──────────────────────────────────────────────────────────────────
+# PrivateNetwork is deliberately OFF. It would give the broker its own network
+# namespace, and `ufw` would then configure the firewall of THAT namespace — the
+# rules would apply to nothing, while the call reported success. A firewall
+# change that silently protects an empty namespace is worse than no feature.
+#
+# Outbound traffic is still impossible in practice: the broker only ever reads
+# and writes a local Unix socket, and AF_INET is not in the allowed families.
+PrivateNetwork=no
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+# ── Filesystem ───────────────────────────────────────────────────────────────
+# `strict` keeps everything read-only except the paths granted below.
+ProtectSystem=strict
+# NOT read-only: set_bound_path_ownership exists to change the owner of a file
+# the user named, and those files are usually in their home directory. With
+# ProtectHome=read-only the chown would fail with EROFS after the user had
+# already approved it.
+ProtectHome=no
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@swap @reboot @module @obsolete @debug
+
+# The socket directory, plus each tree a single operation writes.
+RuntimeDirectory=kria
+RuntimeDirectoryMode=0755
+ReadWritePaths=/sys/class/power_supply
+# ufw's own state and rule files.
+ReadWritePaths=-/etc/ufw
+ReadWritePaths=-/var/lib/ufw
+ReadWritePaths=-/etc/default/ufw
+# firewalld's runtime state, when firewalld is the installed firewall instead.
+ReadWritePaths=-/etc/firewalld
+# lpadmin writes the CUPS printer definitions and talks to cupsd's socket.
+ReadWritePaths=-/etc/cups
+ReadWritePaths=-/run/cups
+
+# ProtectKernelTunables would otherwise make /proc/sys read-only, which ufw needs
+# for net.ipv4 forwarding toggles. Granted narrowly rather than by relaxing the
+# whole protection.
+ReadWritePaths=-/proc/sys/net
+
+[Install]
+WantedBy=multi-user.target

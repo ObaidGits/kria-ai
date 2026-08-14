@@ -9,20 +9,11 @@
 
 mod common;
 
-use common::{dbus_available, gnome_display_available};
+use common::gnome_display_available;
 use kria_core::agent::router::{Intent, IntentRouter};
 use kria_core::safety::policy::{PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
 use serial_test::serial;
-
-fn is_clipboard_transient_error(err: &str) -> bool {
-    let lowered = err.to_ascii_lowercase();
-    lowered.contains("clipboard")
-        && (lowered.contains("empty")
-            || lowered.contains("not available")
-            || lowered.contains("temporarily")
-            || lowered.contains("failed"))
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Smoke — all interaction/desktop tools must be registered
@@ -204,140 +195,61 @@ fn policy_dt04_type_text_is_yellow_or_red() {
 //  Functional — clipboard (requires display)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// linux-os-control-production **Task 2.5**: `set_clipboard`/`get_clipboard`
+/// no longer call `arboard::Clipboard` directly. They reach host effects
+/// **only** through the injected `OsControlRuntime` +
+/// `os_control::clipboard::ClipboardControl` provider. `handler.execute()`
+/// (no [`kria_core::tools::ToolContext`]) can never reach that runtime, so
+/// this test now asserts the frozen `Unavailable` envelope — the same
+/// pattern Tasks 2.1–2.4 established for `set_volume`/`set_brightness`/
+/// `toggle_wifi` in `tests/integration_system_config.rs`. The governed
+/// `ClipboardControl` lifecycle itself (idempotency, dispatch, verification)
+/// is covered end-to-end against a fake transport in
+/// `tests/os_control_clipboard_lifecycle.rs`.
 #[tokio::test]
 #[serial]
 async fn functional_dt01_dt02_clipboard_roundtrip() {
     // PROMPT-ID: DT-01, DT-02
-    if !gnome_display_available() {
-        eprintln!("SKIP: no display for clipboard test");
-        return;
-    }
-
     let reg = registry::build_default_registry();
 
-    // Set clipboard
     let set_handler = reg.get_handler("set_clipboard").unwrap().clone();
     let set_result = set_handler
         .execute(serde_json::json!({ "text": "Hello from KRIA test" }))
         .await;
     assert!(
-        set_result.success,
-        "set_clipboard failed: {:?}",
-        set_result.error
+        !set_result.success,
+        "set_clipboard without a composed provider (no ToolContext) must report Unavailable, got: {set_result:?}"
     );
+    assert_eq!(set_result.error.as_deref(), Some("os_control.unavailable"));
 
-    // Read it back
     let get_handler = reg.get_handler("get_clipboard").unwrap().clone();
-    let mut content = String::new();
-    let mut saw_transient_error = false;
-    for _ in 0..8 {
-        let get_result = get_handler.execute(serde_json::json!({})).await;
-        if get_result.success {
-            content = get_result.data["content"]
-                .as_str()
-                .or(get_result.data["text"].as_str())
-                .or(get_result.data.as_str())
-                .unwrap_or("")
-                .to_string();
-            if content == "Hello from KRIA test" {
-                break;
-            }
-        } else if let Some(err) = get_result.error.as_deref() {
-            if is_clipboard_transient_error(err) {
-                saw_transient_error = true;
-            } else {
-                panic!("get_clipboard failed: {err}");
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-    }
-
-    if content != "Hello from KRIA test" && saw_transient_error {
-        eprintln!(
-            "SKIP: clipboard backend not stable enough for roundtrip assertion (last='{content}')"
-        );
-        return;
-    }
-
-    assert_eq!(
-        content, "Hello from KRIA test",
-        "get_clipboard must return exactly what was set"
+    let get_result = get_handler.execute(serde_json::json!({})).await;
+    assert!(
+        !get_result.success,
+        "get_clipboard without a composed provider must report Unavailable, got: {get_result:?}"
     );
+    assert_eq!(get_result.error.as_deref(), Some("os_control.unavailable"));
 }
 
+/// linux-os-control-production **Task 2.5**: `transform_clipboard` composes
+/// the same governed `ClipboardControl` read+write; without a `ToolContext`
+/// it also reports the frozen `Unavailable` envelope (see
+/// `functional_dt01_dt02_clipboard_roundtrip` above).
 #[tokio::test]
 #[serial]
 async fn functional_dt03_transform_clipboard_uppercase() {
     // PROMPT-ID: DT-03
-    if !gnome_display_available() {
-        eprintln!("SKIP: no display for clipboard transform test");
-        return;
-    }
-
     let reg = registry::build_default_registry();
 
-    // Seed a value
-    {
-        let h = reg.get_handler("set_clipboard").unwrap().clone();
-        let r = h
-            .execute(serde_json::json!({ "text": "hello world" }))
-            .await;
-        if !r.success {
-            eprintln!("SKIP: could not set clipboard");
-            return;
-        }
-    }
-
-    // Transform to uppercase
     let handler = reg.get_handler("transform_clipboard").unwrap().clone();
     let result = handler
         .execute(serde_json::json!({ "transform": "uppercase" }))
         .await;
-    if !result.success {
-        let err = result.error.as_deref().unwrap_or_default();
-        if is_clipboard_transient_error(err) {
-            eprintln!("SKIP: clipboard transform unavailable in this environment: {err}");
-            return;
-        }
-        panic!("transform_clipboard uppercase failed: {:?}", result.error);
-    }
-
-    // Verify
-    let get_h = reg.get_handler("get_clipboard").unwrap().clone();
-    let mut content = String::new();
-    let mut saw_transient_error = false;
-    for _ in 0..8 {
-        let get_r = get_h.execute(serde_json::json!({})).await;
-        if get_r.success {
-            content = get_r.data["content"]
-                .as_str()
-                .or(get_r.data.as_str())
-                .unwrap_or("")
-                .to_string();
-            if content == "HELLO WORLD" {
-                break;
-            }
-        } else if let Some(err) = get_r.error.as_deref() {
-            if is_clipboard_transient_error(err) {
-                saw_transient_error = true;
-            } else {
-                panic!("get_clipboard failed after transform: {err}");
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-    }
-
-    if content != "HELLO WORLD" && saw_transient_error {
-        eprintln!(
-            "SKIP: clipboard backend not stable enough for transform assertion (last='{content}')"
-        );
-        return;
-    }
-
-    assert_eq!(
-        content, "HELLO WORLD",
-        "transform_clipboard uppercase should produce 'HELLO WORLD'"
+    assert!(
+        !result.success,
+        "transform_clipboard without a composed provider must report Unavailable, got: {result:?}"
     );
+    assert_eq!(result.error.as_deref(), Some("os_control.unavailable"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -382,14 +294,19 @@ async fn functional_dt06_list_windows() {
 //  Functional — notifications (requires DBUS)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// linux-os-control-production **Task 2.5** ("upgrade notification
+/// adapter"): `send_notification` no longer spawns `notify-send`/falls back
+/// to `notify_rust` directly. It reaches host effects **only** through the
+/// injected `OsControlRuntime` + `os_control::notifications::NotificationControl`
+/// provider. `handler.execute()` (no [`kria_core::tools::ToolContext`]) can
+/// never reach that runtime, so this test now asserts the frozen
+/// `Unavailable` envelope — the same pattern Tasks 2.1–2.4 established for
+/// `set_volume`/`set_brightness`/`toggle_wifi`. The governed
+/// `NotificationControl` lifecycle itself is covered end-to-end against a
+/// fake transport in `tests/os_control_notification_lifecycle.rs`.
 #[tokio::test]
 async fn functional_com01_send_notification() {
-    // PROMPT-ID: COM-01 — critical: notification must actually appear
-    if !dbus_available() {
-        eprintln!("SKIP: no DBUS for notification test");
-        return;
-    }
-
+    // PROMPT-ID: COM-01
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("send_notification").unwrap().clone();
     let result = handler
@@ -399,10 +316,10 @@ async fn functional_com01_send_notification() {
         }))
         .await;
     assert!(
-        result.success,
-        "send_notification must succeed when DBUS is available: {:?}",
-        result.error
+        !result.success,
+        "send_notification without a composed provider (no ToolContext) must report Unavailable, got: {result:?}"
     );
+    assert_eq!(result.error.as_deref(), Some("os_control.unavailable"));
 }
 
 #[tokio::test]

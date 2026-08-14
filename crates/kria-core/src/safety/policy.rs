@@ -155,6 +155,10 @@ static GREEN_ACTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
         "open_application",
         "list_running_apps",
         "focus_window",
+        "list_installed_apps",
+        // Process (content-free by default; OSC-013.4)
+        "list_processes",
+        "get_process_info",
         // System Info (read-only)
         "get_cpu_usage",
         "get_memory_info",
@@ -325,6 +329,9 @@ static YELLOW_ACTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
         // App Control
         "close_application",
         "kill_process",
+        "open_with_application",
+        "set_default_application",
+        "manage_autostart",
         // System Config
         "set_volume",
         "set_brightness",
@@ -419,6 +426,7 @@ static RED_ACTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
         "uninstall_plugin",
         // Dangerous
         "set_process_priority",
+        "get_process_command_metadata",
         "change_network_config",
         // Developer (destructive)
         "git_commit",
@@ -515,11 +523,64 @@ impl PolicyEngine {
             };
         }
 
-        // 2. Command-level granularity for shell execution tools.
+        // 2. Canonical OS tools with an UNCONDITIONAL contract risk: the frozen
+        //    manifest is the authority.
+        //
+        // Every canonical OS operation declares its own risk in the spec's frozen
+        // contract. Re-deriving it from the action name here was wrong in both
+        // directions: 20 tools the contract rates GREEN or YELLOW were rated RED and
+        // demanded approval — "what is my volume?" is not a system modification, and
+        // asking made the assistant nag for merely looking at things.
+        //
+        // Only **unconditional** risks are taken from the contract. A conditional
+        // one (`write_file` is RED for a protected path, YELLOW for an ordinary one)
+        // must still be resolved from the request below; using the contract's coarse
+        // ceiling there would demand approval for writing to the user's own
+        // Documents folder.
+        //
+        // Deferring to the contract also keeps the genuinely sensitive reads RED —
+        // the journal carries authentication failures, the clipboard may hold a
+        // password, and visible Wi-Fi names reveal location — because the reviewed
+        // contract says so, not because of a keyword in the tool's name.
+        if let Some(contract) = crate::os_control::frozen_contract(action) {
+            if let Some(tier) = contract.risk.fixed_risk() {
+                return PolicyDecision {
+                    risk_level: tier,
+                    action: action.to_string(),
+                    // Only RED needs a human. The contract's own tier decides.
+                    requires_approval: tier == RiskLevel::Red,
+                    blocked: tier == RiskLevel::Black,
+                    reason: format!("frozen OS contract declares {tier:?} for this operation"),
+                    escalated_from: None,
+                };
+            }
+        }
+
+        // 3. Command-level granularity for shell execution tools.
         //    Instead of blanket-blocking execute_bash as Red, inspect the
         //    command string to apply granular Green/Yellow/Red tiering.
         if matches!(action, "execute_bash" | "execute_powershell") {
             if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+                // 2a. BLACK-scope containment (OSC-030/OSC-004/OSC-002): a generic
+                //     shell command that reaches prohibited administration is
+                //     permanently denied before any tool call. This is the raw
+                //     execution surface only; typed capabilities are governed by
+                //     their own grant path and are never blocked here.
+                if let Some(prohibited) = crate::safety::black_scope::classify_command(cmd) {
+                    return PolicyDecision {
+                        risk_level: RiskLevel::Black,
+                        action: action.to_string(),
+                        requires_approval: false,
+                        blocked: true,
+                        reason: format!(
+                            "prohibited scope [{}]: {}",
+                            prohibited.id(),
+                            prohibited.boundary_explanation()
+                        ),
+                        escalated_from: None,
+                    };
+                }
+
                 if is_kria_generated_code_execution_command(action, cmd) {
                     return PolicyDecision {
                         risk_level: RiskLevel::Green,

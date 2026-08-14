@@ -377,6 +377,18 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(running|active)\s*(apps|applications|processes)\b",
             "list_running_apps",
         ),
+        // Process command-line arguments (RED, separate mandatory-approval
+        // action) — MUST come before the generic kill/terminate pattern so
+        // "show me the command arguments for PID 1234" never misroutes to
+        // `kill_process`.
+        (
+            r"(?i)\b(show|see|view|what\s+(is|are)|get)\b.{0,20}\b(command[- ]?line\s+)?(arguments?|args)\b.{0,20}\b(for|of)?\s*(pid|process)\b",
+            "get_process_command_metadata",
+        ),
+        (
+            r"(?i)\bcommand[- ]?line\s+(arguments?|args)\b.{0,30}\b(pid|process)\b",
+            "get_process_command_metadata",
+        ),
         (r"(?i)\b(kill|terminate)\s*(process|pid)\b", "kill_process"),
         // Google Workspace (Drive)
         (
@@ -1745,6 +1757,45 @@ mod tests {
         let result = IntentRouter::classify("Show all docker containers from VM");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // linux-os-control-production Task 3.3 completion proof: prompt routing
+    // distinguishes "close app," "kill PID," and "show command arguments."
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn routes_close_app_kill_pid_and_show_command_arguments_distinctly() {
+        let close = IntentRouter::classify("close gedit");
+        assert_eq!(close.tool_hint.as_deref(), Some("close_application"));
+
+        let kill = IntentRouter::classify("kill process 1234");
+        assert_eq!(kill.tool_hint.as_deref(), Some("kill_process"));
+
+        let show_args = IntentRouter::classify("show me the command arguments for pid 1234");
+        assert_eq!(
+            show_args.tool_hint.as_deref(),
+            Some("get_process_command_metadata")
+        );
+
+        // All three route to distinct tools — never conflated.
+        let hints: std::collections::HashSet<_> = [
+            close.tool_hint.as_deref(),
+            kill.tool_hint.as_deref(),
+            show_args.tool_hint.as_deref(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(hints.len(), 3, "close/kill/show-args must route distinctly");
+    }
+
+    #[test]
+    fn routes_command_line_arguments_phrasing_to_command_metadata() {
+        let result = IntentRouter::classify("what are the command line arguments of process 42");
+        assert_eq!(
+            result.tool_hint.as_deref(),
+            Some("get_process_command_metadata")
+        );
     }
 
     #[test]

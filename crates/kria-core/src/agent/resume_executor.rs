@@ -882,6 +882,64 @@ mod tests {
         );
     }
 
+    /// Bypass-negative (Task 1.1, OSC-001.9): a native-OS decision whose
+    /// resolution never durably committed (it stays Pending because the SQLite
+    /// commit failed) must NOT be executed by the resume path. Proves the
+    /// resume executor cannot override-and-continue an uncommitted OS decision.
+    #[tokio::test]
+    async fn os_decision_with_uncommitted_resolution_is_not_executed_on_resume() {
+        let store = Arc::new(DecisionStore::in_memory());
+        let registry = registry_with_tool("write_file", "file_ops");
+        let executor = executor(registry, Arc::clone(&store));
+
+        // Create a native-OS decision (committed to SQLite), then force the
+        // resolution commit to fail so the decision stays Pending.
+        let action = build_action_proposal(
+            "session-1",
+            "write_file",
+            &serde_json::json!({ "path": "/tmp/kria-os-noresume.txt", "content": "ok" }),
+            &host_authority(),
+        );
+        let decision = store
+            .create_decision_for_action(
+                &action,
+                DecisionCandidate::approval(
+                    "write_file",
+                    "approval required",
+                    RiskLevel::Yellow,
+                    Rollbackability::Compensatable,
+                    vec!["write_file".to_string()],
+                    Some("test.policy".to_string()),
+                ),
+            )
+            .unwrap();
+
+        store.force_os_persistence_failure();
+        let commit_err =
+            store.resolve_with_version(&decision.id, decision.version, "approve", "user_gui");
+        assert!(
+            commit_err.is_err(),
+            "the resolution commit must fail closed"
+        );
+
+        let result = executor
+            .execute_resolved_decision(DecisionExecutionRequest {
+                decision_id: decision.id.clone(),
+                expected_version: None,
+                expected_action_hash: None,
+                expected_target_hash: None,
+                session_id: Some("session-1".to_string()),
+                workspace_id: None,
+            })
+            .await;
+
+        assert!(
+            !result.execution_started,
+            "an uncommitted (still Pending) OS decision must not execute on resume"
+        );
+        assert!(!matches!(result.status, DecisionExecutionStatus::Executed));
+    }
+
     #[test]
     fn action_proposal_versions_participate_in_hash() {
         let target = TargetBinding::new("host", "local");

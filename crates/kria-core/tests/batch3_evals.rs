@@ -26,9 +26,8 @@ use kria_core::agent::ambient_cognition::{
     MAX_TICK_MS, MIN_TICK_INTERVAL,
 };
 use kria_core::agent::cognition_event_bus::{
-    BrowserCognitionEvent, BrowserEventKind, CognitionEvent, CognitionEventBus, ContinuationEvent,
-    ContinuationEventKind, DesktopCognitionEvent, DesktopCognitionEventKind, EventFloodGuard,
-    IdeCognitionEvent, IdeEventKind, PolicyEvent, PolicyEventKind, SuggestionEvent, SuggestionKind,
+    BrowserCognitionEvent, BrowserEventKind, CognitionEvent, CognitionEventBus, DesktopCognitionEvent, DesktopCognitionEventKind, EventFloodGuard,
+    IdeCognitionEvent, IdeEventKind, SuggestionKind,
     WorkflowEvent, WorkflowEventKind,
 };
 use kria_core::agent::desktop_awareness::DesktopAwarenessRuntime;
@@ -961,7 +960,7 @@ fn h5_desktop_awareness_constructible_as_arc() {
 /// I1: Bus event fan-out: same CognitionEvent updates both context and awareness.
 #[test]
 fn i1_bus_event_updates_both_context_and_awareness() {
-    let bus = CognitionEventBus::new();
+    let _bus = CognitionEventBus::new();
     let ctx = OperationalContextTracker::new(None);
     let awareness = DesktopAwarenessRuntime::new(None);
 

@@ -1487,6 +1487,7 @@ pub(super) fn infer_git_path(user_query: &str) -> String {
         .to_string()
 }
 
+#[allow(dead_code)] // test-only seam
 /// Build multiple intent-fallback tool calls for prompts that require parallel tools.
 ///
 /// Handles multi-tool scenarios (e.g. "system stats" → CPU + memory + disk) that
@@ -1565,6 +1566,7 @@ pub(super) fn build_multi_intent_fallback_calls(
         .collect()
 }
 
+#[allow(dead_code)] // test-only seam
 #[cfg(test)]
 pub(super) fn build_intent_fallback_tool_call(
     user_text: &str,

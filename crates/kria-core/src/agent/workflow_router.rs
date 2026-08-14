@@ -383,7 +383,7 @@ impl CapabilitySummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::intent_compiler::{ContentClass, GuiTaskSpec, TargetRef, Verb};
+    use crate::agent::intent_compiler::{GuiTaskSpec, TargetRef, Verb};
 
     fn make_capabilities() -> CapabilitySet {
         CapabilitySet {

@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::os_action_authority::is_native_os_action;
 use crate::safety::RiskLevel;
 
 pub type WorkflowId = String;
@@ -815,6 +816,15 @@ pub enum DecisionStoreError {
     },
     #[error("continuation claim missing for decision {decision_id}")]
     ContinuationMissing { decision_id: String },
+    #[error(
+        "OS decision {decision_id} cannot be persisted: no SQLite durable authority is attached \
+         (fail closed — no in-memory/JSONL fallback for a native-OS decision)"
+    )]
+    OsAuthorityUnavailable { decision_id: String },
+    #[error("OS decision {decision_id} SQLite persistence failed: {detail}")]
+    OsPersistence { decision_id: String, detail: String },
+    #[error("OS decision store error: {0}")]
+    OsStore(String),
 }
 
 #[derive(Debug, Default)]
@@ -826,29 +836,114 @@ struct DecisionStoreState {
     events: Vec<DecisionEvent>,
 }
 
-#[derive(Debug, Clone)]
+/// Durable authority for OS-action `InteractionDecision`s.
+///
+/// linux-os-control-production Task 1.1 (OSC-001.9, design §2.1): native-OS
+/// decision **creation and resolution** are hard-migrated off the JSONL /
+/// in-memory event log onto SQLite transactions. The in-memory
+/// [`DecisionStoreState`] remains a rebuildable *projection*; SQLite is the sole
+/// transactional authority for OS decisions. Non-OS decisions keep the existing
+/// JSONL / in-memory behavior unchanged.
+///
+/// The connection is shared behind `Arc<Mutex<..>>` exactly like every other
+/// SQLite-backed store in the crate (`QuarantineRegistry`, `WorldModelStore`,
+/// …). `rusqlite::Connection` is `Send` but not `Sync`; the `Mutex` provides the
+/// serialization the durable-first commit ordering relies on.
+type OsDecisionAuthority = Arc<Mutex<rusqlite::Connection>>;
+
+#[derive(Clone)]
 pub struct DecisionStore {
     state: Arc<Mutex<DecisionStoreState>>,
     path: Option<PathBuf>,
+    /// SQLite authority for native-OS decisions. When `None`, an OS-action
+    /// decision create/resolve **fails closed** (OSC-001.9) — it is never served
+    /// from the in-memory projection or JSONL log. Non-OS decisions ignore it.
+    os_authority: Option<OsDecisionAuthority>,
+}
+
+impl std::fmt::Debug for DecisionStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecisionStore")
+            .field("path", &self.path)
+            .field("os_authority", &self.os_authority.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl DecisionStore {
+    /// In-memory store with an in-memory SQLite OS-decision authority attached.
+    ///
+    /// The SQLite authority is in-memory (the spec's mandated code-level test
+    /// substrate), so OS-action decisions still commit through real SQLite
+    /// transactions — this is the durable authority, **not** the prohibited
+    /// in-memory HashMap fallback. Use [`Self::in_memory_without_os_authority`]
+    /// to model an unavailable SQLite authority.
     pub fn in_memory() -> Self {
+        let mut store = Self::in_memory_without_os_authority();
+        match open_os_decision_conn_in_memory() {
+            Ok(conn) => {
+                if let Err(error) = store.attach_os_authority(conn) {
+                    tracing::warn!(error = %error, "in-memory OS decision authority init failed");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "in-memory OS decision authority unavailable");
+            }
+        }
+        store
+    }
+
+    /// In-memory store with **no** OS-decision authority. Any OS-action decision
+    /// create/resolve fails closed (used to prove no in-memory OS fallback).
+    pub fn in_memory_without_os_authority() -> Self {
         Self {
             state: Arc::new(Mutex::new(DecisionStoreState::default())),
             path: None,
+            os_authority: None,
         }
     }
 
     pub fn default_persistent() -> Self {
-        let path = default_decision_log_path();
-        match Self::persistent(path) {
+        Self::default_persistent_with_db(&default_decision_db_path())
+    }
+
+    /// Production constructor: JSONL for non-OS decisions plus the shared SQLite
+    /// durable authority (`db_path`, the same `kria.db` the audit log uses) for
+    /// OS-action decisions.
+    ///
+    /// If the SQLite authority cannot be opened, OS-action decisions **fail
+    /// closed** — `os_authority` stays `None` and they are never silently served
+    /// from the in-memory/JSONL fallback (OSC-001.9). Non-OS behavior is
+    /// preserved even if the JSONL log itself is unavailable.
+    pub fn default_persistent_with_db(db_path: &Path) -> Self {
+        let jsonl_path = default_decision_log_path();
+        let mut store = match Self::persistent(jsonl_path) {
             Ok(store) => store,
             Err(error) => {
-                tracing::warn!(error = %error, "falling back to in-memory decision store");
-                Self::in_memory()
+                tracing::warn!(
+                    error = %error,
+                    "decision JSONL log unavailable; non-OS decisions are in-memory only"
+                );
+                Self::in_memory_without_os_authority()
+            }
+        };
+        match open_os_decision_conn(db_path) {
+            Ok(conn) => {
+                if let Err(error) = store.attach_os_authority(conn) {
+                    tracing::warn!(
+                        error = %error,
+                        "OS decision SQLite schema init failed; OS decisions will fail closed"
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "OS decision SQLite authority unavailable; OS decisions will fail closed"
+                );
             }
         }
+        store
     }
 
     pub fn persistent(path: impl Into<PathBuf>) -> Result<Self, DecisionStoreError> {
@@ -859,9 +954,65 @@ impl DecisionStore {
         let store = Self {
             state: Arc::new(Mutex::new(DecisionStoreState::default())),
             path: Some(path),
+            os_authority: None,
         };
         store.replay_from_disk()?;
         Ok(store)
+    }
+
+    /// Attach a SQLite connection as the OS-decision durable authority. Creates
+    /// the schema if needed and replays any persisted OS decisions into the
+    /// in-memory projection so a resume after restart sees them.
+    pub fn attach_os_authority(
+        &mut self,
+        conn: rusqlite::Connection,
+    ) -> Result<(), DecisionStoreError> {
+        init_os_decision_schema(&conn)?;
+        let authority: OsDecisionAuthority = Arc::new(Mutex::new(conn));
+        self.os_authority = Some(authority);
+        let mut state = self.state.lock().unwrap();
+        self.replay_os_decisions_locked(&mut state)?;
+        Ok(())
+    }
+
+    /// Builder variant of [`Self::attach_os_authority`].
+    pub fn with_os_authority(
+        mut self,
+        conn: rusqlite::Connection,
+    ) -> Result<Self, DecisionStoreError> {
+        self.attach_os_authority(conn)?;
+        Ok(self)
+    }
+
+    /// Test substrate: an OS-decision authority whose SQLite connection rejects
+    /// every write (`PRAGMA query_only`), modelling a durable persistence
+    /// failure so we can assert OS decision create/resolve fails closed.
+    #[cfg(test)]
+    pub(crate) fn in_memory_with_failing_os_authority() -> Self {
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory os authority");
+        init_os_decision_schema(&conn).expect("init os schema");
+        conn.execute_batch("PRAGMA query_only = ON;")
+            .expect("set query_only");
+        let mut store = Self::in_memory_without_os_authority();
+        // Bypass `attach_os_authority` (its schema write would fail under
+        // query_only). The authority is present, but every subsequent write
+        // fails — exactly the fail-closed condition under test.
+        store.os_authority = Some(Arc::new(Mutex::new(conn)));
+        store
+    }
+
+    /// Test substrate: flip an already-attached OS authority into a
+    /// write-rejecting state (`PRAGMA query_only`). Lets a test create a
+    /// decision through a healthy authority and then force the *resolution*
+    /// commit to fail, proving a raw UI approval without a committed resolution
+    /// mints no grant.
+    #[cfg(test)]
+    pub(crate) fn force_os_persistence_failure(&self) {
+        if let Some(authority) = &self.os_authority {
+            let conn = authority.lock().unwrap();
+            conn.execute_batch("PRAGMA query_only = ON;")
+                .expect("set query_only");
+        }
     }
 
     pub fn create_decision(
@@ -975,7 +1126,20 @@ impl DecisionStore {
             policy_version: "policy.v1".to_string(),
             runtime_version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        self.append_event(event)?;
+
+        // ── OS decisions: durable SQLite create, fail closed (OSC-001.9) ──────
+        // A native-OS decision is created only if it commits to the SQLite
+        // durable authority first. On persistence failure (or a missing
+        // authority) it fails closed — nothing is written to the in-memory
+        // projection or the JSONL log, so no downstream grant can observe it.
+        if is_native_os_action(&action.tool_name) {
+            let mut state = self.state.lock().unwrap();
+            self.os_persist_decision_locked(&decision)?;
+            apply_event(&mut state, &event);
+            state.events.push(event);
+        } else {
+            self.append_event(event)?;
+        }
         Ok(decision)
     }
 
@@ -1591,18 +1755,106 @@ impl DecisionStore {
     }
 
     pub fn refresh_from_disk(&self) -> Result<(), DecisionStoreError> {
-        let Some(_) = &self.path else {
+        // JSONL-backed (non-OS) projection: clear and replay the event log.
+        // Only stores with a JSONL path clear the projection, so an in-memory
+        // store keeps its in-memory-only (non-OS) decisions.
+        if self.path.is_some() {
+            {
+                let mut state = self.state.lock().unwrap();
+                state.decisions.clear();
+                state.executions.clear();
+                state.continuations.clear();
+                state.verifications.clear();
+                state.events.clear();
+            }
+            self.replay_from_disk()?;
+        }
+        // OS decisions are authoritative in SQLite; merge them into the
+        // projection (idempotent overwrite by id) so a resume after restart or
+        // in another handle observes the committed resolution.
+        if self.os_authority.is_some() {
+            let mut state = self.state.lock().unwrap();
+            self.replay_os_decisions_locked(&mut state)?;
+        }
+        Ok(())
+    }
+
+    /// Commit (create or resolve) a native-OS decision to the SQLite durable
+    /// authority as one autocommit transaction. Fails closed when no authority
+    /// is attached, or when the write fails (OSC-001.9). Callers hold the state
+    /// lock; the os-authority lock is always acquired *after* the state lock to
+    /// keep a single consistent lock order.
+    fn os_persist_decision_locked(
+        &self,
+        decision: &InteractionDecision,
+    ) -> Result<(), DecisionStoreError> {
+        let Some(authority) = &self.os_authority else {
+            return Err(DecisionStoreError::OsAuthorityUnavailable {
+                decision_id: decision.id.clone(),
+            });
+        };
+        let payload = serde_json::to_string(decision).map_err(DecisionStoreError::Serde)?;
+        let tool_name = decision
+            .action_proposal
+            .as_ref()
+            .map(|action| action.tool_name.clone())
+            .unwrap_or_default();
+        let status = format!("{:?}", decision.status);
+        let conn = authority.lock().unwrap();
+        conn.execute(
+            "INSERT INTO os_interaction_decisions \
+                (id, workflow_id, tool_name, action_hash, target_hash, status, version, \
+                 resolution, payload, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             ON CONFLICT(id) DO UPDATE SET \
+                status = excluded.status, version = excluded.version, \
+                resolution = excluded.resolution, payload = excluded.payload, \
+                updated_at = excluded.updated_at",
+            rusqlite::params![
+                decision.id,
+                decision.workflow_id,
+                tool_name,
+                decision.action_hash,
+                decision.target_hash,
+                status,
+                decision.version as i64,
+                decision.resolution,
+                payload,
+                decision.created_at,
+                decision.updated_at,
+            ],
+        )
+        .map_err(|error| DecisionStoreError::OsPersistence {
+            decision_id: decision.id.clone(),
+            detail: error.to_string(),
+        })?;
+        Ok(())
+    }
+
+    /// Replay every persisted OS decision from SQLite into the in-memory
+    /// projection (rebuildable read cache over the durable authority).
+    fn replay_os_decisions_locked(
+        &self,
+        state: &mut DecisionStoreState,
+    ) -> Result<(), DecisionStoreError> {
+        let Some(authority) = &self.os_authority else {
             return Ok(());
         };
-        {
-            let mut state = self.state.lock().unwrap();
-            state.decisions.clear();
-            state.executions.clear();
-            state.continuations.clear();
-            state.verifications.clear();
-            state.events.clear();
+        let conn = authority.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT payload FROM os_interaction_decisions")
+            .map_err(|error| DecisionStoreError::OsStore(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| DecisionStoreError::OsStore(error.to_string()))?;
+        for payload in rows {
+            let payload =
+                payload.map_err(|error| DecisionStoreError::OsStore(error.to_string()))?;
+            if let Ok(decision) = serde_json::from_str::<InteractionDecision>(&payload) {
+                state.decisions.insert(decision.id.clone(), decision);
+            }
         }
-        self.replay_from_disk()
+        Ok(())
     }
 
     pub fn metrics(&self) -> DecisionMetrics {
@@ -1653,33 +1905,56 @@ impl DecisionStore {
         actor: String,
         event_type: DecisionEventType,
     ) -> Result<Option<InteractionDecision>, DecisionStoreError> {
-        let maybe_decision = {
-            let mut state = self.state.lock().unwrap();
-            let Some(decision) = state.decisions.get_mut(decision_id) else {
+        // Snapshot the target decision and compute the would-be updated value
+        // WITHOUT mutating the projection yet. For an OS decision the durable
+        // SQLite commit must land before the in-memory projection (and therefore
+        // any grant) can observe the resolution.
+        let (is_os, updated) = {
+            let state = self.state.lock().unwrap();
+            let Some(decision) = state.decisions.get(decision_id) else {
                 return Ok(None);
             };
-            decision.status = status;
-            decision.version = decision.version.saturating_add(1);
-            decision.updated_at = now_rfc3339();
-            decision.resolution = resolution;
-            decision.clone()
+            let is_os = decision
+                .action_proposal
+                .as_ref()
+                .map(|action| is_native_os_action(&action.tool_name))
+                .unwrap_or(false);
+            let mut updated = decision.clone();
+            updated.status = status;
+            updated.version = updated.version.saturating_add(1);
+            updated.updated_at = now_rfc3339();
+            updated.resolution = resolution;
+            (is_os, updated)
         };
 
         let event = DecisionEvent {
             event_id: uuid::Uuid::new_v4().to_string(),
-            decision_id: maybe_decision.id.clone(),
-            workflow_id: maybe_decision.workflow_id.clone(),
-            stage_id: maybe_decision.stage_id.clone(),
+            decision_id: updated.id.clone(),
+            workflow_id: updated.workflow_id.clone(),
+            stage_id: updated.stage_id.clone(),
             event_type,
             actor,
             authority: AuthorityLevel::UserInstruction,
-            payload: serde_json::to_value(&maybe_decision)?,
-            created_at: maybe_decision.updated_at.clone(),
+            payload: serde_json::to_value(&updated)?,
+            created_at: updated.updated_at.clone(),
             policy_version: "policy.v1".to_string(),
             runtime_version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        self.append_event(event)?;
-        Ok(Some(maybe_decision))
+
+        // ── OS decisions: durable SQLite resolution, fail closed (OSC-001.9) ──
+        // Commit the resolution to the SQLite authority BEFORE the in-memory
+        // projection reflects it. A failed commit leaves the projection (and any
+        // resume grant that reads it) at the prior state, so a UI approval that
+        // does not durably commit yields no grant.
+        if is_os {
+            let mut state = self.state.lock().unwrap();
+            self.os_persist_decision_locked(&updated)?;
+            apply_event(&mut state, &event);
+            state.events.push(event);
+        } else {
+            self.append_event(event)?;
+        }
+        Ok(Some(updated))
     }
 
     fn append_event(&self, event: DecisionEvent) -> Result<(), DecisionStoreError> {
@@ -1868,6 +2143,60 @@ fn default_decision_log_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".kria")
         .join("decision_events.jsonl")
+}
+
+/// Default path for the shared SQLite database that holds the OS-decision
+/// authority. This is the same `kria.db` the audit log and other stores use;
+/// production composition roots should prefer [`DecisionStore::default_persistent_with_db`]
+/// with the configured `paths.db_path`.
+fn default_decision_db_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".kria")
+        .join("kria.db")
+}
+
+/// Create the OS-decision table if it does not exist. The `os_interaction_decisions`
+/// table is the durable authority for native-OS decision create/resolve
+/// (OSC-001.9); the in-memory projection is rebuilt from it.
+fn init_os_decision_schema(conn: &rusqlite::Connection) -> Result<(), DecisionStoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS os_interaction_decisions (\
+            id           TEXT PRIMARY KEY,\
+            workflow_id  TEXT NOT NULL,\
+            tool_name    TEXT NOT NULL,\
+            action_hash  TEXT NOT NULL,\
+            target_hash  TEXT NOT NULL,\
+            status       TEXT NOT NULL,\
+            version      INTEGER NOT NULL,\
+            resolution   TEXT,\
+            payload      TEXT NOT NULL,\
+            created_at   TEXT NOT NULL,\
+            updated_at   TEXT NOT NULL\
+        );",
+    )
+    .map_err(|error| DecisionStoreError::OsStore(error.to_string()))
+}
+
+/// Open a file-backed SQLite connection for the OS-decision authority. Uses the
+/// same WAL / foreign-keys pragmas as the crate's other SQLite stores so it can
+/// safely share `kria.db` with the audit log and world model.
+fn open_os_decision_conn(db_path: &Path) -> Result<rusqlite::Connection, DecisionStoreError> {
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let conn = rusqlite::Connection::open(db_path)
+        .map_err(|error| DecisionStoreError::OsStore(error.to_string()))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .map_err(|error| DecisionStoreError::OsStore(error.to_string()))?;
+    Ok(conn)
+}
+
+/// Open an in-memory SQLite connection for the OS-decision authority (test /
+/// headless substrate; still a real SQLite transactional authority).
+fn open_os_decision_conn_in_memory() -> Result<rusqlite::Connection, DecisionStoreError> {
+    rusqlite::Connection::open_in_memory()
+        .map_err(|error| DecisionStoreError::OsStore(error.to_string()))
 }
 
 fn now_rfc3339() -> String {
@@ -2581,5 +2910,169 @@ mod tests {
                 .status,
             DecisionStatus::Invalidated
         );
+    }
+
+    // ── Task 1.1 (OSC-001.9): SQLite-durable native-OS decisions ────────────
+
+    fn os_action(tool: &str) -> ActionProposal {
+        // `reboot_system` / `write_file` are canonical native-OS actions.
+        ActionProposal::new(
+            "wf-os",
+            "attempt-1",
+            "stage-1",
+            tool,
+            serde_json::json!({ "path": "/tmp/kria-os.txt", "content": "x" }),
+            TargetBinding::new("host", "local"),
+            Actor::User,
+        )
+    }
+
+    fn os_approval_candidate() -> DecisionCandidate {
+        DecisionCandidate::approval(
+            "reboot_system",
+            "approval required",
+            RiskLevel::Red,
+            Rollbackability::Irreversible,
+            vec!["power:session".to_string()],
+            Some("policy.os".to_string()),
+        )
+    }
+
+    #[test]
+    fn os_decision_create_and_resolve_commit_through_sqlite() {
+        // In-memory store carries a real (in-memory) SQLite OS authority.
+        let store = DecisionStore::in_memory();
+        let action = os_action("reboot_system");
+        assert!(is_native_os_action(&action.tool_name));
+
+        let decision = store
+            .create_decision_for_action(&action, os_approval_candidate())
+            .expect("OS decision creation must commit to SQLite");
+        assert_eq!(decision.status, DecisionStatus::Pending);
+
+        let resolved = store
+            .resolve_with_version(&decision.id, decision.version, "approve", "user_gui")
+            .expect("OS resolution must commit to SQLite")
+            .expect("decision exists");
+        assert_eq!(resolved.status, DecisionStatus::Resolved);
+        assert_eq!(resolved.resolution.as_deref(), Some("approve"));
+    }
+
+    #[test]
+    fn os_decision_replays_from_sqlite_into_a_fresh_projection() {
+        // A file-backed SQLite authority shared across two DecisionStore handles
+        // proves the decision is durable (migration/replay), not in-memory only.
+        let dir = std::env::temp_dir().join(format!("kria-os-decisions-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("kria.db");
+
+        let decision_id;
+        {
+            let conn = open_os_decision_conn(&db_path).unwrap();
+            let store = DecisionStore::in_memory_without_os_authority()
+                .with_os_authority(conn)
+                .unwrap();
+            let decision = store
+                .create_decision_for_action(&os_action("reboot_system"), os_approval_candidate())
+                .expect("create commits");
+            store
+                .resolve_with_version(&decision.id, decision.version, "approve", "user_gui")
+                .expect("resolve commits")
+                .expect("exists");
+            decision_id = decision.id;
+        }
+
+        // Fresh projection over the same durable SQLite authority.
+        let conn2 = open_os_decision_conn(&db_path).unwrap();
+        let replayed_store = DecisionStore::in_memory_without_os_authority()
+            .with_os_authority(conn2)
+            .unwrap();
+        let replayed = replayed_store
+            .decision(&decision_id)
+            .expect("OS decision must replay from SQLite into a fresh projection");
+        assert_eq!(replayed.status, DecisionStatus::Resolved);
+        assert_eq!(replayed.resolution.as_deref(), Some("approve"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn os_decision_create_fails_closed_on_persistence_failure() {
+        // Forced SQLite write failure → the OS decision is denied and NOTHING is
+        // written to the projection (so no grant can ever observe it).
+        let store = DecisionStore::in_memory_with_failing_os_authority();
+        let action = os_action("reboot_system");
+        let err = store
+            .create_decision_for_action(&action, os_approval_candidate())
+            .expect_err("OS decision create must fail closed on persistence failure");
+        assert!(matches!(err, DecisionStoreError::OsPersistence { .. }));
+        assert!(
+            store.pending_decisions().is_empty(),
+            "a failed OS decision must not appear in the in-memory projection"
+        );
+    }
+
+    #[test]
+    fn no_in_memory_os_fallback_for_os_decisions() {
+        // No SQLite authority attached: an OS decision must fail closed and must
+        // NOT be served from the in-memory HashMap. A non-OS decision is
+        // unaffected (existing JSONL/in-memory behavior preserved).
+        let store = DecisionStore::in_memory_without_os_authority();
+
+        let os_err = store
+            .create_decision_for_action(&os_action("reboot_system"), os_approval_candidate())
+            .expect_err("OS decision must fail closed without a SQLite authority");
+        assert!(
+            matches!(os_err, DecisionStoreError::OsAuthorityUnavailable { .. }),
+            "expected OsAuthorityUnavailable, got {os_err:?}"
+        );
+        assert!(store.pending_decisions().is_empty());
+
+        // Non-OS decision (execute_bash is NOT a native-OS action) still works.
+        let non_os = ActionProposal::new(
+            "wf",
+            "a",
+            "s",
+            "execute_bash",
+            serde_json::json!({ "command": "echo hi" }),
+            TargetBinding::new("host", "local"),
+            Actor::User,
+        );
+        assert!(!is_native_os_action(&non_os.tool_name));
+        store
+            .create_decision_for_action(
+                &non_os,
+                DecisionCandidate::target_selection("select", vec!["host".into()], "execute_bash"),
+            )
+            .expect("non-OS decision must still use the in-memory/JSONL path");
+        assert_eq!(store.pending_decisions().len(), 1);
+    }
+
+    #[test]
+    fn os_resolution_failing_to_commit_leaves_projection_unresolved() {
+        // Create through a healthy authority, then force the resolution commit to
+        // fail. The projection must remain Pending (resolution uncommitted), so a
+        // raw UI approval yields no resolved decision and therefore no grant.
+        let store = DecisionStore::in_memory();
+        let decision = store
+            .create_decision_for_action(&os_action("reboot_system"), os_approval_candidate())
+            .expect("create commits");
+
+        store.force_os_persistence_failure();
+
+        let err = store
+            .resolve_with_version(&decision.id, decision.version, "approve", "user_gui")
+            .expect_err("resolution commit must fail closed");
+        assert!(matches!(err, DecisionStoreError::OsPersistence { .. }));
+
+        let after = store
+            .decision(&decision.id)
+            .expect("decision still present");
+        assert_eq!(
+            after.status,
+            DecisionStatus::Pending,
+            "uncommitted resolution must not advance the projection"
+        );
+        assert_eq!(after.resolution, None);
     }
 }

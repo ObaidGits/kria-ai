@@ -1018,7 +1018,7 @@ mod tests {
         let rel_id = create_relationship(&db, "create-1");
 
         // Row exists and is active (unverified initial state).
-        let (truth, rev): (Option<String>, Option<i64>) = db
+        let (truth, _rev): (Option<String>, Option<i64>) = db
             .with_read(|conn| {
                 Ok(conn
                     .query_row(
@@ -1054,7 +1054,7 @@ mod tests {
         let db = fresh_db();
         let rel_id = create_relationship(&db, "confirm-1");
 
-        let bus = RelationshipCommandBus::new(Arc::clone(&db));
+        let _bus = RelationshipCommandBus::new(Arc::clone(&db));
         // Need a non-previewed Correct envelope for lifecycle state changes.
         // We use Observe here as a placeholder since CommandKind::Correct requires
         // a preview token. For the store-level test we call the store directly.

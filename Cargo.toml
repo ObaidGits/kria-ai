@@ -165,8 +165,19 @@ urlencoding = "2"
 opt-level = 0
 debug = 1            # line tables only — full debug info doubled link RAM
 codegen-units = 16   # cap parallelism (default is 256 for dev)
-incremental = true  # DISABLED — was generating 118GB+ of incremental state
+incremental = true  # OVERRIDDEN to false by .cargo/config.toml [build] — that wins
 split-debuginfo = "unpacked"
+
+# Dependencies carry NO debug info; our own crates keep theirs.
+#
+# Third-party code is the bulk of what gets compiled and linked, and its debug
+# info is dead weight — a panic trace through `serde` or `tokio` internals is not
+# something we debug. Dropping it cuts link memory and target/ size noticeably
+# while `[profile.dev]` above still gives OUR crates line numbers in backtraces.
+#
+# `"*"` matches dependencies only, never workspace members.
+[profile.dev.package."*"]
+debug = 0
 
 [profile.release]
 opt-level = 3

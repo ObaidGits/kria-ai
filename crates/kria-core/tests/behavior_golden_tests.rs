@@ -6,6 +6,8 @@ fn behavior_enabled() -> bool {
     matches!(std::env::var("KRIA_BEHAVIOR_GOLDEN").as_deref(), Ok("1"))
 }
 
+// Test scaffolding: kept because it records the fixture's shape.
+#[allow(dead_code)]
 fn require_enabled() {
     if !behavior_enabled() {
         eprintln!("SKIP: set KRIA_BEHAVIOR_GOLDEN=1 to run behavior golden tests");

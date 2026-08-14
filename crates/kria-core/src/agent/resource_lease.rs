@@ -25,9 +25,16 @@ pub enum ResourceKind {
     GpuModel,
     VerifierSlot,
     DelegatedWorkflow,
+    /// A native OS-control resource (linux-os-control-production Task 1.6,
+    /// OSC-008). The precise typed domain/scope lives in the requirement's
+    /// `scope` as the canonical resource key `"<os-domain>/<scope>"` produced by
+    /// [`crate::os_control::resource`]; this single generic variant lets every
+    /// §10 OS resource flow through the same manager, digest, and ordering as
+    /// the existing generic resources without a divergent second coordinator.
+    OsControl,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum AccessMode {
     Read,
     Write,
@@ -262,6 +269,47 @@ impl Drop for ResourceLeaseGuard {
             });
         }
     }
+}
+
+/// The canonical, deterministic key for a single resource requirement
+/// (linux-os-control-production Task 1.6, OSC-008.3). It binds the typed kind,
+/// scope, and access mode into one stable UTF-8 string. Sorting by this key is
+/// the single canonical acquisition order that prevents multi-domain deadlock,
+/// and hashing the sorted set is the single canonical resource-set digest shared
+/// by `ExecutionGate` grant issuance and OS lease-set acquisition.
+#[must_use]
+pub fn canonical_resource_key(requirement: &ResourceRequirement) -> String {
+    format!(
+        "{:?}\u{1f}{}\u{1f}{:?}",
+        requirement.kind, requirement.scope, requirement.access_mode
+    )
+}
+
+/// The single canonical resource-set digest (OSC-008.3, OSC-001). Deterministic
+/// over the *set* of requirements: equal sets in any order produce an equal
+/// digest. This is the one derivation `ExecutionGate` stores in a grant and the
+/// OS resource coordinator recomputes when acquiring leases, so a held lease set
+/// can be matched against a grant without a divergent second computation.
+#[must_use]
+pub fn canonical_resource_set_digest(requirements: &[ResourceRequirement]) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    let mut items: Vec<String> = requirements.iter().map(canonical_resource_key).collect();
+    items.sort();
+    let mut hasher = Sha256::new();
+    for item in items {
+        hasher.update(item.as_bytes());
+        hasher.update(b"\n");
+    }
+    hex::encode(hasher.finalize())
+}
+
+/// Sort requirements into the single canonical acquisition order (OSC-008.3).
+/// Acquiring in this order for every action guarantees that two actions sharing
+/// resources acquire the shared resources in the same sequence, so no cyclic
+/// wait — and therefore no deadlock — is possible across multi-domain actions.
+pub fn sort_canonical(requirements: &mut [ResourceRequirement]) {
+    requirements.sort_by(|a, b| canonical_resource_key(a).cmp(&canonical_resource_key(b)));
 }
 
 fn lease_key(kind: ResourceKind, scope: &str) -> String {

@@ -3,6 +3,12 @@
 //! Covers AutomationScheduler, MacroRecorder, WorkflowEngine,
 //! HealthRegistry, CircuitBreaker, and SupervisedTask.
 
+// This suite deliberately exercises `WorkflowEngine`, which is deprecated in
+// favour of GoalTree + WorkflowCompiler + StageExecutor. The coverage stays
+// until the type is actually removed — dropping the tests first would leave
+// the deprecated path untested while it is still reachable.
+#![allow(deprecated)]
+
 use kria_core::automation::scheduler::ScheduledTask;
 use kria_core::automation::workflows::{Workflow, WorkflowStatus, WorkflowStep};
 use kria_core::automation::{AutomationScheduler, MacroRecorder, WorkflowEngine};

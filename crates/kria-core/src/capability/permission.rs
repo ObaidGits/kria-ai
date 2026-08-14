@@ -182,6 +182,21 @@ impl PermissionEngine for DefaultPermissionEngine {
         let now = Utc::now();
         let classes = req.effect_classes();
 
+        // ── Native-OS exclusion (design §2.1, OSC-001/OSC-004). ─────────────
+        // The extension permission engine can NEVER authorize a native host-OS
+        // mutation. A request reaching a native host effect is denied outright;
+        // it must instead re-enter a canonical registered OS tool through
+        // `ExecutionGate`. No grant of any scope can override this.
+        if crate::agent::os_action_authority::effects_request_native_os(&classes) {
+            return PermissionDecision::Deny {
+                reason: format!(
+                    "{}/{} requests a native host-OS effect, which the extension permission \
+                     engine cannot authorize; route it through a canonical OS tool + ExecutionGate",
+                    req.provider_id, req.capability_id
+                ),
+            };
+        }
+
         // ── Tier 1: not elevated ⇒ NeverAsk. ────────────────────────────────
         if !req.effects.is_elevated() {
             return PermissionDecision::Allow {

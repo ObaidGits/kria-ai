@@ -5,6 +5,8 @@ use crate::platform::intent::dispatcher::{DispatchError, IntentDispatcher};
 use crate::platform::intent::scheme::{build_search_url, build_youtube_search_url};
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::os_governed as gov;
+use crate::tools::ToolContext;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -325,6 +327,257 @@ impl ToolHandler for OpenApplicationWithFile {
     }
 }
 
+// ─── OpenWithApplication (canonical Task 3.3 name: `open_with_application`) ──
+//
+// Same behavior as `open_application_with_file`; the frozen manifest names
+// this tool `open_with_application(app_id, path)`. Both names are registered
+// (OSC-009.3: hard cutover requires updating every reference atomically —
+// `open_application_with_file` has many existing call sites across the
+// GUI-substrate planner/executor, so this task adds the canonical name
+// alongside rather than renaming in place).
+
+struct OpenWithApplication {
+    dispatcher: Arc<IntentDispatcher>,
+    registry: Arc<InstalledAppRegistry>,
+}
+
+#[async_trait]
+impl ToolHandler for OpenWithApplication {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let app_id = params["app_id"].as_str().unwrap_or("").trim();
+        if app_id.is_empty() {
+            return ToolResult::err("app_id is required");
+        }
+        let path = params["path"].as_str().unwrap_or("").trim();
+        if path.is_empty() {
+            return ToolResult::err("path is required");
+        }
+
+        let session_id = params["session_id"]
+            .as_str()
+            .unwrap_or("no-session")
+            .to_string();
+
+        let resolved_app_id = match self.registry.resolve_alias(app_id) {
+            Some(id) => id,
+            None => {
+                return ToolResult::err(format!(
+                    "application '{app_id}' is not found in the installed app registry"
+                ))
+            }
+        };
+
+        let safe_path = match SafeArg::new(path) {
+            Ok(a) => a,
+            Err(e) => return ToolResult::err(format!("invalid path argument '{path}': {e}")),
+        };
+
+        let cap = Capability::LaunchApp {
+            app_id: resolved_app_id,
+            args: vec![safe_path],
+        };
+
+        let dispatch = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            self.dispatcher.dispatch(&cap, &session_id, false),
+        )
+        .await;
+
+        match dispatch {
+            Err(_) => ToolResult::err(format!(
+                "launch timeout: application '{app_id}' did not accept path '{path}' within 8s"
+            )),
+            Ok(Ok(result)) => {
+                if result.success {
+                    ToolResult::ok(result.detail)
+                } else {
+                    ToolResult::err(result.message)
+                }
+            }
+            Ok(Err(DispatchError::PolicyBlocked(reason))) => {
+                ToolResult::err(format!("blocked by policy: {reason}"))
+            }
+            Ok(Err(DispatchError::RateLimitExceeded(action, retry))) => ToolResult::err(format!(
+                "rate limit exceeded for '{action}', retry after {retry}s"
+            )),
+            Ok(Err(e)) => ToolResult::err(format!("dispatch error: {e}")),
+        }
+    }
+}
+
+// ─── ListInstalledApps ────────────────────────────────────────────────────────
+//
+// Wraps the existing `InstalledAppRegistry`'s already-scanned manifests
+// (design §9.2: "do not duplicate .desktop parsing") rather than re-scanning
+// `.desktop` files. A pure read, outside any mutation lifecycle.
+
+struct ListInstalledApps {
+    registry: Arc<InstalledAppRegistry>,
+}
+
+#[async_trait]
+impl ToolHandler for ListInstalledApps {
+    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        let query = params["query"]
+            .as_str()
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        let limit = params["limit"].as_u64().unwrap_or(256).clamp(1, 256) as usize;
+
+        let apps = self.registry.snapshot_for_listing();
+        let mut items: Vec<serde_json::Value> = apps
+            .into_iter()
+            .filter(|app| query.is_empty() || app.display_name.to_ascii_lowercase().contains(&query) || app.app_id.to_ascii_lowercase().contains(&query))
+            .map(|app| {
+                serde_json::json!({
+                    "app_id": app.app_id,
+                    "display_name": app.display_name,
+                    "desktop_entry_digest": app.desktop_entry_digest,
+                    "available": app.available,
+                })
+            })
+            .collect();
+        let truncated = items.len() > limit;
+        items.truncate(limit);
+
+        ToolResult::ok(serde_json::json!({
+            "items": items,
+            "truncated": truncated,
+        }))
+    }
+}
+
+// ─── SetDefaultApplication / ManageAutostart ──────────────────────────────────
+//
+// linux-os-control-production **Task 3.3**: freedesktop MIME-default and
+// XDG-autostart mutations. Reach host effects **only** through the injected
+// `OsControlRuntime` + `os_control::applications::DesktopAssociationControl`
+// provider. Until a live provider is composed, both fail closed with the
+// frozen `Unavailable` envelope.
+
+struct SetDefaultApplication;
+#[async_trait]
+impl ToolHandler for SetDefaultApplication {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_process_unavailable(None, "set_default_application")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let mime = params["mime"].as_str().unwrap_or("").trim();
+        if mime.is_empty() {
+            return ToolResult::err("mime is required");
+        }
+        let app_id = params["app_id"].as_str().unwrap_or("").trim();
+        if app_id.is_empty() {
+            return ToolResult::err("app_id is required");
+        }
+        // The governed DesktopAssociationControl provider owns the actual
+        // mimeapps.list before-state capture + write + verification through
+        // the runtime.
+        let resolved = match gov::resolve(&ctx, "set_default_application") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.desktop_association("set_default_application") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "set_default_application") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::applications::AssociationRequest {
+            action: "set_default_application".to_string(),
+            params: params.clone(),
+            op: crate::os_control::applications::AssociationOp::SetDefaultApplication {
+                mime: params["mime"].as_str().unwrap_or_default().to_string(),
+                app_id: params["app_id"]
+                    .as_str()
+                    .or_else(|| params["application"].as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "set_default_application",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+    }
+}
+
+struct ManageAutostart;
+#[async_trait]
+impl ToolHandler for ManageAutostart {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_process_unavailable(None, "manage_autostart")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let app_id = params["app_id"].as_str().unwrap_or("").trim();
+        if app_id.is_empty() {
+            return ToolResult::err("app_id is required");
+        }
+        if params["enabled"].as_bool().is_none() {
+            return ToolResult::err("enabled (boolean) is required");
+        }
+        // The governed DesktopAssociationControl provider owns the actual
+        // XDG autostart entry before-state capture + write + verification
+        // through the runtime.
+        let resolved = match gov::resolve(&ctx, "manage_autostart") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.desktop_association("manage_autostart") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "manage_autostart") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::applications::AssociationRequest {
+            action: "manage_autostart".to_string(),
+            params: params.clone(),
+            op: crate::os_control::applications::AssociationOp::SetAutostart {
+                app_id: params["app_id"]
+                    .as_str()
+                    .or_else(|| params["application"].as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                enabled: params["enabled"].as_bool().unwrap_or(true),
+            },
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "manage_autostart",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
+    }
+}
+
 struct LegacyOpenApplicationWithFile;
 #[async_trait]
 impl ToolHandler for LegacyOpenApplicationWithFile {
@@ -634,6 +887,14 @@ impl ToolHandler for NullSendMessage {
     }
 }
 
+struct NullListInstalledApps;
+#[async_trait]
+impl ToolHandler for NullListInstalledApps {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        ToolResult::ok(serde_json::json!({ "items": [], "truncated": false }))
+    }
+}
+
 struct ListRunningApps;
 #[async_trait]
 impl ToolHandler for ListRunningApps {
@@ -681,51 +942,151 @@ impl ToolHandler for FocusWindow {
     }
 }
 
+/// Return the governed OS-control `Unavailable` envelope for an application/
+/// process tool.
+///
+/// linux-os-control-production **Task 2.5**: `close_application` (mapped to
+/// the canonical `graceful_close_application` operation) and `kill_process`
+/// no longer call `sysinfo::Process::kill()` directly (an unconditional
+/// `SIGKILL` for *both* the "close" and "kill" tools — the exact
+/// graceful-vs-forced conflation this task's "split graceful close from
+/// kill" requirement targets). They reach host effects **only** through the
+/// injected [`crate::os_control::OsControlRuntime`] +
+/// `os_control::applications::ApplicationCloseControl` /
+/// `os_control::processes::ProcessControl` providers. Until a live
+/// native-syscall provider is composed into the runtime, the handlers fail
+/// closed with this frozen envelope and never fall back to an ungoverned
+/// `kill()` call.
+fn os_process_unavailable(
+    runtime: Option<&std::sync::Arc<crate::os_control::OsControlRuntime>>,
+    tool: &str,
+) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => crate::os_control::OsControlError::Unavailable {
+            provider: None,
+            reason: crate::os_control::contract::SafeText::new(
+                "OS control runtime is not injected in this build",
+            ),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
+}
+
 struct CloseApplication;
 #[async_trait]
 impl ToolHandler for CloseApplication {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_process_unavailable(None, "close_application")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
         let name = params["name"].as_str().unwrap_or("").trim();
         if name.is_empty() {
             return ToolResult::err("application name is required");
         }
-        let name_lower = name.to_lowercase();
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        let mut killed = 0;
-        for proc_ in sys.processes().values() {
-            let proc_name = proc_.name().to_string_lossy().to_lowercase();
-            // FIX #33: Use exact match or starts_with, NOT contains.
-            // "close_application("code")" must not kill "decode", "vscode-server", etc.
-            // We match: exact name, or name is a prefix of the process name
-            // (e.g., "gedit" matches "gedit-3"), but NOT substring matches.
-            if proc_name == name_lower || proc_name.starts_with(&format!("{}-", name_lower)) {
-                proc_.kill();
-                killed += 1;
-            }
-        }
-        if killed > 0 {
-            ToolResult::ok(serde_json::json!({ "name": name, "processes_closed": killed }))
-        } else {
-            ToolResult::err(format!("no running process matched '{name}'"))
-        }
+        // The governed ApplicationCloseControl provider owns the actual
+        // SIGTERM-only signal loop (never SIGKILL — that escalation is the
+        // separate `kill_process` operation) + liveness verification through
+        // the runtime.
+        let resolved = match gov::resolve(&ctx, "close_application") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.application_close("close_application") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "close_application") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let name = params["name"]
+            .as_str()
+            .or_else(|| params["app"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        let request = crate::os_control::applications::ApplicationCloseRequest {
+            action: "close_application".to_string(),
+            params: params.clone(),
+            name,
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "close_application",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
 struct KillProcess;
 #[async_trait]
 impl ToolHandler for KillProcess {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let pid = params["pid"].as_u64().unwrap_or(0) as u32;
-        let sys_pid = sysinfo::Pid::from_u32(pid);
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        if let Some(proc_) = sys.process(sys_pid) {
-            proc_.kill();
-            ToolResult::ok(serde_json::json!({ "pid": pid, "killed": true }))
-        } else {
-            ToolResult::err(format!("process {pid} not found"))
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_process_unavailable(None, "kill_process")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let pid = params["pid"].as_u64().unwrap_or(0);
+        if pid == 0 {
+            return ToolResult::err("pid is required");
         }
+        // The governed ProcessControl provider owns the actual PID-reuse-safe
+        // `kill(2)` (SIGKILL) + verification through the runtime.
+        let resolved = match gov::resolve(&ctx, "kill_process") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.processes("kill_process") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "kill_process") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let pid = params["pid"].as_u64().unwrap_or(0) as u32;
+        // start_time binds the identity so a recycled PID cannot be mistaken for
+        // the original process.
+        let start_time = params["start_time"].as_u64().unwrap_or(0);
+        let identity = crate::os_control::processes::ProcessIdentity::new(pid, start_time);
+        // `kill_process` is the escalated path: SIGKILL is unconditional.
+        let request = crate::os_control::processes::ProcessRequest {
+            action: "kill_process".to_string(),
+            params: params.clone(),
+            op: crate::os_control::processes::ProcessOp::Terminate {
+                identity,
+                force: params["force"].as_bool().unwrap_or(true),
+            },
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "kill_process",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
@@ -763,6 +1124,22 @@ pub fn register_with_dispatcher(
         } else {
             Arc::new(LegacyOpenApplicationWithFile)
         };
+
+    let open_with_application_handler: Arc<dyn ToolHandler> =
+        if let (Some(d), Some(r)) = (dispatcher.clone(), registry.clone()) {
+            Arc::new(OpenWithApplication {
+                dispatcher: d,
+                registry: r,
+            })
+        } else {
+            Arc::new(LegacyOpenApplicationWithFile)
+        };
+
+    let list_installed_apps_handler: Arc<dyn ToolHandler> = if let Some(r) = registry.clone() {
+        Arc::new(ListInstalledApps { registry: r })
+    } else {
+        Arc::new(NullListInstalledApps)
+    };
 
     let open_url_handler: Arc<dyn ToolHandler> = if let Some(d) = dispatcher.clone() {
         Arc::new(OpenUrl {
@@ -843,6 +1220,65 @@ pub fn register_with_dispatcher(
                 ],
             },
             open_app_with_file_handler,
+        ),
+        (
+            ToolDef {
+                name: "open_with_application".into(),
+                description: "Open/launch an installed application with a file path argument (canonical Task 3.3 name; same behavior as open_application_with_file)."
+                    .into(),
+                category: "app_lifecycle".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "lite",
+                parameters: vec![
+                    param("app_id", "string", "Canonical application id (from list_installed_apps)", true),
+                    param("path", "string", "Absolute path to the file to open in the application", true),
+                    param("session_id", "string", "Session identifier for audit logging", false),
+                ],
+            },
+            open_with_application_handler,
+        ),
+        (
+            ToolDef {
+                name: "list_installed_apps".into(),
+                description: "List installed desktop applications discovered from .desktop entries, with stable canonical app ids, display names, and availability.".into(),
+                category: "app_lifecycle".into(),
+                default_tier: RiskLevel::Green,
+                min_tier: "lite",
+                parameters: vec![
+                    param("query", "string", "Filter by name/id substring", false),
+                    param("cursor", "string", "Pagination cursor from a previous call", false),
+                    param("limit", "integer", "Maximum applications to return per page", false),
+                ],
+            },
+            list_installed_apps_handler,
+        ),
+        (
+            ToolDef {
+                name: "set_default_application".into(),
+                description: "Set the default application for a MIME type (e.g. text/plain, text/html) using freedesktop MIME associations.".into(),
+                category: "app_lifecycle".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![
+                    param("mime", "string", "MIME type to associate (e.g. text/plain)", true),
+                    param("app_id", "string", "Canonical application id to make the default handler", true),
+                ],
+            },
+            Arc::new(SetDefaultApplication),
+        ),
+        (
+            ToolDef {
+                name: "manage_autostart".into(),
+                description: "Enable or disable an application's autostart entry for the current user (XDG autostart).".into(),
+                category: "app_lifecycle".into(),
+                default_tier: RiskLevel::Yellow,
+                min_tier: "standard",
+                parameters: vec![
+                    param("app_id", "string", "Canonical application id", true),
+                    param("enabled", "boolean", "Whether the application should autostart", true),
+                ],
+            },
+            Arc::new(ManageAutostart),
         ),
         (
             ToolDef {
@@ -945,7 +1381,10 @@ pub fn register_with_dispatcher(
                 category: "app_lifecycle".into(),
                 default_tier: RiskLevel::Yellow,
                 min_tier: "lite",
-                parameters: vec![param("pid", "integer", "Process ID", true)],
+                parameters: vec![
+                    param("pid", "integer", "Process ID", true),
+                    param("start_time", "integer", "Process start time in ms since epoch, for PID-reuse-safe targeting (optional; from get_process_info)", false),
+                ],
             },
             Arc::new(KillProcess),
         ),

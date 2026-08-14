@@ -120,6 +120,8 @@ impl Drop for ServerGuard {
 #[derive(Debug, Clone)]
 struct ResponseIssue {
     kind: IssueKind,
+    // Test scaffolding: kept because it records the fixture's shape.
+    #[allow(dead_code)]
     description: String,
 }
 
@@ -127,6 +129,8 @@ struct ResponseIssue {
 enum IssueKind {
     Unavailable,
     Hallucination,
+    // Test scaffolding: records the fixture's shape even where a particular test does not read it.
+    #[allow(dead_code)]
     WrongData,
     BashFallback,
 }

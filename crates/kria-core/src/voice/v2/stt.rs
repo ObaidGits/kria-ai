@@ -50,6 +50,10 @@ pub(crate) const PARTIAL_SILENCE_RMS: f32 = 0.005;
 /// `full()` fails to encode very short (sub-second) windows ("failed to
 /// encode"), so early-utterance partials are skipped until enough audio
 /// accumulates. Also reduces partial-decode CPU further.
+/// Only the `whisper_rs_impl` module reads this, and that module is behind
+/// `voice-whisper-rs`. Gated identically so a build without the feature does not
+/// warn — deleting it would break the build that does use it.
+#[cfg(feature = "voice-whisper-rs")]
 pub(crate) const PARTIAL_MIN_SAMPLES: usize = 16_000;
 
 /// Partial transcript emitted every ~500 ms during streaming.

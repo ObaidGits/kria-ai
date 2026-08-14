@@ -57,6 +57,9 @@ pub mod conformance;
 pub mod descriptor;
 pub mod error;
 pub mod events;
+/// Deny-live fake provider (Task 0.4 / OSC-033); test composition only.
+#[cfg(feature = "os-control-test")]
+pub mod fake;
 pub mod grants;
 pub mod index;
 pub mod intelligence;

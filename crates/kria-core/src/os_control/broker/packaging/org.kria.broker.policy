@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Polkit action registration for the KRIA typed privilege broker.
+
+  linux-os-control-production Task 1.5, design §12.
+
+  This file registers exactly the six closed broker operations as distinct
+  Polkit actions. There is deliberately NO generic-command, shell,
+  arbitrary-file-write, arbitrary-D-Bus, raw-device, service/unit, firmware,
+  repository-mutation, or run-as-root action. Each action requires active,
+  authenticated administrator authorization (auth_admin_keep is intentionally
+  NOT used; every operation re-authorizes).
+-->
+<policyconfig>
+  <vendor>K.R.I.A.</vendor>
+  <vendor_url>https://kria.local/</vendor_url>
+
+  <action id="org.kria.broker.apply-package-plan">
+    <description>Apply an approved package plan</description>
+    <message>Authentication is required to apply an approved package plan.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kria.broker.set-bound-path-ownership">
+    <description>Set ownership of an approved path</description>
+    <message>Authentication is required to change ownership of an approved path.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kria.broker.set-firewall-enabled">
+    <description>Enable or disable the firewall</description>
+    <message>Authentication is required to change the firewall state.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kria.broker.set-privacy-control">
+    <description>Change a privacy control</description>
+    <message>Authentication is required to change a privacy control.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kria.broker.configure-discovered-printer">
+    <description>Configure a discovered printer</description>
+    <message>Authentication is required to configure a printer.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.kria.broker.set-battery-charge-thresholds">
+    <description>Set battery charge thresholds</description>
+    <message>Authentication is required to set battery charge thresholds.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

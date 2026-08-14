@@ -83,6 +83,7 @@ pub mod loop_engine;
 pub mod ml_orchestrator;
 pub mod ocr_engine;
 pub mod onnx_classifier;
+pub mod os_action_authority;
 pub mod perception;
 pub mod planner;
 pub mod planner_v2;

@@ -82,6 +82,21 @@ pub struct AppManifest {
     pub no_display: bool,
 }
 
+/// A read-only summary of one installed application for
+/// `list_installed_apps` (linux-os-control-production Task 3.3). Content-free
+/// beyond the app's own already-public identity/name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledAppSummary {
+    /// The stable canonical application id.
+    pub app_id: String,
+    /// The human-readable display name.
+    pub display_name: String,
+    /// Hex-encoded `Exec=` line fingerprint (desktop-entry content digest).
+    pub desktop_entry_digest: String,
+    /// Whether the `.desktop` file is currently resolvable on disk.
+    pub available: bool,
+}
+
 /// Outcome of a fuzzy app-name match (Requirement 6: mistyped/ambiguous/closest).
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMatch {
@@ -304,6 +319,27 @@ impl InstalledAppRegistry {
                 registry.initialize().await;
             }
         });
+    }
+
+    /// A read-only snapshot of every currently-scanned installed application,
+    /// for the `list_installed_apps` tool (linux-os-control-production Task
+    /// 3.3, design §9.2: "do not duplicate .desktop parsing" — this wraps the
+    /// registry's already-scanned manifests rather than re-scanning
+    /// `.desktop` files). Fails closed (returns empty) on lock contention
+    /// rather than blocking, mirroring `is_installed`'s fail-closed posture.
+    pub fn snapshot_for_listing(&self) -> Vec<InstalledAppSummary> {
+        let Ok(apps) = self.apps.try_read() else {
+            warn!("InstalledAppRegistry: lock contention in snapshot_for_listing — returning empty");
+            return Vec::new();
+        };
+        apps.values()
+            .map(|manifest| InstalledAppSummary {
+                app_id: manifest.app_id.as_str().to_string(),
+                display_name: manifest.display_name.clone(),
+                desktop_entry_digest: hex::encode(manifest.exec_fingerprint),
+                available: manifest.desktop_path.exists(),
+            })
+            .collect()
     }
 
     /// Check whether an app with the given `CanonicalAppId` is installed.

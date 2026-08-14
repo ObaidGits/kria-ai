@@ -815,8 +815,8 @@ mod integration_tests {
         let skill_id = "lifecycle_test";
 
         // 1. Discovery
-        let mut skill = sample_skill(skill_id);
-        let discovered = registry
+        let skill = sample_skill(skill_id);
+        let _discovered = registry
             .discover_all_skills()
             .expect("discovery should succeed");
         // Mock discovery would find 0 skills in test environment

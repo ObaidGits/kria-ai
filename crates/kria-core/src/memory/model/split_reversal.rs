@@ -270,7 +270,7 @@ mod tests {
         EntityProposalBuilder, ProposalMatchMethod, ProposalRationale, ProposalStatus,
     };
     use crate::memory::model::proposal_action::{
-        ProposalActionBuilder, ProposalActionKind, ProposalBeforeState,
+        ProposalActionBuilder, ProposalBeforeState,
     };
     use crate::memory::model::{EntityId, GraphRevision};
 

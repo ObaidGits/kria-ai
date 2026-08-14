@@ -165,3 +165,10 @@ cobertura.xml
 *.db-wal
 *.db-shm
 .aider*
+
+# CodeScout / code maps — generated artifacts, rebuildable in seconds
+# (`codescout map` for TS, `python3 scripts/rust-map.py` for Rust)
+.codescout/*.json
+.codescout/graph.html
+.codescout/*.md
+.codescout-trash/

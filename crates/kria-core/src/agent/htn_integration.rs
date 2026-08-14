@@ -224,12 +224,10 @@ pub fn parse_htn_json(json_str: &str) -> Result<GuiWorkflow, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::htn_executor::{SafeAbortStep, SubGoal};
-    use crate::agent::turn_gate::{
-        ComputeClass, HazardHint, IntentEnvelope, IntentSource, Modality, Operation, ResourcePlan,
-    };
-    use crate::agent::visual_reasoning::{ContentType, GeneratedContent};
-    use async_trait::async_trait;
+    
+    
+    use crate::agent::visual_reasoning::ContentType;
+    
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
@@ -488,9 +486,9 @@ mod tests {
     /// Per RFC 007: KillSwitchInterceptor must be globally active during GuiExecutor loop.
     #[tokio::test]
     async fn test_kill_switch_aborts_workflow_mid_execution() {
-        use crate::agent::htn_executor::{GuiExecutor, SafeAbortExecutor};
+        
         use crate::tools::gui_automation::{
-            GuiBackend, GuiError, KillSwitchInterceptor, WindowInfo, YdotoolBackend,
+            GuiBackend, GuiError, KillSwitchInterceptor, WindowInfo,
         };
 
         // Create a 5-step workflow

@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod black_scope;
 pub mod blacklist;
 pub mod command_classifier;
 pub mod global_halt;
@@ -9,6 +10,7 @@ pub mod policy_gate;
 pub mod rollback;
 
 pub use audit::AuditLogger;
+pub use black_scope::{classify_command as classify_prohibited_command, ProhibitedCapability};
 pub use blacklist::BlacklistChecker;
 pub use command_classifier::CommandClassification;
 pub use global_halt::{check_or_halt, engage_halt, halt_reason, is_halted, release_halt};

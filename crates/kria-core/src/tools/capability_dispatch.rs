@@ -272,6 +272,21 @@ impl ToolHandler for CapabilityDispatchHandler {
                 .unwrap_or_else(|| unreachable!("honest_miss guard ensures at least one hit"))
         };
 
+        // 1b) Native-OS re-entry boundary (design §2.1, OSC-001). An extension
+        //     capability that declares/requests a native host-OS effect receives
+        //     NO host handle here. It must submit a scoped invocation back through
+        //     a canonical registered OS tool, which is governed by `ExecutionGate`.
+        if crate::agent::os_action_authority::effects_request_native_os(&descriptor.effects.classes)
+            || crate::agent::os_action_authority::effects_request_native_os(&descriptor.permissions)
+        {
+            return ToolResult::err(format!(
+                "'{}' requests a native host-OS effect, which extensions cannot perform directly. \
+                 Route the request through the corresponding built-in OS tool (governed by the \
+                 execution gate) instead.",
+                descriptor.name
+            ));
+        }
+
         // 2) Permission gate — the ONE engine + ONE grant store. Chat has no
         //    session id; scope grants to the workspace so a single approval is
         //    remembered across the whole session (no repeated prompts).

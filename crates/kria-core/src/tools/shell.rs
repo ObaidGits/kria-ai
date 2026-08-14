@@ -2,7 +2,7 @@ use crate::infra::environment::{CommandRequest, CommandResult, EnvironmentError,
 use crate::infra::ToolResult;
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
-use crate::tools::ToolContext;
+use crate::tools::{ToolContext, TriggerProvenance};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -17,6 +17,150 @@ const MAX_OUTPUT_LINES: usize = 10_000;
 
 fn default_timeout_secs() -> u64 {
     DEFAULT_TIMEOUT_SECS
+}
+
+// ─── Raw shell containment (OSC-002 §7, OSC-030) ─────────────────────────────
+//
+// Raw generic shell (`execute_bash`/`execute_python`/`execute_powershell`) is
+// the separately-governed Expert Mode surface: RED, always-confirmed,
+// non-rollbackable, and — enforced here at the tool boundary — unavailable to
+// unattended automation, forbidden from interpolating secret references, and
+// unable to reach prohibited BLACK-scope administration. Structured OS
+// capabilities do NOT pass through here and are never restricted by this gate.
+
+/// The outcome of admitting a raw-shell invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawShellAdmission {
+    /// The invocation may proceed to the (still RED, still approved) executor.
+    Allowed,
+    /// The invocation is refused at the tool boundary. `code` is a stable
+    /// machine tag; `message` is the user-facing explanation.
+    Refused { code: &'static str, message: String },
+}
+
+/// Whether Expert Mode raw shell is enabled for this process.
+///
+/// Raw shell is enabled by default and opted out with
+/// `KRIA_EXPERT_MODE=0|false|off`. Even when enabled it remains RED,
+/// always-confirmed, and non-rollbackable; disabling it turns the tools into an
+/// honest refusal (satisfying the "disabled by default OR Expert Mode" branch
+/// of OSC-002 §7 for deployments that choose the stricter posture).
+fn expert_mode_enabled() -> bool {
+    !matches!(
+        std::env::var("KRIA_EXPERT_MODE").ok().as_deref(),
+        Some("0") | Some("false") | Some("off") | Some("FALSE") | Some("OFF")
+    )
+}
+
+/// Detect secret-reference interpolation in a raw command/code string.
+///
+/// Raw shell must never interpolate opaque secret references (OSC-002 §5/§7,
+/// OSC-025). We match the reference syntaxes KRIA uses plus common credential
+/// environment-variable interpolation.
+fn contains_secret_interpolation(source: &str) -> bool {
+    let lower = source.to_ascii_lowercase();
+    const REFERENCE_MARKERS: &[&str] = &[
+        "${secret",
+        "{{secret",
+        "{{ secret",
+        "<secret:",
+        "secret://",
+        "$kria_secret",
+        "${kria_secret",
+        "kria-secret://",
+        "${credential",
+        "{{credential",
+        "vault:",
+    ];
+    if REFERENCE_MARKERS.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+    // Credential-bearing environment interpolation, e.g. `$PASSWORD`,
+    // `${API_KEY}`, `$AWS_SECRET_ACCESS_KEY`.
+    const CREDENTIAL_VARS: &[&str] = &[
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "access_key",
+        "private_key",
+        "credential",
+    ];
+    for var in CREDENTIAL_VARS {
+        let braced = format!("${{{var}");
+        let bare = format!("${var}");
+        if lower.contains(&braced) || lower.contains(&bare) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Evaluate whether a raw-shell invocation is admissible at the tool boundary.
+///
+/// Order: prohibited-scope containment → secret interpolation → unattended
+/// automation → Expert Mode availability. Prohibited scope and secret
+/// interpolation are refused regardless of Expert Mode.
+pub fn evaluate_raw_shell_admission(
+    source: &str,
+    provenance: TriggerProvenance,
+    expert_mode: bool,
+) -> RawShellAdmission {
+    if let Some(prohibited) = crate::safety::black_scope::classify_command(source) {
+        return RawShellAdmission::Refused {
+            code: "prohibited_scope",
+            message: format!(
+                "prohibited scope [{}]: {}",
+                prohibited.id(),
+                prohibited.boundary_explanation()
+            ),
+        };
+    }
+    if contains_secret_interpolation(source) {
+        return RawShellAdmission::Refused {
+            code: "secret_interpolation",
+            message:
+                "raw shell must not interpolate secret or credential references; use a structured \
+                 capability that resolves credentials inside its provider instead"
+                    .to_string(),
+        };
+    }
+    if provenance != TriggerProvenance::User {
+        return RawShellAdmission::Refused {
+            code: "unattended_automation",
+            message:
+                "raw shell is Expert Mode and unavailable to unattended automation or content-\
+                 triggered execution; it requires a direct, attended user request"
+                    .to_string(),
+        };
+    }
+    if !expert_mode {
+        return RawShellAdmission::Refused {
+            code: "expert_mode_disabled",
+            message:
+                "raw shell execution is disabled; enable Expert Mode (KRIA_EXPERT_MODE) to use it"
+                    .to_string(),
+        };
+    }
+    RawShellAdmission::Allowed
+}
+
+/// Apply the raw-shell admission gate, returning an error `ToolResult` when the
+/// invocation is refused.
+fn admit_raw_shell(source: &str, ctx: &ToolContext) -> Result<(), ToolResult> {
+    match evaluate_raw_shell_admission(source, ctx.provenance, expert_mode_enabled()) {
+        RawShellAdmission::Allowed => Ok(()),
+        RawShellAdmission::Refused { code, message } => {
+            tracing::warn!(
+                event = "RawShellRefused",
+                refusal = code,
+                "raw shell invocation refused at tool boundary"
+            );
+            Err(ToolResult::err(message))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -333,6 +477,10 @@ impl ToolHandler for ExecuteBash {
             return ToolResult::err("command cannot be empty");
         }
 
+        if let Err(refusal) = admit_raw_shell(&input.command, &ctx) {
+            return refusal;
+        }
+
         if let Some(mutation) = boundary_mutation(&input.command) {
             tracing::warn!(
                 event = "ShellStateBoundaryWarning",
@@ -397,6 +545,10 @@ impl ToolHandler for ExecutePython {
             return ToolResult::err("code cannot be empty");
         }
 
+        if let Err(refusal) = admit_raw_shell(&input.code, &ctx) {
+            return refusal;
+        }
+
         let timeout_ms = match resolve_timeout_ms(input.timeout) {
             Ok(value) => value,
             Err(error) => return error,
@@ -430,6 +582,10 @@ impl ToolHandler for ExecutePowershell {
             return ToolResult::err("command cannot be empty");
         }
 
+        if let Err(refusal) = admit_raw_shell(&input.command, &ctx) {
+            return refusal;
+        }
+
         let timeout_ms = match resolve_timeout_ms(input.timeout) {
             Ok(value) => value,
             Err(error) => return error,
@@ -460,7 +616,9 @@ pub fn register(reg: &ToolRegistry) {
         (
             ToolDef {
                 name: "execute_bash".into(),
-                description: "Execute a bash shell command".into(),
+                description: "Execute a bash shell command (Expert Mode: RED, always-confirmed, \
+                    non-rollbackable, direct-user-only; never used for prohibited administration)"
+                    .into(),
                 category: "shell".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "lite",
@@ -479,7 +637,9 @@ pub fn register(reg: &ToolRegistry) {
         (
             ToolDef {
                 name: "execute_python".into(),
-                description: "Execute Python code".into(),
+                description: "Execute Python code (Expert Mode: RED, always-confirmed, \
+                    non-rollbackable, direct-user-only; never used for prohibited administration)"
+                    .into(),
                 category: "shell".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "standard",
@@ -498,7 +658,9 @@ pub fn register(reg: &ToolRegistry) {
         (
             ToolDef {
                 name: "execute_powershell".into(),
-                description: "Execute a PowerShell command".into(),
+                description: "Execute a PowerShell command (Expert Mode: RED, always-confirmed, \
+                    non-rollbackable, direct-user-only; never used for prohibited administration)"
+                    .into(),
                 category: "shell".into(),
                 default_tier: RiskLevel::Red,
                 min_tier: "lite",
@@ -517,5 +679,90 @@ pub fn register(reg: &ToolRegistry) {
     ];
     for (def, handler) in tools {
         reg.register(def, handler);
+    }
+}
+
+#[cfg(test)]
+mod raw_shell_admission_tests {
+    use super::*;
+    use crate::tools::TriggerProvenance;
+
+    #[test]
+    fn attended_benign_command_is_allowed_in_expert_mode() {
+        let a = evaluate_raw_shell_admission("ls -la /var/log", TriggerProvenance::User, true);
+        assert_eq!(a, RawShellAdmission::Allowed);
+    }
+
+    #[test]
+    fn prohibited_scope_is_refused_even_in_expert_mode() {
+        let a = evaluate_raw_shell_admission("mkfs.ext4 /dev/sdb1", TriggerProvenance::User, true);
+        match a {
+            RawShellAdmission::Refused { code, .. } => assert_eq!(code, "prohibited_scope"),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn secret_interpolation_is_refused() {
+        for cmd in [
+            "curl -H \"Authorization: ${SECRET_TOKEN}\" https://x",
+            "echo $PASSWORD | login",
+            "deploy --key {{secret.api_key}}",
+        ] {
+            let a = evaluate_raw_shell_admission(cmd, TriggerProvenance::User, true);
+            match a {
+                RawShellAdmission::Refused { code, .. } => {
+                    assert_eq!(code, "secret_interpolation", "for `{cmd}`")
+                }
+                other => panic!("expected refusal for `{cmd}`, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unattended_automation_is_refused() {
+        let external =
+            evaluate_raw_shell_admission("ls -la", TriggerProvenance::ExternalContent, true);
+        assert!(matches!(
+            external,
+            RawShellAdmission::Refused {
+                code: "unattended_automation",
+                ..
+            }
+        ));
+        let tool = evaluate_raw_shell_admission("ls -la", TriggerProvenance::Tool, true);
+        assert!(matches!(
+            tool,
+            RawShellAdmission::Refused {
+                code: "unattended_automation",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn disabled_expert_mode_refuses_attended_command() {
+        let a = evaluate_raw_shell_admission("ls -la", TriggerProvenance::User, false);
+        assert!(matches!(
+            a,
+            RawShellAdmission::Refused {
+                code: "expert_mode_disabled",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prohibited_scope_precedes_expert_mode_check() {
+        // Even with Expert Mode disabled, prohibited scope reports the scope
+        // refusal (the boundary explanation), not a generic disabled message.
+        let a = evaluate_raw_shell_admission("useradd bob", TriggerProvenance::User, false);
+        assert!(matches!(
+            a,
+            RawShellAdmission::Refused {
+                code: "prohibited_scope",
+                ..
+            }
+        ));
     }
 }

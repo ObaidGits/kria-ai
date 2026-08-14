@@ -4,5 +4,22 @@ kria-test = "run -p kria-core --bin kria-test --"
 # ── Storage management ───────────────────────────────────────────────────
 # Keep incremental OFF by default — it's the biggest disk killer (was 118GB).
 # Turn ON temporarily with CARGO_INCREMENTAL=1 if you need fast rebuilds.
+#
+# NOTE: this `[build]` setting WINS over `incremental = true` in the workspace
+# Cargo.toml's `[profile.dev]`. The profile line is effectively dead; this is the
+# one that decides.
 [build]
 incremental = false
+
+# ── Memory management ────────────────────────────────────────────────────
+# Bound how many tests run AT ONCE.
+#
+# `-j` bounds the compilers; it does nothing once the test binary is built. The
+# suite is ~5,700 tests and many open their own in-memory SQLite database, so the
+# default (one thread per CPU core) multiplies that by the core count and is a
+# separate memory spike from the build.
+#
+# Two threads keeps the suite bounded on a 15 GB laptop. Raise it for a one-off
+# fast run with:  RUST_TEST_THREADS=8 cargo test …
+[env]
+RUST_TEST_THREADS = "2"

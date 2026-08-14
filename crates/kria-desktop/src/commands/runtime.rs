@@ -1038,8 +1038,70 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         None,
         Some(memory_system.clone()),
     );
+    // ── Durable OS audit ledger (OSC-007) ──────────────────────────────────────
+    // Install BEFORE any OS action can be admitted. Without this the ledger falls
+    // back to in-memory, which loses the record of an interrupted action so it
+    // can never be reconciled after a restart. Installed unconditionally (not
+    // behind `os-control-live`) so read-side admissions are durable too.
+    {
+        let audit_path = paths.data_dir.join("os_control_audit.db");
+        match rusqlite::Connection::open(&audit_path) {
+            Ok(conn) => {
+                if kria_core::os_control::governed::init_audit_store(conn) {
+                    tracing::info!(
+                        target: "authority_trace",
+                        path = %audit_path.display(),
+                        "durable OS audit ledger installed"
+                    );
+                } else {
+                    tracing::warn!(
+                        target: "authority_trace",
+                        "OS audit ledger already installed; keeping the first one"
+                    );
+                }
+            }
+            Err(error) => tracing::error!(
+                target: "authority_trace",
+                path = %audit_path.display(),
+                error = %error,
+                "could not open the durable OS audit ledger; OS actions will use a \
+                 NON-durable in-memory ledger and interrupted actions cannot be reconciled"
+            ),
+        }
+    }
+
     kria_core::tools::precognitive::register(&tool_registry_inner, sidecar.clone());
     kria_core::tools::news::register(&tool_registry_inner, sidecar.clone());
+
+    // ── LIVE OS-control ignition (opt-in, `os-control-live` feature) ───────────
+    // Without this the registry keeps its default `OsControlRuntime::detached()`
+    // and every canonical OS action answers `Unavailable` — safe, but inert.
+    // Composing the live aggregate here (the ONE composition root) is what lets a
+    // prompt actually reach the host. Domains whose backend is absent stay
+    // uncomposed and keep answering `Unavailable` rather than degrading to a
+    // shell. Built only when the feature is enabled, and that feature is a hard
+    // `compile_error!` alongside `os-control-test`, so no test binary links it.
+    #[cfg(feature = "os-control-live")]
+    {
+        use kria_core::os_control::live::LiveHostOsControl;
+        use kria_core::os_control::runtime::{HostOsControl, OsControlRuntime};
+
+        // Probe the host over D-Bus first: a bus-backed domain composes only when
+        // its service actually has an owner, so an absent NetworkManager or logind
+        // reports Unavailable rather than failing on first call.
+        let live_host = Arc::new(LiveHostOsControl::compose_probed().await);
+        let domains = live_host.composed_domains().join(",");
+        let revision = live_host
+            .capability_snapshot()
+            .map_or(0, |snapshot| snapshot.revision.0);
+        tool_registry_inner.set_os_runtime(Arc::new(OsControlRuntime::with_host(live_host)));
+        tracing::info!(
+            target: "authority_trace",
+            domains = %domains,
+            capability_snapshot_revision = revision,
+            "live OS-control aggregate composed and injected into the tool registry"
+        );
+    }
     // Re-register vision tools with sidecar (overrides the None-sidecar registration from build_registry)
     // ── Single shared GPU lease arbiter (HRA Tasks 13/14/15) ───────────────────
     // ONE process-wide lease manager shared by every GPU consumer (image, vision, and — via
@@ -2275,8 +2337,14 @@ pub async fn init_runtime(handle: &AppHandle) -> anyhow::Result<()> {
         }
     };
 
-    let decision_store =
-        Arc::new(kria_core::agent::collaborative_decision::DecisionStore::default_persistent());
+    // OS-action decisions are SQLite-durable (OSC-001.9): bind the decision
+    // store's native-OS authority to the same shared `kria.db` the audit log
+    // uses, so a UI approval is ineffective until its resolution commits.
+    let decision_store = Arc::new(
+        kria_core::agent::collaborative_decision::DecisionStore::default_persistent_with_db(
+            &paths.db_path,
+        ),
+    );
     let resume_executor = Arc::new(kria_core::agent::resume_executor::ResumeExecutor::new(
         tool_registry.clone(),
         policy_engine.clone(),

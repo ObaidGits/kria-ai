@@ -311,7 +311,7 @@ impl GuiPlanner for SimplePlanner {
 mod tests {
     use super::*;
     use crate::agent::environment_grounder::{GroundingCapabilities, OperationalFacts};
-    use crate::agent::intent_compiler::{ContentClass, GuiTaskSpec, TargetRef, Verb};
+    use crate::agent::intent_compiler::{GuiTaskSpec, TargetRef, Verb};
 
     #[tokio::test]
     async fn rule_planner_open_gedit() {

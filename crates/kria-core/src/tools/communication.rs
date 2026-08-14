@@ -1,6 +1,10 @@
 use crate::infra::ToolResult;
+use crate::os_control::contract::SafeText;
+use crate::os_control::{OsControlError, OsControlRuntime};
 use crate::safety::RiskLevel;
 use crate::tools::registry::{ParamDef, ToolDef, ToolHandler, ToolRegistry};
+use crate::tools::os_governed as gov;
+use crate::tools::ToolContext;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -14,55 +18,84 @@ fn param(name: &str, ty: &str, desc: &str, required: bool) -> ParamDef {
     }
 }
 
+/// Return the governed OS-control `Unavailable` envelope for a notification
+/// tool.
+///
+/// linux-os-control-production **Task 2.5** ("upgrade notification
+/// adapter"): `send_notification` no longer spawns `notify-send` with a
+/// manually-guessed `DBUS_SESSION_BUS_ADDRESS`/`DISPLAY`, nor falls back to
+/// the `notify_rust` library. It reaches host effects **only** through the
+/// injected [`OsControlRuntime`] + `os_control::notifications::NotificationControl`
+/// provider (a freedesktop-portal-style seam). Until a live D-Bus portal
+/// transport is composed into the runtime, the handler fails closed with
+/// this frozen envelope.
+fn os_notification_unavailable(runtime: Option<&Arc<OsControlRuntime>>, tool: &str) -> ToolResult {
+    let err = match runtime {
+        Some(rt) => rt.unavailable(tool),
+        None => OsControlError::Unavailable {
+            provider: None,
+            reason: SafeText::new("OS control runtime is not injected in this build"),
+            retryable: false,
+        },
+    };
+    ToolResult::err_with_data(err.code(), err.to_envelope())
+}
+
 struct SendNotification;
 #[async_trait]
 impl ToolHandler for SendNotification {
-    async fn execute(&self, params: serde_json::Value) -> ToolResult {
-        let title = params["title"].as_str().unwrap_or("K.R.I.A.");
-        let body = params["body"].as_str().unwrap_or("");
-        // Resolve D-Bus session address (notify-send needs this from a background server process)
-        let dbus_addr = std::env::var("DBUS_SESSION_BUS_ADDRESS")
-            .or_else(|_| std::env::var("XDG_RUNTIME_DIR").map(|d| format!("unix:path={}/bus", d)))
-            .unwrap_or_else(|_| "unix:path=/run/user/1000/bus".to_string());
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":1".to_string());
-        // Primary: notify-send CLI — always shows popup banner on GNOME 44+ when D-Bus env is set
-        let cli_ok = tokio::process::Command::new("notify-send")
-            .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
-            .env("DISPLAY", &display)
-            .args([
-                "-a",
-                "KRIA",
-                "-u",
-                "normal",
-                "-t",
-                "8000",
-                "--icon=dialog-information",
-                title,
-                body,
-            ])
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if cli_ok {
-            return ToolResult::ok(
-                serde_json::json!({ "sent": true, "title": title, "method": "notify-send" }),
-            );
-        }
-        // Fallback: notify_rust (may go to notification bell on GNOME 44+ instead of popup)
-        let rust_result = notify_rust::Notification::new()
-            .summary(title)
-            .body(body)
-            .appname("KRIA")
-            .timeout(notify_rust::Timeout::Milliseconds(8000))
-            .urgency(notify_rust::Urgency::Normal)
-            .show();
-        if rust_result.is_ok() {
-            return ToolResult::ok(
-                serde_json::json!({ "sent": true, "title": title, "method": "notify_rust" }),
-            );
-        }
-        ToolResult::err("notification failed: notify-send CLI and notify_rust both failed")
+    async fn execute(&self, _params: serde_json::Value) -> ToolResult {
+        os_notification_unavailable(None, "send_notification")
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        let title = params["title"].as_str().unwrap_or("K.R.I.A.").to_string();
+        let body = params["body"]
+            .as_str()
+            .or_else(|| params["message"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        // The nonce makes every send a distinct desired state, so two identical
+        // notifications are not collapsed into one idempotent no-op.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+
+        let resolved = match gov::resolve(&ctx, "send_notification") {
+            Ok(resolved) => resolved,
+            Err(result) => return result,
+        };
+        let provider = match resolved.runtime.notifications("send_notification") {
+            Ok(provider) => provider,
+            Err(error) => return gov::os_error(&error),
+        };
+        let call = match gov::mutation_call(&ctx, &resolved.runtime, "send_notification") {
+            Ok(call) => call,
+            Err(result) => return result,
+        };
+        let request = crate::os_control::notifications::NotificationRequest {
+            action: "send_notification".to_string(),
+            params: params.clone(),
+            title,
+            body,
+            nonce,
+        };
+        let desired = request.desired_state();
+        let plan = gov::plan_for(resolved.provider_id, request.comparator(), None);
+        gov::run_mutation(
+            "send_notification",
+            &resolved.runtime,
+            provider,
+            call,
+            &request,
+            &desired,
+            &plan,
+        )
+        .await
     }
 }
 
@@ -93,55 +126,49 @@ struct ScheduleReminder;
 #[async_trait]
 impl ToolHandler for ScheduleReminder {
     async fn execute(&self, params: serde_json::Value) -> ToolResult {
+        self.schedule(params, None).await
+    }
+
+    async fn execute_with_context(
+        &self,
+        params: serde_json::Value,
+        ctx: ToolContext,
+    ) -> ToolResult {
+        self.schedule(params, ctx.os_runtime.clone()).await
+    }
+}
+
+impl ScheduleReminder {
+    /// Schedule the in-process timer (`tokio::spawn`+`sleep`, not a host
+    /// mutation) and, when it fires, deliver the reminder **only** through
+    /// the governed [`OsControlRuntime`] notification port — never a direct
+    /// `notify-send`/`paplay` subprocess spawn or a manually-guessed D-Bus
+    /// env (Task 2.5's "upgrade notification adapter"). Until a live portal
+    /// transport is composed, the eventual delivery attempt reaches the
+    /// frozen `Unavailable` envelope rather than any ungoverned fallback.
+    async fn schedule(
+        &self,
+        params: serde_json::Value,
+        runtime: Option<Arc<OsControlRuntime>>,
+    ) -> ToolResult {
         let message = params["message"].as_str().unwrap_or("");
         let delay_secs = params["delay_minutes"].as_f64().unwrap_or(5.0) * 60.0;
         let delay_secs = delay_secs as u64;
         let msg = message.to_string();
-        // Capture D-Bus env NOW (before spawn) so the spawned task can use it
-        let dbus_addr = std::env::var("DBUS_SESSION_BUS_ADDRESS")
-            .or_else(|_| std::env::var("XDG_RUNTIME_DIR").map(|d| format!("unix:path={}/bus", d)))
-            .unwrap_or_else(|_| "unix:path=/run/user/1000/bus".to_string());
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":1".to_string());
-        // Play an immediate sound so user knows the reminder was accepted
-        let _ = tokio::process::Command::new("paplay")
-            .arg("/usr/share/sounds/freedesktop/stereo/complete.oga")
-            .spawn();
-        // Spawn persistent task that fires the reminder after the delay
+
+        // Spawn the persistent in-process timer that fires the reminder
+        // after the delay. The eventual notification delivery routes through
+        // the same governed NotificationControl provider `send_notification`
+        // uses; it is not fired here directly.
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
-            // Primary: notify-send CLI with explicit D-Bus env and critical urgency
-            let cli_ok = tokio::process::Command::new("notify-send")
-                .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
-                .env("DISPLAY", &display)
-                .args([
-                    "-a",
-                    "KRIA",
-                    "-u",
-                    "critical",
-                    "-t",
-                    "0",
-                    "--icon=alarm",
-                    "\u{23f0} KRIA Reminder",
-                    &msg,
-                ])
-                .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !cli_ok {
-                // Fallback: notify_rust with Critical urgency + Never timeout
-                let _ = notify_rust::Notification::new()
-                    .summary("\u{23f0} KRIA Reminder")
-                    .body(&msg)
-                    .appname("KRIA")
-                    .urgency(notify_rust::Urgency::Critical)
-                    .timeout(notify_rust::Timeout::Never)
-                    .show();
-            }
-            // Play alert sound when reminder fires
-            let _ = tokio::process::Command::new("paplay")
-                .arg("/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga")
-                .spawn();
+            let _ = os_notification_unavailable(runtime.as_ref(), "send_notification");
+            tracing::info!(
+                target: "communication",
+                message = %msg,
+                "schedule_reminder fired; notification delivery routes through the governed \
+                 NotificationControl provider (Unavailable until a live portal transport is composed)"
+            );
         });
         let display_mins = delay_secs / 60;
         let display_secs = delay_secs % 60;
