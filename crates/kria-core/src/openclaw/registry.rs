@@ -1220,7 +1220,33 @@ impl ProductionSkillRegistry {
 
     /// Legacy compatibility: uninstall skill.
     pub fn uninstall(&self, skill_id: &str) -> Result<(), RegistryError> {
-        self.set_skill_state(skill_id, SkillState::Removed)
+        // Uninstalling something already uninstalled is an error, not a silent no-op.
+        //
+        // Calling `set_skill_state` directly would happily set `Removed` twice and
+        // report success, which hides the two mistakes this call most often contains: a
+        // mistyped skill id, and a caller that has lost track of what it already
+        // removed. Nothing is lost by refusing — the skill is already in the desired
+        // state.
+        //
+        // The check is expressed as a conditional UPDATE rather than read-then-write so
+        // there is no window in which two callers both see "not removed" and both
+        // proceed.
+        let rows = {
+            let db = self.db.lock().unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            db.execute(
+                "UPDATE skills SET state = ?1, state_changed_at = ?2, updated_at = ?3 \
+                 WHERE skill_id = ?4 AND state != ?1",
+                params![SkillState::Removed.as_str(), now, now, skill_id],
+            )
+            .map_err(RegistryError::Db)?
+        };
+        if rows == 0 {
+            // Either no such skill, or it was already removed. Both mean "there is
+            // nothing installed under this id to uninstall".
+            return Err(RegistryError::NotFound(skill_id.to_string()));
+        }
+        Ok(())
     }
 
     /// Legacy compatibility: toggle enabled/disabled.
@@ -1272,6 +1298,30 @@ impl ProductionSkillRegistry {
         let mut skills = Vec::new();
 
         for metadata in metadata_list {
+            // Skills the user uninstalled must NOT appear in an "installed" listing.
+            //
+            // `uninstall()` is a soft delete: it sets the state to `Removed` and keeps
+            // the row, which is right — the audit trail and any residual grants survive.
+            // But this listing queried with `state: None` and so returned removed skills
+            // alongside live ones, so a user who uninstalled a skill still saw it in
+            // their installed list with no way to tell the difference.
+            if matches!(metadata.state, SkillState::Removed) {
+                continue;
+            }
+            // Report the skill's ACTUAL state. This was hardcoded to `Active`, which
+            // meant a disabled skill was presented as active — the one field a caller
+            // consults to decide whether the skill is usable.
+            let status = match metadata.state {
+                SkillState::Enabled | SkillState::Installed => SkillStatus::Active,
+                SkillState::Disabled | SkillState::Deprecated => SkillStatus::Disabled,
+                SkillState::Discovered | SkillState::Verified => SkillStatus::PendingApproval,
+                // A broken skill must not be reported as usable, and one mid-recovery is
+                // not yet usable either. Quarantined is the honest answer for both.
+                SkillState::Broken | SkillState::Recovering => SkillStatus::Quarantined,
+                // Already skipped above; kept exhaustive so a new variant is a compile
+                // error here rather than a silent misreport.
+                SkillState::Removed => continue,
+            };
             let skill = SkillDescriptor {
                 skill_id: metadata.skill_id,
                 name: metadata.name,
@@ -1291,7 +1341,7 @@ impl ProductionSkillRegistry {
                 installed_at: metadata.discovered_at,
                 last_used_at: None,
                 use_count: 0,
-                status: SkillStatus::Active,
+                status,
             };
             skills.push(skill);
         }

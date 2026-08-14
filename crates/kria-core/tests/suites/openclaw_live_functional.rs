@@ -122,16 +122,21 @@ fn live_audit_log_table_queryable_via_raw_sql() {
         "audit_log is empty (entries written only by OpenClawToolHandler during live invocations)"
     );
 
+    // Invocation counts live in `skill_statistics.usage_count`. This query used to read
+    // `installed_skills.use_count` — a table and column that do not exist in the schema
+    // (`registry.rs` creates `skills`, `skill_statistics`, `capability_profiles`,
+    // `market_catalog`). The test was failing with "no such table" rather than telling
+    // anyone the count was wrong, so it was reporting a schema mismatch in itself.
     let use_count: i64 = conn
         .query_row(
-            "SELECT use_count FROM installed_skills WHERE skill_id = 'oc_calculator'",
+            "SELECT usage_count FROM skill_statistics WHERE skill_id = 'oc_calculator'",
             [],
             |r| r.get(0),
         )
         .unwrap();
     assert_eq!(use_count, 2);
     println!(
-        "✓ audit_log exists and queryable; oc_calculator use_count = {}",
+        "✓ audit_log exists and queryable; oc_calculator usage_count = {}",
         use_count
     );
 }

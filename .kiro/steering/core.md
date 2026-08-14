@@ -27,6 +27,17 @@ Rust (kria-core domain authority), Tauri/Axum thin adapters, SolidJS+Tailwind UI
 - Resource-aware: reuse builds/terminals/services, bounded concurrency, focused validation before heavy suites.
 
 ## Build/test quick ref
+- **Full verification: `just gate` (or `bash scripts/gate.sh`)** — runs every test in
+  the workspace (~11,300) and FAILS if any target is skipped. This is the only
+  command whose green result means anything.
+  - Why it exists: 152 integration-test files sat outside the habitual test command
+    for a long time. 26 were failing unnoticed, and one was catching a real security
+    bypass in the capability gate. `cargo test --lib` is a partial answer that looks
+    complete. A gate that can silently shrink is worse than no gate.
+  - Environmental failures are listed with reasons in
+    `scripts/known-failing-tests.txt`; unexplained ones in
+    `scripts/needs-investigation-tests.txt`. The gate reports "PASSED with debt" while
+    any of the latter remain, and tells you when a listed test starts passing.
 - Check: `cargo check -p kria-core`  · Format: `cargo fmt`  · Lint: `cargo clippy`
 - Focused test: `cargo test -p kria-core <name>`  · UI: `cd ui && npm run test:run`
 - Run full workspace/E2E/release suites only at phase gates.

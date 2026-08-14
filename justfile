@@ -8,8 +8,20 @@
 default:
     @just --list
 
+# ── THE gate — run this before asking anyone to trust a result ──────────────
+# Runs every test in the workspace (~11,300) and fails if any target is skipped.
+#
+# Prefer this over `just test`: `cargo test --workspace --lib` covers the LIBRARY
+# tests only. That gap is not academic — 152 integration-test files were outside
+# the habitual command for a long time, 26 of them were failing, and one was
+# catching a real security bypass in the capability gate. Library-only is a
+# partial answer that looks like a complete one.
+gate:
+    bash scripts/gate.sh
+
 # ── Fast unit / property / integration tests ────────────────────────────────
 # Runs everything that does NOT need a virtual display. Default `cargo test`.
+# NOTE: library tests only — see `just gate` for the full picture.
 test:
     cargo test --workspace --lib
 

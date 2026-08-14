@@ -2,19 +2,36 @@
 //!
 //! Run:
 //!   cargo test -p kria-core --test document_pipeline_test -- --nocapture
-//!
-//! Test the PDF at the exact path used in the user's session:
-//!   cargo test -p kria-core --test document_pipeline_test doc_pipeline_pdf -- --nocapture
 
 use kria_core::preprocessing::{
     document::DocumentProcessor, document_sanitizer::sanitize, split_into_chunks_sync,
 };
 
-const TEST_PDF: &str = "/home/obaid/Downloads/Sem-8.pdf";
+/// A small PDF committed alongside the tests.
+///
+/// This used to be `/home/obaid/Downloads/Sem-8.pdf` — one person's Downloads folder.
+/// The test therefore failed for everyone else and on every clean checkout, and it was
+/// counted as an "environmental" failure that could never be fixed. A 3.5 KB fixture in
+/// the repository removes the dependency on anyone's filesystem.
+///
+/// It carries a sentinel string so extraction can be checked for CONTENT rather than
+/// merely for a non-empty result: a pipeline that returned whitespace would have passed
+/// the old assertion.
+const TEST_PDF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/documents/pipeline_fixture.pdf"
+);
+
+/// Text known to be in the fixture, used to prove extraction actually worked.
+const PDF_SENTINEL: &str = "PIPELINE_FIXTURE_OK";
 
 async fn run_pipeline(path: &str) {
     let p = std::path::Path::new(path);
-    assert!(p.exists(), "Test file not found at path: {path}\nPlease ensure the file exists before running this test.");
+    assert!(
+        p.exists(),
+        "fixture missing at {path} — it is committed to the repo, so this means the \
+         checkout is incomplete"
+    );
 
     // ── 1. Extract ───────────────────────────────────────────────────────────
     let raw = DocumentProcessor::extract_text(p)
@@ -25,6 +42,18 @@ async fn run_pipeline(path: &str) {
         !raw.trim().is_empty(),
         "Extracted text is empty — check pdftotext installation"
     );
+    // Only the PDF fixture carries the sentinel; the .txt path reuses this function, so
+    // the check is scoped to the file that has it. Asserting real content catches a
+    // pipeline that returns whitespace or a stray header, which "not empty" would miss.
+    if path.ends_with(".pdf") {
+        assert!(
+            raw.contains(PDF_SENTINEL),
+            "extraction did not return the fixture's known text ({PDF_SENTINEL}); \
+             got {} chars starting: {}",
+            raw.len(),
+            &raw[..raw.len().min(120)]
+        );
+    }
     println!(
         "\n[1/3] EXTRACT  {} → {} chars\nFirst 400 chars:\n---\n{}\n---",
         p.file_name().unwrap().to_string_lossy(),

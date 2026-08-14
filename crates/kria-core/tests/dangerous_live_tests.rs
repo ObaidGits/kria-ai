@@ -95,14 +95,23 @@ fn dangerous_t1_reboot_is_red_and_requires_approval() {
 }
 
 #[test]
-fn dangerous_t1_kill_process_is_yellow_and_requires_approval() {
-    // Policy classifies kill_process as Yellow (execute+notify tier; no blocking approval needed)
+fn dangerous_t1_kill_process_is_red_and_requires_approval() {
+    // The frozen contract declares `risk.fixed.red` for kill_process (verified in
+    // .kiro/specs/linux-os-control-production/operation-contracts.json), and the policy
+    // engine defers to it. RED is right: terminating a process by PID can take down the
+    // user's editor mid-edit or a database mid-write, and it cannot be undone. The
+    // Yellow expectation and the "no blocking approval needed" comment below both
+    // predate the contract.
     let engine = PolicyEngine::new();
     let d = engine.evaluate("kill_process", &serde_json::json!({ "pid": 1 }));
     assert_eq!(
         d.risk_level,
-        RiskLevel::Yellow,
-        "kill_process must be Yellow per policy"
+        RiskLevel::Red,
+        "kill_process is RED per the frozen contract"
+    );
+    assert!(
+        d.requires_approval,
+        "a RED action must ask a human before running"
     );
     assert!(!d.blocked, "kill_process must not be blocked");
 }

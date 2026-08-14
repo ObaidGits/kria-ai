@@ -8,31 +8,20 @@
 #
 # Format:  <test name>    # why it cannot pass here
 
-# ── Needs a Docker image that is not pulled ──────────────────────────────────
-# Failure is `No such image: ubuntu:24.04@sha256:cdb5fd...`. Pull that exact
-# digest and these run.
-docker_archive_io_tmpfs_test          # needs the pinned ubuntu:24.04 image
-docker_basic_execution_test           # needs the pinned ubuntu:24.04 image
-docker_env_var_injection_test         # needs the pinned ubuntu:24.04 image
-docker_memory_limit_oom_test          # needs the pinned ubuntu:24.04 image
-docker_output_flood_control_test      # needs the pinned ubuntu:24.04 image
-docker_pid_limit_exhaustion_test      # needs the pinned ubuntu:24.04 image
-
-# ── Needs an initialised OpenClaw skill database ─────────────────────────────
-# Failure is `no such table: installed_skills`. These exercise the live skill
-# substrate against a real store, which is not provisioned on this laptop.
-openclaw_live_functional::live_audit_log_table_queryable_via_raw_sql   # needs the OpenClaw store
-openclaw_live_functional::live_uninstall_removes_skill                 # needs the OpenClaw store
-
 # ── Needs a graphical session with specific apps ─────────────────────────────
-# These drive real windows (gedit, a terminal, an editor) and assert on focus
-# checkpoints. They cannot pass headless or without those apps installed.
+# These drive real windows (an editor, a terminal) and assert on focus
+# checkpoints. They cannot pass headless or without those apps installed, and
+# running them would take over the owner's desktop mid-session.
 workflow_multistep_evals::eval_open_code_write_run_pascal_triangle   # needs a GUI session + editor
 workflow_multistep_evals::eval_open_code_write_save_run_four_stage   # needs a GUI session + editor
 workflow_multistep_evals::eval_open_gedit_type_save                 # needs a GUI session + gedit
 workflow_multistep_evals::eval_switch_to_terminal_and_run_command   # needs a GUI session + terminal
 
-# ── Needs a specific file in the owner's Downloads ───────────────────────────
-# The suite hardcodes /home/obaid/Downloads/Sem-8.pdf. Worth replacing with a
-# generated fixture so it stops depending on one person's filesystem.
-document_pipeline_test::doc_pipeline_pdf   # hardcoded path to a PDF that is not present
+# ── Resolved and deliberately removed from this list ─────────────────────────
+# The six docker_* tests are gone: the pinned ubuntu:24.04 image was pulled and
+# all six pass. The document_pipeline PDF test is gone: it no longer depends on a
+# file in one person's Downloads folder — a 3.5 KB fixture is committed at
+# crates/kria-core/tests/fixtures/documents/pipeline_fixture.pdf. The two
+# openclaw_live_functional tests are gone: both were real defects, not
+# environment (a soft-deleted skill still listed as installed, and a query
+# against a table that does not exist in the schema).

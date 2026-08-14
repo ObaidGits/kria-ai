@@ -100,12 +100,12 @@ fn reg_f2b_search_for_filename_must_not_route_to_web_search() {
 fn reg_f3_search_files_is_green_no_approval() {
     use kria_core::safety::policy::{PolicyEngine, RiskLevel};
     let p = PolicyEngine::new();
-    for tool in [
-        "search_files",
-        "read_file",
-        "list_directory",
-        "find_files_by_pattern",
-    ] {
+    // `read_file` is deliberately not in this list: its frozen contract declares
+    // `risk.fixed.red`, because the path is caller-supplied and may name a private key
+    // or a .env file. The policy engine reads the reviewed contract rather than
+    // guessing from the tool name, so listing it here asserted against the contract.
+    // It is pinned as RED in safety_tests.rs.
+    for tool in ["search_files", "list_directory", "find_files_by_pattern"] {
         let d = p.evaluate(
             tool,
             &serde_json::json!({ "directory": "/home/obaid", "pattern": "*.txt" }),

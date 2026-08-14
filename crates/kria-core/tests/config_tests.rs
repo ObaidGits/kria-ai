@@ -43,7 +43,11 @@ fn default_config_has_expected_values() {
     assert_eq!(cfg.server.port, 8088);
     assert!(!cfg.server.enable_auth);
 
-    assert_eq!(cfg.ui.theme, "dark");
+    // The default theme is "light". It was "dark" when these tests were written and
+    // was changed deliberately in commit 15bcd42; nothing about config loading is
+    // broken. Verified by reading `impl Default for UiConfig`, not by trusting the
+    // failure message.
+    assert_eq!(cfg.ui.theme, "light");
     assert_eq!(cfg.ui.window_width, 1200);
 }
 
@@ -78,8 +82,8 @@ port = 9999
     assert_eq!(cfg.llm.active_model, "custom-model");
     assert_eq!(cfg.llm.context_window, 8192);
     assert_eq!(cfg.server.port, 9999);
-    // Untouched fields remain default
-    assert_eq!(cfg.ui.theme, "dark");
+    // Untouched fields remain default — and the default theme is "light".
+    assert_eq!(cfg.ui.theme, "light");
 }
 
 #[test]
@@ -120,9 +124,26 @@ cloud_api_key = "sk-test-key"
 
     let cfg = load_config(base_f.path(), Some(override_f.path())).unwrap();
     // Override values applied
-    assert_eq!(cfg.llm.routing_mode, "gemini");
     assert_eq!(cfg.llm.cloud_api_key, "sk-test-key");
     assert_eq!(cfg.llm.active_model, "override-model");
+
+    // `llm.routing_mode` is NOT taken from the file, and that is by design rather
+    // than a merge failure. After merging, `load_config` calls
+    // `sync_legacy_llm_from_active_provider`, which derives the legacy `llm.*`
+    // routing fields from the newer `providers` config — the single authority for
+    // "which provider is active". With no `[providers]` section in either file the
+    // default (llama.cpp, local) wins, so "gemini" in the legacy field is discarded.
+    //
+    // Only `KRIA_LLM_MODE` in the environment can force the legacy field, which is
+    // the documented escape hatch. Asserting the file value here tested a precedence
+    // the migration deliberately removed.
+    //
+    // Worth a product decision separately: a user who edits `routing_mode` in their
+    // config gets it silently ignored, with no warning that the field is legacy.
+    assert_eq!(
+        cfg.llm.routing_mode, "local",
+        "routing_mode is derived from the active provider, not the legacy llm section"
+    );
 }
 
 #[test]
@@ -191,8 +212,12 @@ fn env_vars_override_config_values() {
 fn auto_select_model_maps_tiers_correctly() {
     assert_eq!(auto_select_model(HardwareTier::Lite), "qwen2.5-3b");
     assert_eq!(auto_select_model(HardwareTier::Standard), "phi-4-mini");
-    assert_eq!(auto_select_model(HardwareTier::Performance), "qwen3-vl-4b");
-    assert_eq!(auto_select_model(HardwareTier::High), "qwen3-vl-4b");
+    // The top two tiers now select qwen2.5-vl-7b. The test expected qwen3-vl-4b, the
+    // model chosen when it was written; the catalogue has since moved to the larger
+    // 7B vision model for machines that can run it. Verified against
+    // `auto_select_model` in config/mod.rs.
+    assert_eq!(auto_select_model(HardwareTier::Performance), "qwen2.5-vl-7b");
+    assert_eq!(auto_select_model(HardwareTier::High), "qwen2.5-vl-7b");
 }
 
 // ── Serialization roundtrip ─────────────────────────────────────────
@@ -349,24 +374,26 @@ fn theme_toggle_persists_through_save_load() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("theme_test.toml");
 
-    // Start dark
+    // Start from the real default, which is "light".
     let mut cfg = KriaConfig::default();
-    assert_eq!(cfg.ui.theme, "dark");
+    assert_eq!(cfg.ui.theme, "light");
 
-    // Toggle to light
-    cfg.ui.theme = "light".into();
+    // Toggle to the other theme and confirm it survives a save/load round trip —
+    // which is what this test is actually for.
+    cfg.ui.theme = "dark".into();
     let toml_str = toml::to_string_pretty(&cfg).unwrap();
     std::fs::write(&path, &toml_str).unwrap();
 
     let loaded = load_config(&path, None).unwrap();
-    assert_eq!(loaded.ui.theme, "light");
+    assert_eq!(loaded.ui.theme, "dark");
 
-    // Toggle back to dark
+    // Toggle back to light — asserting both directions, so a round trip that only
+    // ever happened to store one value cannot pass.
     let mut cfg2 = loaded;
-    cfg2.ui.theme = "dark".into();
+    cfg2.ui.theme = "light".into();
     let toml_str2 = toml::to_string_pretty(&cfg2).unwrap();
     std::fs::write(&path, &toml_str2).unwrap();
 
     let loaded2 = load_config(&path, None).unwrap();
-    assert_eq!(loaded2.ui.theme, "dark");
+    assert_eq!(loaded2.ui.theme, "light");
 }

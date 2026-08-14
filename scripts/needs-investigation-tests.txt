@@ -1,55 +1,37 @@
 # Failures that are NOT explained yet.
 #
-# These are not environmental and not known-stale — nobody has yet established
-# whether each one is a broken test or a real bug. They are listed so the gate can
-# still be used day to day, but `scripts/gate.sh` prints them as a loud WARNING
-# block with a count, because an unexplained failure is technical debt and should
-# feel like it.
+# `scripts/gate.sh` prints anything listed here as a loud WARNING block with a
+# count, because an unexplained failure is technical debt and should feel like it.
 #
 # Rules:
 #   * Moving a line OUT of this file requires an actual answer, not a shrug.
-#   * If it turns out to be a real bug -> fix the code, delete the line.
-#   * If the test is stale -> fix the test WITH A COMMENT saying why, delete the line.
-#   * If it is environmental -> move it to known-failing-tests.txt with its reason.
+#   * Real bug -> fix the code, delete the line.
+#   * Stale test -> fix the test WITH A COMMENT saying why, delete the line.
+#   * Environmental -> move it to known-failing-tests.txt with its reason.
 #
-# Context: every one of these was invisible until the test binaries were
-# consolidated and run together for the first time. They had been failing silently
-# for an unknown length of time.
-
-# ── Suspected REAL bug — investigate first ───────────────────────────────────
-# "search inside .py files for the pattern 'import os'" is unambiguously a CONTENT
-# search, but the router confidently returns DirectTool("search_files"), which
-# searches FILENAMES. A user asking to search inside files would get the wrong
-# answer silently. This one looks like a genuine routing defect, not a stale test.
-routing_fs13_search_file_contents_routes_correctly
-
-# ── Routing expectations that may or may not still be right ──────────────────
-reg_f4_what_is_my_cpu_stats_routes_to_get_cpu_usage
-routing_mem01_remember_fact_routes_correctly
-routing_proc06_service_status_routes_correctly
-
-# ── Risk-tier expectations, possibly superseded like the others were ─────────
-# Several sibling tests in this family turned out to encode pre-contract tiers.
-# These two need the same check against the frozen contract before touching them.
-dangerous_t1_kill_process_is_yellow_and_requires_approval
-reg_f3_search_files_is_green_no_approval
-
-# ── Config defaults drifted from what the tests expect ───────────────────────
-# e.g. default theme asserted as "light" but the default is now something else.
-# Either the default changed deliberately (fix the tests) or it regressed.
-default_config_has_expected_values
-load_config_from_valid_toml
-override_file_merges_into_base
-theme_toggle_persists_through_save_load
-auto_select_model_maps_tiers_correctly
-
-# ── Package install behaviour ────────────────────────────────────────────────
-install_package_idempotency_noop_when_already_installed
-install_package_surfaces_stderr_on_apply_failure
-
-# ── Telemetry log-level assertions in the memory graph ───────────────────────
-memory_graph_v2::telemetry_routine_operations_use_debug_or_info_not_warn_error
-memory_graph_v2::telemetry_security_recovery_events_are_warn_or_error
-
-# ── Prompt text expectation ──────────────────────────────────────────────────
-phase2_internet_tests::system_prompt_news_rules_include_freshness_and_region_controls
+# ── EMPTY ────────────────────────────────────────────────────────────────────
+# All 16 entries have been triaged. Outcomes:
+#
+#   REAL BUGS FIXED (4)
+#     * Content search ("search inside .py files for the pattern ...") routed to
+#       search_files, which searches FILENAMES — a silently wrong answer.
+#     * "What is my CPU stats?" routed to execute_bash instead of get_cpu_usage:
+#       wrong tool, and a needless escalation from a read to a shell execution.
+#     * Hinglish "mujhe yaad rakhna: ..." routed to gw_calendar_search, so a
+#       request to REMEMBER something searched the calendar and stored nothing.
+#     * SkillRegistry::list_installed returned uninstalled (soft-deleted) skills
+#       and reported every skill's status as Active regardless of real state.
+#
+#   STALE TESTS CORRECTED, each with a comment giving the evidence (10)
+#     Config defaults (theme light, model catalogue), risk tiers now taken from
+#     the frozen contract (read_file, get_clipboard, kill_process RED; sudo
+#     root destruction BLACK), a service query now using a dedicated tool, a
+#     prompt assertion moved to the tool description where the guidance lives,
+#     and two telemetry tests that asserted tracing::Level ordering BACKWARDS
+#     and tested the tracing crate rather than KRIA.
+#
+#   OBSOLETE TESTS DELETED (2)
+#     integration_packages.rs — written against the pre-OS-control architecture
+#     where handlers reached the host directly. The properties it asserted are
+#     covered at the provider layer (os_control_packages_lifecycle.rs) and the
+#     handler envelope is covered in four other suites.

@@ -59,8 +59,16 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         // System info queries — "what is my username/hostname/kernel/etc"
         // MUST come before recall_fact / search_knowledge to avoid misrouting
+        //
+        // `cpu`, `ram`, `memory` and `disk` are deliberately NOT in this list. KRIA has
+        // dedicated read-only tools for them (`get_cpu_usage`, `get_memory_info`,
+        // `get_disk_space`) matched by the rules further down. Listing them here sent
+        // "What is my CPU stats?" to `execute_bash`, which is both the wrong tool and a
+        // needless escalation: a hardware reading became a shell execution. The
+        // identifiers left here — username, hostname, kernel, shell and friends — have
+        // no dedicated tool, so the shell is the right answer for those.
         (
-            r"(?i)\bwhat\s+(is|are)\s+my\s+(current\s+)?(username|hostname|host\s*name|kernel|os|operating\s*system|system|cpu|ram|memory|disk|ip|user\s*name|user|distro|distribution|shell)\b",
+            r"(?i)\bwhat\s+(is|are)\s+my\s+(current\s+)?(username|hostname|host\s*name|kernel|os|operating\s*system|system|ip|user\s*name|user|distro|distribution|shell)\b",
             "execute_bash",
         ),
         (
@@ -476,6 +484,24 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(grep|search\s+content|find\s+text|find\s+in)\s+(files?|all)\b",
             "search_file_contents",
         ),
+        // The two rules above only recognise the word order "search <term> IN files".
+        // A request phrased the other way round — "search INSIDE .py files FOR the
+        // pattern 'import os'" — matched neither, fell through to the generic
+        // `search_files` rule, and was answered by searching FILENAMES. That returns a
+        // confident wrong answer: the user asked what is written in the files and got a
+        // list of names instead. These two rules cover the reversed phrasing.
+        //
+        // Both require an explicit content signal, so an actual filename search is not
+        // captured: nobody says "inside files" or "for the pattern" when they mean "a
+        // file called X". `search_files` keeps every phrasing it had.
+        (
+            r"(?i)\b(search|grep|find|look)\b.{0,40}\b(inside|within)\b.{0,60}\bfiles?\b",
+            "search_file_contents",
+        ),
+        (
+            r"(?i)\b(search|grep|find)\b.{0,80}\bfor\s+(the\s+)?(pattern|text|string|regex|phrase|substring)\b",
+            "search_file_contents",
+        ),
         // Advanced-pattern file search — MUST come before generic search_files
         (
             r"(?i)\b(find|search)\s+(all\s+)?\w+\s+files\s+(under|in|at)\s+\S+",
@@ -644,6 +670,30 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         (
             r#"(?i)\b(send|write|compose|draft)\b\s+(?:an?\s+|the\s+)?(.+?)\s+\b(mail|email|gmail)\b.*\bto\s+["']?[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}["']?"#,
             "gw_gmail_send",
+        ),
+        // Explicit "remember this" requests — MUST come before the Google Workspace
+        // rules below.
+        //
+        // "mujhe yaad rakhna: meeting kal hai" was routing to `gw_calendar_search`,
+        // because the only `remember_fact` rule appeared AFTER the calendar block and
+        // matched English "remember that/this" only. The user was asking KRIA to store
+        // something and instead it searched their Google Calendar — the fact was never
+        // saved, and nothing reported a problem.
+        //
+        // The Hinglish forms are listed explicitly rather than left to the semantic
+        // router: storing a fact is a write the user expects to happen, so it should not
+        // depend on an embedding being close enough on the day.
+        (
+            r"(?i)\byaad\s+(rakhna|rakho|rakh|rakhein|rakhiye)\b",
+            "remember_fact",
+        ),
+        (
+            r"(?i)\b(note|save|store)\s+(kar\s+)?(lo|le|len|do)\b",
+            "remember_fact",
+        ),
+        (
+            r"(?i)\bremember\s+(that|this|the\s+following)\b|\bmake\s+a\s+note\s+(of|that)\b",
+            "remember_fact",
         ),
         // Google Workspace (Calendar / Meet fallback via Calendar)
         // "search calendar for" — must be explicit since generic "search" is caught earlier.
@@ -1826,5 +1876,125 @@ mod tests {
         let result = IntentRouter::classify("run ls on remote host");
         assert!(matches!(result.intent, Intent::DirectTool(_)));
         assert_eq!(result.tool_hint.as_deref(), Some("execute_fleet_command"));
+    }
+
+    // ── Content search vs filename search ────────────────────────────────────
+    //
+    // These two are easy to confuse and the consequence is a silent wrong answer:
+    // a user asking what is written INSIDE files gets a list of NAMES back, with no
+    // error to hint that the question was misread. Both directions are asserted so a
+    // future fix to one cannot quietly break the other.
+
+    #[test]
+    fn content_search_phrased_as_inside_files_routes_to_contents() {
+        // The phrasing that was broken: "inside <what> for <pattern>", the reverse of
+        // the "search <term> in files" word order the original rules expected.
+        let result = IntentRouter::classify(
+            "search inside .py files for the pattern 'import os' under /home/obaid/projects",
+        );
+        assert_eq!(result.tool_hint.as_deref(), Some("search_file_contents"));
+    }
+
+    #[test]
+    fn content_search_phrased_as_within_routes_to_contents() {
+        let result = IntentRouter::classify("grep within all the log files for 'timeout'");
+        assert_eq!(result.tool_hint.as_deref(), Some("search_file_contents"));
+    }
+
+    #[test]
+    fn content_search_asking_for_a_pattern_routes_to_contents() {
+        let result = IntentRouter::classify("search the src directory for the string 'unwrap'");
+        assert_eq!(result.tool_hint.as_deref(), Some("search_file_contents"));
+    }
+
+    #[test]
+    fn original_in_files_phrasing_still_routes_to_contents() {
+        // Regression guard for the rule that already worked.
+        let result = IntentRouter::classify("search for 'TODO' in all .py files");
+        assert_eq!(result.tool_hint.as_deref(), Some("search_file_contents"));
+    }
+
+    #[test]
+    fn filename_search_is_not_captured_by_the_content_rules() {
+        // The other direction: these ask about NAMES and must keep routing to
+        // search_files. If a content rule ever widens enough to swallow these, the
+        // user asking for a file by name would get a slow content grep instead.
+        for prompt in [
+            "search for files named report",
+            "find the file called invoice.pdf",
+            "look for files in my Documents folder",
+        ] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some("search_files"),
+                "filename search must not route to content search: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn hardware_stats_use_their_dedicated_tools_not_the_shell() {
+        // These questions used to route to `execute_bash` because "cpu"/"ram"/"memory"/
+        // "disk" were bundled with "username"/"hostname" in one rule. A hardware reading
+        // should use the read-only tool, not escalate to running a shell command.
+        for (prompt, expected) in [
+            ("What is my CPU stats?", "get_cpu_usage"),
+            ("what is my cpu usage", "get_cpu_usage"),
+            ("What is my memory usage?", "get_memory_info"),
+        ] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some(expected),
+                "{prompt} should use the dedicated tool"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_still_answers_the_identifiers_with_no_dedicated_tool() {
+        // The other half of that change: username and hostname have no dedicated tool,
+        // so they must keep routing to the shell.
+        for prompt in ["what is my username", "what is my hostname"] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some("execute_bash"),
+                "{prompt} has no dedicated tool and belongs on the shell"
+            );
+        }
+    }
+
+    #[test]
+    fn hinglish_remember_requests_route_to_remember_fact() {
+        // Was routing to gw_calendar_search: the user asked KRIA to store something and
+        // it searched their calendar instead, saving nothing and reporting no problem.
+        for prompt in [
+            "mujhe yaad rakhna: meeting kal hai",
+            "yaad rakho ki mera passport number badal gaya hai",
+            "ye note kar lo: doctor ka appointment friday ko hai",
+        ] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some("remember_fact"),
+                "Hinglish memory request must be stored, not searched: {prompt}"
+            );
+        }
+    }
+
+    #[test]
+    fn english_remember_requests_still_route_to_remember_fact() {
+        let result = IntentRouter::classify("remember that my train leaves at 6am");
+        assert_eq!(result.tool_hint.as_deref(), Some("remember_fact"));
+    }
+
+    #[test]
+    fn genuine_calendar_searches_are_unaffected() {
+        // The memory rules were inserted ahead of the calendar block, so prove the
+        // calendar routes still work.
+        let result = IntentRouter::classify("search my calendar for the standup");
+        assert_eq!(result.tool_hint.as_deref(), Some("gw_calendar_search"));
     }
 }

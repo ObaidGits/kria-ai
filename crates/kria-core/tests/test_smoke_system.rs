@@ -625,10 +625,15 @@ fn routing_proc01_list_apps_routes_correctly() {
 fn routing_proc06_service_status_routes_correctly() {
     // PROMPT-ID: PROC-06
     let r = IntentRouter::classify("Check status of docker service.");
+    // `manage_service` is the right answer and better than what this test originally
+    // demanded. It expected `execute_bash` because no service tool existed when it was
+    // written; a dedicated tool has since been added, and routing a service query
+    // through it beats shelling out — narrower permissions, structured output, and no
+    // shell quoting to get wrong.
     assert!(
-        matches!(&r.intent, Intent::DirectTool(t) if t == "execute_bash")
+        matches!(&r.intent, Intent::DirectTool(t) if t == "manage_service" || t == "execute_bash")
             || matches!(r.intent, Intent::Conversation | Intent::ComplexTask),
-        "Docker service status should route to execute_bash, got: {:?}",
+        "Docker service status should use the service tool or the shell, got: {:?}",
         r.intent
     );
 }

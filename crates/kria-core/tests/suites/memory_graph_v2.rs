@@ -35,6 +35,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Source directory of the `kria-memory` crate.
+///
+/// The telemetry tests below assert on the log LEVEL used at specific call sites, and
+/// a level is a compile-time property of the callsite — there is no runtime handle to
+/// interrogate. Reading the source is therefore the honest way to check it. The
+/// memory subsystem lives in a sibling crate since the split.
+fn memory_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("kria-core lives inside crates/, so it has a parent")
+        .join("kria-memory/src")
+}
+
 use kria_core::memory::authority::command::Deadline;
 use kria_core::memory::authority::publish::{
     revisions_since, NoopWakePublisher, RevisionWake, WakePublisher,
@@ -9925,47 +9938,20 @@ fn telemetry_security_recovery_events_are_warn_or_error() {
 
     // WARN is strictly above INFO:
     assert!(
-        Level::WARN > Level::INFO,
-        "WARN level must be strictly above INFO — any INFO-or-higher filter preserves WARN"
+        Level::INFO > Level::WARN,
+        "tracing::Level orders by VERBOSITY: INFO is more verbose than WARN, so a \
+         WARN-level filter admits WARN and drops INFO"
     );
 
-    // ERROR is strictly above WARN:
-    assert!(
-        Level::ERROR > Level::WARN,
-        "ERROR level must be strictly above WARN — WARN-or-higher filter preserves ERROR"
-    );
-
-    // ERROR is strictly above INFO:
-    assert!(
-        Level::ERROR > Level::INFO,
-        "ERROR level must be strictly above INFO"
-    );
-
-    // DEBUG is strictly below INFO (production INFO filter drops DEBUG):
-    assert!(
-        Level::DEBUG < Level::INFO,
-        "DEBUG level must be below INFO — an INFO-or-higher filter silences DEBUG"
-    );
-
-    // TRACE is strictly below DEBUG:
-    assert!(
-        Level::TRACE < Level::DEBUG,
-        "TRACE level must be below DEBUG"
-    );
-
-    println!(
-        "[telemetry_security_recovery_events_are_warn_or_error] PASS — \
-        WARN={}, ERROR={}, INFO={}, DEBUG={}, TRACE={}; \
-        WARN > INFO: {}, ERROR > INFO: {}, DEBUG < INFO: {}",
-        Level::WARN,
-        Level::ERROR,
-        Level::INFO,
-        Level::DEBUG,
-        Level::TRACE,
-        Level::WARN > Level::INFO,
-        Level::ERROR > Level::INFO,
-        Level::DEBUG < Level::INFO,
-    );
+    // Everything this test used to "verify" was `tracing::Level` enum ordering, and it
+    // had the ordering backwards — `Level` orders by VERBOSITY, so ERROR < WARN < INFO
+    // < DEBUG < TRACE. Even correctly written it would have tested the tracing crate
+    // rather than KRIA. The real property — that Recovery_Mode entry logs at WARN or
+    // above, so a production WARN filter cannot hide it — is asserted in
+    // `telemetry_security_events_are_warn_or_error` against the actual source.
+    //
+    // What remains here is the part that IS about this codebase: a genuine
+    // Recovery_Mode entry is exercised end to end by the 17.2 test below.
 }
 
 // ─── 17.2  Recovery_Mode entry emits WARN ────────────────────────────────────
@@ -10075,57 +10061,44 @@ async fn telemetry_recovery_mode_entry_uses_warn_level_code_site() {
 fn telemetry_routine_operations_use_debug_or_info_not_warn_error() {
     // **Validates: V-RESOURCE-01 (routine events at DEBUG/INFO — filterable)**
     //
-    // Level ordering proof:
-    //   ERROR(1) > WARN(2) > INFO(3) > DEBUG(4) > TRACE(5)
+    // This test used to "prove" the level ordering with `assert!(Level::WARN >
+    // Level::INFO)` and a comment claiming ERROR(1) > WARN(2) > INFO(3). That is
+    // backwards: `tracing::Level` orders by VERBOSITY, so ERROR < WARN < INFO <
+    // DEBUG < TRACE, and the assertion could never hold. Worse, even if it had held
+    // it would only have tested the tracing crate's enum, saying nothing whatsoever
+    // about how KRIA logs.
     //
-    // A production INFO filter admits only ERROR+WARN+INFO.
-    // A production WARN filter admits only ERROR+WARN.
-    // Either filter silences DEBUG/TRACE, meaning near-zero overhead for
-    // the majority of routine operational events.
-
-    // Security/recovery events (WARN or ERROR) pass any WARN-or-higher filter:
-    let security_levels = [Level::WARN, Level::ERROR];
-    for &lvl in &security_levels {
-        assert!(
-            lvl >= Level::WARN,
-            "security event level {lvl} must be WARN or higher"
-        );
-    }
-
-    // Routine operational events (INFO) pass an INFO-or-higher filter
-    // but are filtered by a WARN-only production configuration:
+    // So it now checks the actual property: a routine operational event is emitted at
+    // INFO, so a production WARN-only filter silences it.
+    let migrations = std::fs::read_to_string(memory_dir().join("db/migrations.rs"))
+        .expect("migrations source must be readable");
+    let applied_line = migrations
+        .lines()
+        .find(|line| line.contains("applied memory schema migration"))
+        .expect("the migration-applied log site must exist");
     assert!(
-        Level::INFO < Level::WARN,
-        "INFO is below WARN — a WARN filter silences routine INFO events (low overhead)"
+        applied_line.contains("info!") || applied_line.contains("debug!"),
+        "a routine migration is not an operator alert; it must log at INFO or DEBUG \
+         so a WARN-only production filter silences it: {applied_line}"
     );
+}
 
-    // Routine debug events (DEBUG) are silenced by both INFO and WARN filters:
-    let routine_levels = [Level::DEBUG, Level::TRACE];
-    for &lvl in &routine_levels {
-        assert!(
-            lvl < Level::INFO,
-            "routine event level {lvl} must be below INFO — silenced by INFO-or-higher filter"
-        );
-    }
-
-    // The 1% overhead budget is met: disabled-level events short-circuit at a
-    // single atomic load (tracing's static filter). For a 100ms operation, even
-    // 1000 disabled-level checks add <1µs — well within the 1ms (1%) budget.
-    let operation_budget_ms = 100_u64;
-    let overhead_per_disabled_check_ns = 5_u64; // conservative upper bound
-    let checks_per_operation = 1000_u64; // generous upper bound
-    let overhead_ns = overhead_per_disabled_check_ns * checks_per_operation;
-    let overhead_pct = (overhead_ns as f64) / (operation_budget_ms as f64 * 1_000_000.0) * 100.0;
+#[test]
+fn telemetry_security_events_are_warn_or_error() {
+    // The other half, and the one that actually matters: entering Recovery_Mode blocks
+    // every durable write, so it must NOT be filtered out by a production WARN-level
+    // configuration. Asserted against the source rather than against enum ordering.
+    let api = std::fs::read_to_string(memory_dir().join("api/mod.rs"))
+        .expect("api source must be readable");
+    let idx = api
+        .find("entering Recovery_Mode")
+        .expect("the Recovery_Mode log site must exist");
+    // Look back a few lines for the macro that carries this message.
+    let preceding = &api[idx.saturating_sub(200)..idx];
     assert!(
-        overhead_pct < 1.0,
-        "disabled-level tracing overhead {overhead_pct:.4}% must be below 1% budget"
-    );
-
-    println!(
-        "[telemetry_routine_operations_use_debug_or_info_not_warn_error] PASS — \
-        security_levels=[WARN, ERROR] ≥ WARN; \
-        routine_levels=[DEBUG, TRACE] < INFO; \
-        estimated disabled overhead={overhead_pct:.4}% < 1% budget"
+        preceding.contains("warn!") || preceding.contains("error!"),
+        "entering Recovery_Mode blocks all durable writes and must survive a WARN-level \
+         filter; found neither warn! nor error! at the callsite"
     );
 }
 
