@@ -11,7 +11,10 @@ pub mod image;
 pub mod infra;
 pub mod llm;
 pub mod mcp;
-pub mod memory;
+// The memory subsystem now lives in its own crate. Re-exported under the old name
+// so every `crate::memory::...` path in this crate keeps resolving unchanged — the
+// move is invisible to callers, which is what makes it safe to do in one step.
+pub use kria_memory as memory;
 pub mod mobile;
 pub mod n8n;
 pub mod notify;

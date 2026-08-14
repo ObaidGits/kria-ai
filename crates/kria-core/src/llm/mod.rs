@@ -1,3 +1,6 @@
+/// Adapter satisfying kria-memory's narrow extraction seam.
+pub mod memory_extractor;
+
 pub mod budget;
 pub mod cloud;
 pub mod failover;

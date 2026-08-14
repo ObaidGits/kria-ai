@@ -47,3 +47,42 @@ useful comparison in Stage 7 is **leaf edit before vs leaf edit after**.
 later stage of this refactor slower for no extra insight — a from-clean build has to
 compile everything once whether the code is one crate or six, so it is the one
 scenario a split barely improves. The two rows above are the ones that move.
+| AFTER Stage 2 · rebuild after LEAF edit (notify/mod.rs) | 246s | 8630 MB | 861 MB | 474 | ok |
+| AFTER Stage 2 · LEAF edit, LIBRARY ONLY (cargo check) | 46s | 4233 MB | 5611 MB | 89 | ok |
+
+## Stage 2 result — and why it changes the plan
+
+`memory` (105,006 lines, 20% of the crate) was extracted successfully: 1,960 of its
+tests moved with it, kria-core kept the other 3,737, and the total is unchanged at
+5,697. Nothing was lost and nothing broke.
+
+But the payoff was **8%**, not the step change the plan assumed:
+
+| Scenario | Wall | Peak MB | Min free MB |
+|---|---|---|---|
+| BEFORE · leaf edit, full test build | 267s | 7,981 | 385 |
+| AFTER Stage 2 · leaf edit, full test build | 246s | 8,630 | 861 |
+| AFTER Stage 2 · leaf edit, **library only** | **46s** | **4,233** | 5,611 |
+
+The third row is the one that matters. Compiling the library after a leaf edit costs
+**46 seconds**. The other **200 seconds — 80% of the wall time — is building and
+linking 152 separate integration-test binaries**, each of which links the entire
+crate.
+
+Splitting the crate reduces the 46s part in proportion to what is removed. It does
+**nothing** for the 200s part. That is why removing a fifth of the code bought only
+8%: the thing being optimised was never the bottleneck.
+
+### What actually attacks the 200 seconds
+
+1. **The `mold` linker** — not yet installed. Linking is the dominant cost and mold
+   exists for precisely this. `sudo bash scripts/enable-mold.sh`.
+2. **Fewer test binaries** — 152 files in `crates/kria-core/tests/` become 152
+   binaries, each statically linking the whole crate. Consolidating them into a
+   handful of binaries with modules inside would cut most of that linking. The tests
+   themselves would not change, only how many executables they are packed into.
+
+Stages 3–6 (voice, image, resource, os_control) were planned on the assumption that
+crate size drove the cost. The measurement says otherwise, so they are **not worth
+doing for build speed**. They may still be worth doing later for architectural
+clarity — that is a different justification, and should be argued on its own terms.

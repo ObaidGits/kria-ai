@@ -720,7 +720,11 @@ pub async fn process_message(
     if !is_transient_llm_error_text(&full_response) {
         let extraction = match agent_loop.memory_parser_backend() {
             Some(parser_backend) => {
-                let parser = SemanticMemoryParser::new(parser_backend);
+                // The parser now takes the narrow extraction seam, so the raw
+                // backend is wrapped once here.
+                let parser = SemanticMemoryParser::new(std::sync::Arc::new(
+                    crate::llm::memory_extractor::LlmBackendExtractor::new(parser_backend),
+                ));
                 parser.parse_turn(text, &full_response).await
             }
             None => None,

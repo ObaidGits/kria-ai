@@ -1,0 +1,65 @@
+[package]
+name = "kria-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "K.R.I.A. memory and knowledge subsystem — conversations, facts, RAG, vector search"
+
+# ── Why this is its own crate ────────────────────────────────────────────────
+# `kria-core` held ~517,000 lines in ONE compilation unit, so editing any file
+# rebuilt all of it: a 254-line leaf file cost the same 267s as the most central
+# type (measured in docs/build-baseline.md). Memory is 105,000 of those lines and
+# had exactly ONE reference to the rest of the crate, which made it the cheapest
+# and largest thing to lift out.
+#
+# It stays a CORE crate — domain logic, not an adapter — so the project rule that
+# `kria-core` owns all domain logic still holds; the logic simply lives in a
+# sibling core crate now.
+
+[dependencies]
+# Every version is inherited from the workspace, so this crate cannot drift onto
+# a different release of a shared dependency.
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+walkdir = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+chrono = { workspace = true }
+# `serde` is declared EXPLICITLY here. kria-core got it for free from another
+# crate in the workspace enabling it, which hid a real requirement — this crate
+# serializes Uuid, so it must ask for the feature itself.
+uuid = { workspace = true, features = ["serde"] }
+ort = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+async-trait = { workspace = true }
+unicode-normalization = { workspace = true }
+blake3 = { workspace = true }
+# Used fully-qualified inside function bodies, so they do not appear in the
+# top-of-file `use` list: ndarray for the embedding tensor, tokenizers for the
+# ONNX tokenizer, sysinfo for the scheduler's memory pressure check.
+ndarray = { workspace = true }
+tokenizers = { workspace = true }
+sysinfo = { workspace = true }
+# Also fully-qualified at call sites: hex for digest rendering, dirs for the
+# cold-start home lookup, libc for the statfs free-space check.
+hex = { workspace = true }
+dirs = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+# Versions match kria-core's exactly so the two crates cannot disagree about the
+# test harness they share expectations with.
+tempfile = "3"
+proptest = "1.5.0"
+serial_test = "3"

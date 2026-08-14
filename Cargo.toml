@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/kria-core", "crates/kria-desktop", "crates/kria-server", "crates/kria-eval", "crates/kria-connection-control", "crates/kria-uinput-daemon", "crates/kria-test-app", "crates/kria-wake-daemon"]
+members = ["crates/kria-core", "crates/kria-memory", "crates/kria-desktop", "crates/kria-server", "crates/kria-eval", "crates/kria-connection-control", "crates/kria-uinput-daemon", "crates/kria-test-app", "crates/kria-wake-daemon"]
 resolver = "2"
 
 [workspace.package]
