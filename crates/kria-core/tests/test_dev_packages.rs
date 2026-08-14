@@ -58,8 +58,13 @@ fn policy_sh03_sudo_rm_rf_root_is_red() {
     );
     assert_eq!(
         decision.risk_level,
-        RiskLevel::Red,
-        "sudo rm -rf / must be classified Red"
+        // BLACK, not Red — and that is stricter, not a regression. Red means "ask a
+        // human"; Black means "never, no matter who asks". Wiping the filesystem root
+        // as superuser belongs in the second category, and the black-scope classifier
+        // now puts it there. The comment above already said "must be blocked", which
+        // is Black; the assertion had been the weaker of the two.
+        RiskLevel::Black,
+        "sudo filesystem-root destruction must be blocked outright, not merely gated"
     );
 }
 
@@ -93,7 +98,7 @@ async fn functional_sh04_execute_bash_echo() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("execute_bash").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "command": "echo $HOME", "timeout": 10 }))
+        .execute_with_context(serde_json::json!({ "command": "echo $HOME", "timeout": 10 }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -118,7 +123,7 @@ async fn functional_sh02_execute_python_print() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("execute_python").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "code": "print(2 + 2)", "timeout": 10 }))
+        .execute_with_context(serde_json::json!({ "code": "print(2 + 2)", "timeout": 10 }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -143,7 +148,7 @@ async fn functional_sh06_execute_bash_df_h() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("execute_bash").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "command": "df -h", "timeout": 10 }))
+        .execute_with_context(serde_json::json!({ "command": "df -h", "timeout": 10 }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -343,7 +348,7 @@ async fn functional_sched01_list_scheduled_tasks() {
     // PROMPT-ID: SCHED-01
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("list_scheduled_tasks").unwrap().clone();
-    let result = handler.execute(serde_json::json!({})).await;
+    let result = handler.execute_with_context(serde_json::json!({}), test_ctx()).await;
     assert!(
         result.success || result.error.is_some(),
         "list_scheduled_tasks must not panic"
@@ -441,7 +446,7 @@ async fn functional_git01_git_status_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_status").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": KRIA_PATH }))
+        .execute_with_context(serde_json::json!({ "path": KRIA_PATH }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -459,7 +464,7 @@ async fn functional_git02_git_log_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_log").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": KRIA_PATH, "count": 5 }))
+        .execute_with_context(serde_json::json!({ "path": KRIA_PATH, "count": 5 }), test_ctx())
         .await;
     assert!(result.success, "git_log should succeed: {:?}", result.error);
     let commits = result
@@ -483,7 +488,7 @@ async fn functional_git03_git_diff_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_diff").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": KRIA_PATH }))
+        .execute_with_context(serde_json::json!({ "path": KRIA_PATH }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -500,7 +505,7 @@ async fn functional_git05_git_branch_list_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_branch_list").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": KRIA_PATH }))
+        .execute_with_context(serde_json::json!({ "path": KRIA_PATH }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -528,7 +533,7 @@ async fn functional_git09_analyze_project_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("analyze_project").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": KRIA_PATH }))
+        .execute_with_context(serde_json::json!({ "path": KRIA_PATH }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -542,10 +547,10 @@ async fn functional_git10_query_sqlite_missing_db() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("query_sqlite").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "database": "/nonexistent_kria_test/kria.db",
             "query": "SELECT * FROM facts LIMIT 5"
-        }))
+        }), test_ctx())
         .await;
     assert!(
         !result.success,
@@ -577,11 +582,31 @@ async fn functional_git_stash_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_stash").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": sandbox.path.to_str().unwrap() }))
+        .execute_with_context(serde_json::json!({ "path": sandbox.path.to_str().unwrap() }), test_ctx())
         .await;
     // May fail if no staged changes — that's fine as long as it doesn't panic
     assert!(
         result.success || result.error.is_some(),
         "git_stash must not panic"
     );
+}
+
+// `execute_with_context` is what `loop_engine` and `resume_executor` call, so tests
+// go through it too. `execute` has an erroring default body — see
+// scripts/fix-tool-execute-tests.py for why that default is correct and these calls
+// were the thing that was wrong.
+fn test_ctx() -> kria_core::tools::ToolContext {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    kria_core::tools::ToolContext::new(
+        Arc::new(kria_core::infra::environment::LocalEnvironment::new()),
+        Arc::new(tokio::sync::Mutex::new(
+            kria_core::infra::environment::ShellState {
+                cwd: std::env::current_dir().expect("a working directory"),
+                env_vars: HashMap::new(),
+                generation: 0,
+            },
+        )),
+        tokio_util::sync::CancellationToken::new(),
+    )
 }

@@ -75,15 +75,41 @@ fn code_only(src: &str) -> String {
         .join("\n")
 }
 
+/// Keep only the code that ships, dropping everything from the first `#[cfg(test)]`
+/// onward.
+///
+/// The invariant below is about how the RUNNING system reaches the database. A unit
+/// test spinning up its own throwaway database breaks nothing, so counting test code
+/// as a violation reports failures that cannot be fixed — and a guard that cries wolf
+/// gets switched off, which is worse than having no guard.
+fn shipping_code_only(src: &str) -> String {
+    let code = code_only(src);
+    match code.find("#[cfg(test)]") {
+        Some(idx) => code[..idx].to_string(),
+        None => code,
+    }
+}
+
 #[test]
 fn i1a_single_authority_connection() {
     // Only `db/` may open a raw SQLite connection for the memory authority.
+    //
+    // Two precisions matter here, both learned from this test firing on five
+    // harmless lines:
+    //
+    // 1. Only shipping code counts — see `shipping_code_only`.
+    // 2. Only `Connection::open(` counts, NOT `open_in_memory()`. An in-memory
+    //    database has no file, is discarded when the process exits, and cannot
+    //    corrupt or race the real store. Treating the two as the same thing is what
+    //    made this test look like it had found an architectural breach when every
+    //    hit was a unit test building a scratch database.
     let offenders: Vec<String> = rs_files(&memory_dir())
         .into_iter()
         .filter(|p| {
             let r = rel(p);
             !r.starts_with("db/")
-                && code_only(&std::fs::read_to_string(p).unwrap()).contains("Connection::open")
+                && shipping_code_only(&std::fs::read_to_string(p).unwrap())
+                    .contains("Connection::open(")
         })
         .map(|p| rel(&p))
         .collect();

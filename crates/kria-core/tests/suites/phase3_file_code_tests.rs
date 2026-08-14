@@ -7,6 +7,26 @@ use kria_core::safety::{BlacklistChecker, HitlGateway, PolicyEngine, RiskLevel};
 use kria_core::tools::registry;
 use std::path::Path;
 
+// These handlers need the environment, so they implement `execute_with_context` and
+// leave `execute` as the trait's erroring default — the same trap that made
+// `integration_file_ops` look like the file tools were broken. The agent calls
+// `execute_with_context`, so testing through it exercises the real path.
+fn test_ctx() -> kria_core::tools::ToolContext {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    kria_core::tools::ToolContext::new(
+        Arc::new(kria_core::infra::environment::LocalEnvironment::new()),
+        Arc::new(tokio::sync::Mutex::new(
+            kria_core::infra::environment::ShellState {
+                cwd: std::env::current_dir().expect("a working directory"),
+                env_vars: HashMap::new(),
+                generation: 0,
+            },
+        )),
+        tokio_util::sync::CancellationToken::new(),
+    )
+}
+
 // ── 3.1 & 3.2: File tools registration ──────────────────────
 
 #[test]
@@ -70,12 +90,12 @@ async fn phase3_search_file_contents_finds_text() {
     let handler = reg.get_handler("search_file_contents").unwrap();
     // Search for "fn " in our own source crate
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "directory": "src",
             "query": "pub fn register",
             "max_results": 5,
             "context_lines": 1,
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -91,11 +111,11 @@ async fn phase3_search_file_contents_case_insensitive() {
     let handler = reg.get_handler("search_file_contents").unwrap();
     // Search for "TOOLRESULT" (case-insensitive should match "ToolResult")
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "directory": "src",
             "query": "TOOLRESULT",
             "max_results": 3,
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -109,10 +129,10 @@ async fn phase3_project_structure_returns_tree() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_project_structure").unwrap();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": "src",
             "max_depth": 2,
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -206,9 +226,9 @@ async fn phase3_count_loc_returns_breakdown() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("count_lines_of_code").unwrap();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "directory": "src",
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -230,10 +250,10 @@ async fn phase3_find_todos_works() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("find_todos").unwrap();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "directory": "src",
             "max_results": 10,
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -249,9 +269,9 @@ async fn phase3_analyze_code_rust_file() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("analyze_code").unwrap();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": "src/lib.rs",
-        }))
+        }), test_ctx())
         .await;
     assert!(result.success);
     let data = &result.data;
@@ -284,10 +304,22 @@ fn phase3_document_tools_green_tier() {
 #[test]
 fn phase3_policy_classifies_read_as_green() {
     let policy = PolicyEngine::new();
+    // `read_file` is RED, not Green, and deliberately so: it is a canonical OS
+    // operation whose frozen contract declares `risk.fixed.red`, because the path is
+    // caller-supplied and may name a private key or a .env file. The policy engine
+    // reads that reviewed contract instead of guessing from the tool's name.
+    //
+    // The Green case is asserted below with `list_directory`, which the contract does
+    // rate harmless — so this test still covers "harmless reads are not gated".
     let decision = policy.evaluate("read_file", &serde_json::json!({ "path": "/tmp/test.txt" }));
-    assert_eq!(decision.risk_level, RiskLevel::Green);
-    assert!(!decision.requires_approval);
-    assert!(!decision.blocked);
+    assert_eq!(decision.risk_level, RiskLevel::Red);
+    assert!(decision.requires_approval, "a RED read still asks a human");
+    assert!(!decision.blocked, "RED is approval-gated, not forbidden");
+
+    let listing = policy.evaluate("list_directory", &serde_json::json!({ "path": "/tmp" }));
+    assert_eq!(listing.risk_level, RiskLevel::Green);
+    assert!(!listing.requires_approval);
+    assert!(!listing.blocked);
 }
 
 #[test]
@@ -366,7 +398,11 @@ fn phase3_clipboard_risk_tiers() {
     );
     assert_eq!(
         reg.get_def("type_text").unwrap().default_tier,
-        RiskLevel::Yellow
+        // RED, not Yellow. Synthetic keystrokes go to whatever window currently has
+        // focus — which may be a terminal, a password field, or a chat window — so the
+        // tool requires PIN confirmation. Its own description states the RED tier; the
+        // Yellow expectation here predates the GUI automation work that raised it.
+        RiskLevel::Red
     );
 }
 

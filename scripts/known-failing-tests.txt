@@ -1,0 +1,38 @@
+# Tests that need something this machine does not have.
+#
+# Every line needs a REASON. An entry without one is indistinguishable from a bug
+# somebody parked here, which is how a gate rots into decoration.
+#
+# `scripts/gate.sh` tolerates these, and TELLS YOU when one starts passing so the
+# line gets deleted rather than lingering.
+#
+# Format:  <test name>    # why it cannot pass here
+
+# ── Needs a Docker image that is not pulled ──────────────────────────────────
+# Failure is `No such image: ubuntu:24.04@sha256:cdb5fd...`. Pull that exact
+# digest and these run.
+docker_archive_io_tmpfs_test          # needs the pinned ubuntu:24.04 image
+docker_basic_execution_test           # needs the pinned ubuntu:24.04 image
+docker_env_var_injection_test         # needs the pinned ubuntu:24.04 image
+docker_memory_limit_oom_test          # needs the pinned ubuntu:24.04 image
+docker_output_flood_control_test      # needs the pinned ubuntu:24.04 image
+docker_pid_limit_exhaustion_test      # needs the pinned ubuntu:24.04 image
+
+# ── Needs an initialised OpenClaw skill database ─────────────────────────────
+# Failure is `no such table: installed_skills`. These exercise the live skill
+# substrate against a real store, which is not provisioned on this laptop.
+openclaw_live_functional::live_audit_log_table_queryable_via_raw_sql   # needs the OpenClaw store
+openclaw_live_functional::live_uninstall_removes_skill                 # needs the OpenClaw store
+
+# ── Needs a graphical session with specific apps ─────────────────────────────
+# These drive real windows (gedit, a terminal, an editor) and assert on focus
+# checkpoints. They cannot pass headless or without those apps installed.
+workflow_multistep_evals::eval_open_code_write_run_pascal_triangle   # needs a GUI session + editor
+workflow_multistep_evals::eval_open_code_write_save_run_four_stage   # needs a GUI session + editor
+workflow_multistep_evals::eval_open_gedit_type_save                 # needs a GUI session + gedit
+workflow_multistep_evals::eval_switch_to_terminal_and_run_command   # needs a GUI session + terminal
+
+# ── Needs a specific file in the owner's Downloads ───────────────────────────
+# The suite hardcodes /home/obaid/Downloads/Sem-8.pdf. Worth replacing with a
+# generated fixture so it stops depending on one person's filesystem.
+document_pipeline_test::doc_pipeline_pdf   # hardcoded path to a PDF that is not present

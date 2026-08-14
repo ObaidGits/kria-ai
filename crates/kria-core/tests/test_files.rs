@@ -163,7 +163,7 @@ async fn functional_fs01_read_existing_file() {
     }
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("read_file").unwrap().clone();
-    let result = handler.execute(serde_json::json!({ "path": path })).await;
+    let result = handler.execute_with_context(serde_json::json!({ "path": path }), test_ctx()).await;
     assert!(
         result.success,
         "read_file should succeed for Cargo.toml: {:?}",
@@ -182,7 +182,7 @@ async fn functional_fs01_read_missing_file_returns_error() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("read_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": "/nonexistent_path_kria_test_xyz/file.txt" }))
+        .execute_with_context(serde_json::json!({ "path": "/nonexistent_path_kria_test_xyz/file.txt" }), test_ctx())
         .await;
     assert!(
         !result.success,
@@ -200,7 +200,7 @@ async fn functional_fs02_list_directory() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("list_directory").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": "/media/obaid/SSD/KRIA" }))
+        .execute_with_context(serde_json::json!({ "path": "/media/obaid/SSD/KRIA" }), test_ctx())
         .await;
     if !result.success {
         // May be permission-denied in CI — that's fine as long as it's clean
@@ -222,7 +222,7 @@ async fn functional_fs10_calculate_dir_size() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("calculate_dir_size").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/crates" }))
+        .execute_with_context(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/crates" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -253,11 +253,11 @@ async fn functional_fs05_write_file_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("write_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": path.to_str().unwrap(),
             "content": "Hello KRIA",
             "overwrite": false
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -278,11 +278,11 @@ async fn functional_fs05_write_file_overwrite_false_fails_if_exists() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("write_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": path.to_str().unwrap(),
             "content": "new content",
             "overwrite": false
-        }))
+        }), test_ctx())
         .await;
     assert!(
         !result.success,
@@ -299,10 +299,10 @@ async fn functional_fs06_copy_file_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("copy_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "source": src.to_str().unwrap(),
             "destination": dst.to_str().unwrap()
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -321,10 +321,10 @@ async fn functional_fs07_rename_file_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("rename_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "source": original.to_str().unwrap(),
             "destination": renamed.to_str().unwrap()
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -349,10 +349,10 @@ async fn functional_fs08_move_file_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("move_file").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "source": src.to_str().unwrap(),
             "destination": dst.to_str().unwrap()
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -371,7 +371,7 @@ async fn functional_fs09_get_file_info_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("get_file_info").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": file.to_str().unwrap() }))
+        .execute_with_context(serde_json::json!({ "path": file.to_str().unwrap() }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -446,10 +446,10 @@ async fn functional_fs17_diff_files_sandbox() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("diff_files").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "file_a": a.to_str().unwrap(),
             "file_b": b.to_str().unwrap()
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -470,7 +470,7 @@ async fn functional_fs16_find_todos_kria() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("find_todos").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "directory": "/media/obaid/SSD/KRIA/crates" }))
+        .execute_with_context(serde_json::json!({ "directory": "/media/obaid/SSD/KRIA/crates" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -484,7 +484,7 @@ async fn functional_fs15_count_lines_of_code() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("count_lines_of_code").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/crates" }))
+        .execute_with_context(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/crates" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -498,13 +498,33 @@ async fn functional_fs19_analyze_code() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("analyze_code").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "file_path": "/media/obaid/SSD/KRIA/crates/kria-core/src/agent/router.rs",
             "language": "rust"
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
         "analyze_code must not panic"
     );
+}
+
+// `execute_with_context` is what `loop_engine` and `resume_executor` call, so tests
+// go through it too. `execute` has an erroring default body — see
+// scripts/fix-tool-execute-tests.py for why that default is correct and these calls
+// were the thing that was wrong.
+fn test_ctx() -> kria_core::tools::ToolContext {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    kria_core::tools::ToolContext::new(
+        Arc::new(kria_core::infra::environment::LocalEnvironment::new()),
+        Arc::new(tokio::sync::Mutex::new(
+            kria_core::infra::environment::ShellState {
+                cwd: std::env::current_dir().expect("a working directory"),
+                env_vars: HashMap::new(),
+                generation: 0,
+            },
+        )),
+        tokio_util::sync::CancellationToken::new(),
+    )
 }

@@ -15,12 +15,13 @@ use std::sync::Arc;
 fn green_risk_for_read_only_actions() {
     let engine = PolicyEngine::new();
 
-    // `read_file` is deliberately NOT in this list. It is a canonical OS operation
-    // whose frozen contract declares `risk.fixed.red`, because the path is
-    // caller-supplied and may name a private key or an .env file. The policy engine
-    // now defers to that reviewed contract instead of guessing from the tool's name,
-    // so asserting Green here would assert against the contract.
-    let green_actions = ["get_clipboard", "web_search", "list_directory"];
+    // Neither `read_file` nor `get_clipboard` belongs in this list. Both are canonical
+    // OS operations whose frozen contract declares `risk.fixed.red`: a caller-supplied
+    // file path may name a private key, and the clipboard routinely holds a password
+    // someone just copied. The policy engine defers to that reviewed contract rather
+    // than guessing from the tool's name, so asserting Green here would assert against
+    // the contract. Both are pinned as RED in the test below.
+    let green_actions = ["web_search", "list_directory"];
 
     for action in &green_actions {
         let decision = engine.evaluate(action, &serde_json::json!({}));
@@ -206,19 +207,25 @@ async fn hitl_cancel_all_clears_pending() {
 
 #[test]
 fn read_file_follows_the_frozen_contract_not_its_name() {
-    // Pins the decision that `green_risk_for_read_only_actions` above deliberately
-    // stops asserting. Reading an arbitrary caller-supplied path is RED because the
-    // reviewed contract says so; if someone later "simplifies" the policy engine back
-    // to name-based guessing, this fails and explains why.
+    // Pins the decisions that `green_risk_for_read_only_actions` above deliberately
+    // stops asserting. These reads are RED because the reviewed contract says so; if
+    // someone later "simplifies" the policy engine back to name-based guessing, this
+    // fails and explains why.
     let engine = PolicyEngine::new();
-    let decision = engine.evaluate("read_file", &serde_json::json!({}));
-    assert_eq!(
-        decision.risk_level,
-        RiskLevel::Red,
-        "the frozen contract declares risk.fixed.red for os.read_file"
-    );
-    assert!(
-        decision.requires_approval,
-        "a RED read must still ask a human"
-    );
+    for sensitive_read in ["read_file", "get_clipboard"] {
+        let decision = engine.evaluate(sensitive_read, &serde_json::json!({}));
+        assert_eq!(
+            decision.risk_level,
+            RiskLevel::Red,
+            "the frozen contract declares risk.fixed.red for {sensitive_read}"
+        );
+        assert!(
+            decision.requires_approval,
+            "a RED read must still ask a human: {sensitive_read}"
+        );
+        assert!(
+            !decision.blocked,
+            "RED is approval-gated, never forbidden: {sensitive_read}"
+        );
+    }
 }

@@ -62,7 +62,7 @@ async fn functional_chain01_stats_plus_summary() {
     // PROMPT-ID: CHAIN-01 — Step 1: get_cpu_usage; Step 2: format summary
     let reg = registry::build_default_registry();
     let cpu_handler = reg.get_handler("get_cpu_usage").unwrap().clone();
-    let cpu_result = cpu_handler.execute(serde_json::json!({})).await;
+    let cpu_result = cpu_handler.execute_with_context(serde_json::json!({}), test_ctx()).await;
     assert!(
         cpu_result.success,
         "Step 1 (cpu_usage) failed: {:?}",
@@ -79,10 +79,10 @@ async fn functional_chain01_stats_plus_summary() {
     if pct > 80.0 {
         let notif_handler = reg.get_handler("send_notification").unwrap().clone();
         let notif_result = notif_handler
-            .execute(serde_json::json!({
+            .execute_with_context(serde_json::json!({
                 "title": "High CPU",
                 "body": format!("CPU usage is {pct:.1}%")
-            }))
+            }), test_ctx())
             .await;
         assert!(
             notif_result.success || notif_result.error.is_some(),
@@ -108,7 +108,7 @@ async fn functional_chain02_read_transform_write() {
     // Step 1: read file
     let read_handler = reg.get_handler("read_file").unwrap().clone();
     let read_result = read_handler
-        .execute(serde_json::json!({ "path": source.to_str().unwrap() }))
+        .execute_with_context(serde_json::json!({ "path": source.to_str().unwrap() }), test_ctx())
         .await;
     assert!(
         read_result.success,
@@ -131,10 +131,10 @@ async fn functional_chain02_read_transform_write() {
     let dest = sandbox.child("dest.txt");
     let write_handler = reg.get_handler("write_file").unwrap().clone();
     let write_result = write_handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "path": dest.to_str().unwrap(),
             "content": transformed
-        }))
+        }), test_ctx())
         .await;
     assert!(
         write_result.success,
@@ -192,7 +192,7 @@ async fn functional_chain04_fetch_and_summarise() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("fetch_webpage").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "url": "https://blog.rust-lang.org/" }))
+        .execute_with_context(serde_json::json!({ "url": "https://blog.rust-lang.org/" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -236,7 +236,7 @@ async fn functional_chain05_git_status_check() {
     let reg = registry::build_default_registry();
     let handler = reg.get_handler("git_status").unwrap().clone();
     let result = handler
-        .execute(serde_json::json!({ "path": kria.to_str().unwrap() }))
+        .execute_with_context(serde_json::json!({ "path": kria.to_str().unwrap() }), test_ctx())
         .await;
     assert!(
         result.success,
@@ -334,7 +334,7 @@ async fn functional_side01_document_extract_sandbox_pdf() {
     let handler = handler.clone();
     // Use a real file that exists in the workspace
     let result = handler
-        .execute(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/README.md" }))
+        .execute_with_context(serde_json::json!({ "path": "/media/obaid/SSD/KRIA/README.md" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -355,10 +355,10 @@ async fn functional_side02_code_analyze_ast() {
     };
     let handler = handler.clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "code": "fn add(a: i32, b: i32) -> i32 { a + b }",
             "language": "rust"
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -379,7 +379,7 @@ async fn functional_side03_web_extract_article() {
     };
     let handler = handler.clone();
     let result = handler
-        .execute(serde_json::json!({ "url": "https://www.rust-lang.org/learn" }))
+        .execute_with_context(serde_json::json!({ "url": "https://www.rust-lang.org/learn" }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -410,9 +410,9 @@ async fn functional_side04_embeddings_generate() {
     };
     let handler = handler.clone();
     let result = handler
-        .execute(serde_json::json!({
+        .execute_with_context(serde_json::json!({
             "text": "Kria is a voice-first AI assistant."
-        }))
+        }), test_ctx())
         .await;
     assert!(
         result.success || result.error.is_some(),
@@ -448,11 +448,31 @@ async fn functional_side05_audio_preprocess() {
     };
     let handler = handler.clone();
     let result = handler
-        .execute(serde_json::json!({ "path": audio_path.to_str().unwrap() }))
+        .execute_with_context(serde_json::json!({ "path": audio_path.to_str().unwrap() }), test_ctx())
         .await;
     // May succeed or fail depending on VAD/audio pipeline being up
     assert!(
         result.success || result.error.is_some(),
         "audio_preprocess must not panic"
     );
+}
+
+// `execute_with_context` is what `loop_engine` and `resume_executor` call, so tests
+// go through it too. `execute` has an erroring default body — see
+// scripts/fix-tool-execute-tests.py for why that default is correct and these calls
+// were the thing that was wrong.
+fn test_ctx() -> kria_core::tools::ToolContext {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    kria_core::tools::ToolContext::new(
+        Arc::new(kria_core::infra::environment::LocalEnvironment::new()),
+        Arc::new(tokio::sync::Mutex::new(
+            kria_core::infra::environment::ShellState {
+                cwd: std::env::current_dir().expect("a working directory"),
+                env_vars: HashMap::new(),
+                generation: 0,
+            },
+        )),
+        tokio_util::sync::CancellationToken::new(),
+    )
 }
