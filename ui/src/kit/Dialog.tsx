@@ -44,7 +44,6 @@ export function Dialog(props: DialogProps) {
     "open", "defaultOpen", "onOpenChange", "hideClose", "triggerVariant", "layer",
   ]);
   const [internalOpen, setInternalOpen] = createSignal(local.defaultOpen ?? false);
-  const [hasOpened, setHasOpened] = createSignal(Boolean(local.open || local.defaultOpen));
   const isOpen = () => local.open ?? internalOpen();
   const titleId = `dialog-title-${createUniqueId()}`;
   const descriptionId = `dialog-description-${createUniqueId()}`;
@@ -72,7 +71,6 @@ export function Dialog(props: DialogProps) {
   const focusables = () => Array.from(panelRef?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])
     .filter((element) => !element.hasAttribute("data-focus-trap"));
   const setOpen = (value: boolean) => {
-    if (value) setHasOpened(true);
     if (local.open === undefined) setInternalOpen(value);
     local.onOpenChange?.(value);
     if (!value) queueMicrotask(() => triggerRef?.focus());
@@ -80,8 +78,17 @@ export function Dialog(props: DialogProps) {
 
   createEffect(() => {
     if (!isOpen()) return;
-    setHasOpened(true);
     queueMicrotask(() => (focusables()[0] ?? panelRef)?.focus());
+  });
+
+  // Closing UNMOUNTS the panel, so its overlay-registry entry has to be released
+  // here — otherwise the registry keeps pointing at a detached node and the
+  // surfaces beneath stay inert, which looks exactly like a frozen app.
+  createEffect(() => {
+    if (isOpen()) return;
+    unregisterSurface?.();
+    unregisterSurface = undefined;
+    panelRef = undefined;
   });
 
   function onKeyDown(event: KeyboardEvent): void {
@@ -130,16 +137,21 @@ export function Dialog(props: DialogProps) {
           </Show>
         </button>
       </Show>
-      <Show when={hasOpened()}>
+      {/* Mounted ONLY while open. Hiding a mounted overlay with the `hidden`
+          attribute does not work here: `.kit-dialog__positioner` sets
+          `display: flex`, and an author `display` beats the UA's
+          `[hidden] { display: none }` — so a closed dialog left behind a
+          full-screen `position: fixed; inset: 0` layer that swallowed every
+          click app-wide while staying invisible. Unmounting removes that
+          failure mode entirely rather than papering over it. */}
+      <Show when={isOpen()}>
         <Portal>
           <div
             class="kit-dialog__overlay"
             data-layer={layerAttr()}
-            hidden={!isOpen()}
-            data-open={isOpen() ? "" : undefined}
-            data-closed={!isOpen() ? "" : undefined}
+            data-open=""
           />
-          <div class="kit-dialog__positioner" data-layer={layerAttr()} hidden={!isOpen()}>
+          <div class="kit-dialog__positioner" data-layer={layerAttr()}>
             <div
               ref={bindPanel}
               class="kit-dialog__panel"
@@ -148,9 +160,7 @@ export function Dialog(props: DialogProps) {
               aria-labelledby={titleId}
               aria-describedby={local.description ? descriptionId : undefined}
               tabindex={-1}
-              hidden={!isOpen()}
-              data-open={isOpen() ? "" : undefined}
-              data-closed={!isOpen() ? "" : undefined}
+              data-open=""
               onKeyDown={onKeyDown}
             >
               <span data-focus-trap tabindex={0} onFocus={() => {

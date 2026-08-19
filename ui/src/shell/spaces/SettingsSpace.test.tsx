@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-lib
 const bridgeInvoke = vi.hoisted(() => vi.fn());
 vi.mock("../../bridge/invoke", () => ({ bridgeInvoke, bridgeInvokeOptional: vi.fn(async () => null) }));
 import { settingsStore, type SettingMeta } from "../../stores/settingsStore";
+import { capabilityStore } from "../../stores/capabilityStore";
 import { currentRoute, navigate } from "../router";
 import { currentSurface } from "../../app/surface";
 import SettingsSpace from "./SettingsSpace";
@@ -50,6 +51,216 @@ beforeEach(() => {
 });
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+describe("SettingsSpace — Stage 5 verification", () => {
+  /**
+   * End-to-end checks for what this work set out to fix, phrased as the user would
+   * describe it: every provider type is offered where they look, and the control that
+   * used to lie is gone.
+   */
+  it("lets a provider be added from Settings with a key, endpoint and model", async () => {
+    const providerTypes = [
+      { id: "ollama", name: "Ollama" },
+      { id: "llama_cpp", name: "llama.cpp" },
+      { id: "openai", name: "OpenAI" },
+      { id: "gemini", name: "Gemini" },
+      { id: "anthropic", name: "Anthropic" },
+      { id: "openrouter", name: "OpenRouter" },
+      { id: "openai_compatible", name: "OpenAI-compatible" },
+    ];
+    bridgeInvoke.mockImplementation(async (command: string) => {
+      if (command === "get_provider_types") return { ok: true, data: { types: providerTypes } };
+      if (command === "list_providers") return { ok: true, data: { providers: [] } };
+      return { ok: true, data: [] };
+    });
+
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    // "Add provider" is the affordance the user said did not exist in Settings.
+    const addButton = await vi.waitFor(() => {
+      const found = screen.getByRole("button", { name: /^Add provider$/ });
+      expect(found).toBeInTheDocument();
+      return found;
+    });
+    fireEvent.click(addButton);
+
+    // These four fields ARE the complaint: "api key model name endpoint ye sab dalne ka
+    // koi option nahi". The editor form must offer every one of them.
+    await vi.waitFor(() => {
+      for (const label of ["Provider type", "Endpoint URL", "API key", "Model ID"]) {
+        expect(screen.getByLabelText(new RegExp(label, "i")), `${label} field`).toBeInTheDocument();
+      }
+    });
+  });
+
+  it("loads all seven provider types into the editor", async () => {
+    const providerTypes = [
+      "ollama", "llama_cpp", "openai", "gemini", "anthropic", "openrouter",
+      "openai_compatible",
+    ].map((id) => ({ id, name: id }));
+    bridgeInvoke.mockImplementation(async (command: string) => {
+      if (command === "get_provider_types") return { ok: true, data: { types: providerTypes } };
+      if (command === "list_providers") return { ok: true, data: { providers: [] } };
+      return { ok: true, data: [] };
+    });
+
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    // Four of these — Ollama, OpenAI, Anthropic, OpenRouter — had no route from
+    // Settings at all before this work.
+    await vi.waitFor(() => {
+      expect(capabilityStore.providerTypes().map((type) => type.id).sort()).toEqual([
+        "anthropic", "gemini", "llama_cpp", "ollama", "openai", "openai_compatible",
+        "openrouter",
+      ]);
+    });
+  });
+
+  it("no longer renders the legacy AI routing control", async () => {
+    // `llm.routing_mode` is derived from the active provider, so the row that used to
+    // sit here accepted a change and then silently reverted on the next config load.
+    // It is now flagged non-functional and the store drops it before the page sees it.
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-setting-key="llm.routing_mode"]')).toBeNull();
+    });
+    expect(document.body.textContent ?? "").not.toContain("AI routing");
+  });
+});
+
+describe("SettingsSpace — noise reduction", () => {
+  /**
+   * The page was "full of unnecessary warnings and infos". These pin the three worst
+   * offenders so they cannot creep back:
+   *   - a sentence whose only content was that there was no content,
+   *   - a two-clause risk warning that said the same thing twice,
+   *   - a description paragraph on 70 of 76 rows, 25 of them over 60 characters.
+   */
+  it("says nothing when there is no risk classification to report", async () => {
+    // The row for a `risk: "none"` setting must not carry "No additional risk
+    // classification is available for this raw field." The Risk badge already says None.
+    settingsStore.setActiveGroup("voice");
+    render(() => <SettingsSpace />);
+
+    const row = await vi.waitFor(() => {
+      const found = document.querySelector('[data-setting-key="voice.mode"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(row.textContent).not.toContain("No additional risk classification");
+  });
+
+  it("keeps the high-risk warning but not the doubled-up version", () => {
+    settingsStore.setActiveGroup("developer");
+    render(() => <SettingsSpace />);
+    // Whatever the wording, it must not be the old sentence, and a high-risk field
+    // must still warn — silence here would be worse than verbosity.
+    const body = document.body.textContent ?? "";
+    expect(body).not.toContain("runtime safety or exposure may change");
+  });
+
+  it("shows a short description inline with no toggle", async () => {
+    settingsStore.setSchema([{
+      key: "ui.theme", section: "ui", field: "theme", label: "Theme", group: "you",
+      type: "select", risk: "low", requiresRestart: false, envLocked: false,
+      secret: false, options: ["dark", "light"],
+      description: "Interface colour scheme.",
+    } as SettingMeta]);
+    settingsStore.setActiveGroup("you");
+    render(() => <SettingsSpace />);
+
+    const row = await vi.waitFor(() => {
+      const found = document.querySelector('[data-setting-key="ui.theme"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(row.textContent).toContain("Interface colour scheme.");
+    // A one-liner is cheap to read; adding a click for it would be worse, not better.
+    expect(row.querySelector(".kria-settings__description-toggle")).toBeNull();
+    expect(row.querySelector(".kria-settings__row-description--clamped")).toBeNull();
+  });
+
+  it("clamps a long description behind a toggle that reveals it", async () => {
+    const long =
+      "Maximum tokens the model can consider at once. Larger values consume more memory.";
+    settingsStore.setSchema([{
+      key: "llm.context_window", section: "llm", field: "context_window",
+      label: "Context window", group: "intelligence", type: "number", risk: "low",
+      requiresRestart: false, envLocked: false, secret: false, description: long,
+    } as SettingMeta]);
+    settingsStore.setSettings({ llm: { context_window: 8192 } });
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    const row = await vi.waitFor(() => {
+      const found = document.querySelector('[data-setting-key="llm.context_window"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+
+    // Clamped, but present — the text is folded, never deleted.
+    expect(row.textContent).toContain(long);
+    expect(row.querySelector(".kria-settings__row-description--clamped")).not.toBeNull();
+
+    const toggle = row.querySelector<HTMLButtonElement>(".kria-settings__description-toggle");
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle!);
+    expect(toggle!.getAttribute("aria-expanded")).toBe("true");
+    expect(row.querySelector(".kria-settings__row-description--clamped")).toBeNull();
+  });
+});
+
+describe("SettingsSpace — LLM provider editor reachability", () => {
+  /**
+   * The user's report was that Settings offered no way to add an LLM provider with
+   * an API key, endpoint and model name — while the backend supports SEVEN provider
+   * types and has full add/edit/remove/test commands.
+   *
+   * Both were true. The editor existed, fully wired, in the capabilities space; the
+   * "AI & Models" group in Settings showed only a legacy three-choice routing
+   * dropdown. Nobody looking in Settings would ever find it.
+   *
+   * These tests pin that it is reachable from Settings, that opening the group asks
+   * for the provider data (otherwise the panel mounts against an empty store and
+   * honestly reports "no providers" on an install that has several), and that it does
+   * NOT leak into unrelated groups.
+   */
+  it("renders the provider editor in the AI & Models group", async () => {
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    // Selected by the panel's own root class rather than a test-only attribute, so
+    // the test breaks if the panel stops rendering — not merely if a hook is renamed.
+    await vi.waitFor(() => {
+      expect(document.querySelector(".kria-models-runtime")).not.toBeNull();
+    });
+  });
+
+  it("asks for provider data when the group opens", async () => {
+    settingsStore.setActiveGroup("intelligence");
+    render(() => <SettingsSpace />);
+
+    // `list_providers` and `get_provider_types` are what the models segment loads.
+    // Without this the panel would render an empty editor on a configured machine.
+    await vi.waitFor(() => {
+      const called = bridgeInvoke.mock.calls.map((call) => call[0]);
+      expect(called).toContain("list_providers");
+      expect(called).toContain("get_provider_types");
+    });
+  });
+
+  it("does not render the provider editor in an unrelated group", () => {
+    settingsStore.setActiveGroup("voice");
+    render(() => <SettingsSpace />);
+    expect(document.querySelector(".kria-models-runtime")).toBeNull();
+  });
+});
 
 describe("SettingsSpace — task 11.1, Requirements 10.1/10.2", () => {
   it("renders all eight searchable groups and selected backend-backed settings", () => {

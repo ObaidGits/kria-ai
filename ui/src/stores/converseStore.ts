@@ -505,6 +505,16 @@ async function setThreadFlag(
       .map((thread) => (thread.id === threadId ? { ...thread, [field]: value } : thread))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt),
   );
+  // Archiving REMOVES the chat from the visible list, so say so. Silently making a
+  // conversation disappear is indistinguishable from losing it.
+  if (field === "archived") {
+    actionNotification(
+      "success",
+      value
+        ? "Chat archived — hidden from the list until you choose Show archived."
+        : "Chat restored to the list.",
+    );
+  }
   return true;
 }
 

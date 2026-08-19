@@ -37,6 +37,33 @@ describe("Menu", () => {
     expect(screen.getAllByRole("menuitem").length).toBe(2);
   });
 
+  // The `label` prop rendered a bare `GroupLabel`, which Kobalte refuses outside a
+  // `Group` — it threw "useMenuGroupContext must be used within a Menu.Group" and
+  // the app's error boundary turned that into a full "startup error" screen. The
+  // Converse export menu is the one caller that passes `label`, so the crash showed
+  // up as "the download button breaks the app". The existing tests missed it because
+  // portal content only renders once the menu is OPEN, so this one opens it.
+  it("renders a group label without crashing, and still shows its items", () => {
+    render(() => (
+      <Menu
+        triggerLabel="Export conversation"
+        label="Export format"
+        items={[
+          { id: "text", label: "Plain text (.txt)" },
+          { id: "json", label: "JSON (.json)" },
+        ]}
+      />
+    ));
+    openMenu("Export conversation");
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByText("Export format")).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitem").length).toBe(2);
+    expect(
+      screen.getByRole("menuitem", { name: "JSON (.json)" }),
+    ).toBeInTheDocument();
+  });
+
   it("invokes onSelect when an item is chosen", () => {
     const onSelect = vi.fn();
     render(() => (

@@ -111,18 +111,9 @@ model_path = "~/.kria/models/classifier/model.onnx"
 
 
 [memory]
-enabled = true
 max_facts = 10000
 decay_half_life_days = 7
 prune_threshold = 0.01
-
-[gui_cognition]
-enabled = true
-
-[tools]
-enabled = true
-disabled_groups = []
-disabled_tools = []
 
 [safety]
 require_approval_for_red = true
@@ -133,36 +124,6 @@ rollback_max_age_days = 30
 [server]
 host = "127.0.0.1"
 port = 3001
-# MGR-003 / F1.6.1: the server binds to loopback by default (above). Setting
-# `host` to a non-loopback address requires explicitly setting
-# `remote_enabled = true` PLUS `enable_auth = true` and a non-empty
-# `jwt_secret` below, or the server refuses to start.
-#
-# When `remote_enabled = true`, every request must carry a valid
-# `Authorization: Bearer <token>` HMAC-signed with `jwt_secret` (F1.6.2 —
-# signed identity/expiry/replay semantics; see `kria-server/src/auth.rs`).
-# Loopback mode (the default) does not require this — MGR-003 only mandates
-# authenticated identity for the non-loopback/remote case.
-remote_enabled = false
-# MGR-003 / F1.6.3 — exact browser Origin allowlist enforced ONLY when
-# remote_enabled = true. An empty list in remote mode is FAIL-CLOSED: it
-# denies every cross-origin browser request, it does NOT mean "allow all".
-# Example: allowed_origins = ["https://kria.example.com"]
-allowed_origins = []
-# MGR-003 / F1.6.3 — set true once a reverse proxy/tunnel in front of this
-# server terminates TLS. This process does not terminate TLS itself; leaving
-# this false while remote_enabled = true only logs a startup warning (it does
-# not refuse to start — this repo cannot verify a proxy's existence from
-# inside the process).
-require_protected_transport = false
-# MGR-003 / F1.6.3 — request/body/rate/concurrency limits. Body/timeout/
-# concurrency apply to EVERY request (loopback and remote); the per-minute
-# rate limit applies only in remote mode (loopback has no untrusted-caller
-# concept to key it on).
-max_body_bytes = 262144
-request_timeout_secs = 30
-max_concurrent_requests = 128
-remote_rate_limit_per_minute = 120
 
 # ─── Phase 4.5 — Mobile prompt-control ───
 [mobile]
@@ -213,9 +174,6 @@ news_feeds = [
     "https://feeds.arstechnica.com/arstechnica/index",
     "https://hnrss.org/frontpage",
 ]
-
-[mcp]
-enabled = true
 
 [hardware]
 tier = ""                                   # "" = auto-detect; or lite|standard|performance|high

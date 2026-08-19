@@ -190,6 +190,22 @@ const CONTENT_LEAD_VERBS: &[&str] = &[
     "render ",
     "code ",
 ];
+
+/// Nouns naming physical machine state that `os_control` owns, and for which KRIA's
+/// own schema has NO field. Every entry was checked against the schema before being
+/// added — that check is the entry criterion, because the whole point is that a
+/// settings reading cannot be correct for these words.
+///
+/// `speaker` and `mute` are deliberately excluded: `voice.speaker_device` is a real
+/// setting, and "mute" is a value token the settings value parser uses.
+const OS_HARDWARE_NOUNS: &[&str] = &[
+    "volume",
+    "brightness",
+    "night light",
+    "wifi",
+    "wi-fi",
+    "bluetooth",
+];
 /// Copular tokens marking a DECLARATIVE statement/opinion ("dark mode is ugly").
 /// A short setting phrase inside a statement is a comment, not a command.
 const STATEMENT_COPULAS: &[&str] = &[
@@ -437,6 +453,24 @@ impl SettingsIntentPipeline {
         // an image_mode value on the value-grounded path.
         let gen_route = norm.contains("generate") && norm.contains("using");
         if !gen_route && CONTENT_LEAD_VERBS.iter().any(|v| norm.starts_with(v)) {
+            trace.decision = "not_settings";
+            return (SettingsDecision::NotSettings, trace);
+        }
+
+        // ── Machine-hardware guard (no-interference) ─────────────────────────
+        // These nouns name PHYSICAL MACHINE state that `os_control` owns and that
+        // KRIA's own schema has no field for at all. Without this guard, fuzzy
+        // matching latched onto an incidental token: "Turn Volume up to 40%" scored
+        // against `orchestrator.min_ngl_delta_up` purely because both contain "up",
+        // landed in the clarify band, and answered "Did you want to change
+        // orchestrator.min_ngl_delta_up?" — and because this stage runs BEFORE the
+        // tool router and returns `Claimed`, the turn ended before `set_volume`
+        // could ever be considered. Since no such config field exists, a settings
+        // reading is never right here; hand the turn on instead of guessing.
+        //
+        // `speaker` is deliberately ABSENT: `voice.speaker_device` is a real
+        // setting, so "change my speaker" must still reach this pipeline.
+        if OS_HARDWARE_NOUNS.iter().any(|n| norm.contains(n)) {
             trace.decision = "not_settings";
             return (SettingsDecision::NotSettings, trace);
         }
@@ -701,6 +735,48 @@ mod tests {
             SettingsDecision::Clarify { .. } => "clarify",
             SettingsDecision::NotSettings => "not_settings",
         }
+    }
+
+    /// Physical machine controls must never be claimed by the settings pipeline.
+    /// This gate runs BEFORE the tool router and a claim ends the turn, so a false
+    /// positive here does not merely answer oddly — it makes the OS tool unreachable.
+    /// "Turn Volume up to 40%" was answered with "Did you want to change
+    /// orchestrator.min_ngl_delta_up?" because both strings contain "up".
+    #[test]
+    fn machine_hardware_commands_are_never_settings() {
+        let conv = ConversationContext::default();
+        let p = pipeline();
+        for prompt in [
+            "Turn Volume up to 40%",
+            "Turn Volume Down to 70%",
+            "turn the volume up",
+            "set volume to 40%",
+            "turn brightness down",
+            "turn on wifi",
+            "turn bluetooth off",
+            "enable night light",
+        ] {
+            let decision = p.classify(prompt, &conv);
+            assert_eq!(
+                decision_kind(&decision),
+                "not_settings",
+                "{prompt:?} names machine hardware and must pass through to the tool router"
+            );
+        }
+    }
+
+    /// The guard must not swallow the real settings that merely sound audio-ish:
+    /// `voice.speaker_device` IS a KRIA setting, so it has to stay reachable.
+    #[test]
+    fn audio_device_settings_still_reach_the_pipeline() {
+        let conv = ConversationContext::default();
+        let p = pipeline();
+        let decision = p.classify("change the speaker device to auto", &conv);
+        assert_ne!(
+            decision_kind(&decision),
+            "not_settings",
+            "voice.speaker_device is a real setting and must not be guarded away"
+        );
     }
 
     #[test]

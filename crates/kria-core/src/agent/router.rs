@@ -594,6 +594,18 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             r"(?i)\b(set|change|put|increase|decrease|raise|lower|turn\s+up|turn\s+down)\b.{0,20}\b(volume|sound|speaker)\b",
             "set_volume",
         ),
+        // English separates the phrasal verb: "turn the volume UP", "turn volume
+        // down to 70%". The pattern above only matches the joined order ("turn up
+        // the volume"), so the most natural phrasing reached no tool at all and the
+        // turn fell through to the settings gate, which mis-claimed it.
+        (
+            r"(?i)\b(turn|set|put|bring|crank|bump)\b.{0,20}\b(volume|sound)\b.{0,20}\b(up|down|to|at|higher|lower|louder|quieter)\b",
+            "set_volume",
+        ),
+        (
+            r"(?i)\b(volume|sound)\s+(up|down|louder|quieter|higher|lower)\b",
+            "set_volume",
+        ),
         (
             r"(?i)\b(volume|sound|speaker|awaaz)\s+(ko|set|badhao|ghataao|ghatao|badha|ghata|barhao|badhaao)\b|\b(volume|sound|speaker|awaaz)\s+\d+",
             "set_volume",
@@ -605,6 +617,15 @@ static DIRECT_TOOL_RE: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
         ),
         (
             r"(?i)\b(set|change|increase|decrease|raise|lower|turn\s+up|turn\s+down)\b.{0,20}\bbrightness\b",
+            "set_brightness",
+        ),
+        // Same separable-verb gap as volume: "turn the brightness down".
+        (
+            r"(?i)\b(turn|set|put|bring)\b.{0,20}\bbrightness\b.{0,20}\b(up|down|to|at|higher|lower|dimmer|brighter)\b",
+            "set_brightness",
+        ),
+        (
+            r"(?i)\bbrightness\s+(up|down|higher|lower|dimmer|brighter)\b",
             "set_brightness",
         ),
         (
@@ -1527,6 +1548,52 @@ impl IntentRouter {
 #[cfg(test)]
 mod tests {
     use super::{Intent, IntentRouter};
+
+    /// Exact phrasings from a real failing session. English separates the phrasal
+    /// verb ("turn the volume UP"), and only the joined order was covered, so these
+    /// reached no tool at all — the turn then fell through to the settings gate,
+    /// which mis-claimed "Turn Volume up to 40%" as `orchestrator.min_ngl_delta_up`
+    /// because both strings contain "up".
+    #[test]
+    fn routes_separated_phrasal_volume_commands_to_set_volume() {
+        for prompt in [
+            "Turn Volume up to 40%",
+            "Turn Volume Down to 70%",
+            "turn the volume up",
+            "turn volume down",
+            "volume up",
+            "crank the sound up",
+            // The already-working orders must keep working.
+            "set volume to 40%",
+            "turn up the volume",
+            "increase the volume",
+        ] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some("set_volume"),
+                "{prompt:?} should route to set_volume"
+            );
+        }
+    }
+
+    #[test]
+    fn routes_separated_phrasal_brightness_commands_to_set_brightness() {
+        for prompt in [
+            "Turn brightness up to 60%",
+            "turn brightness down",
+            "brightness down",
+            "turn down the brightness",
+            "set brightness to 60",
+        ] {
+            let result = IntentRouter::classify(prompt);
+            assert_eq!(
+                result.tool_hint.as_deref(),
+                Some("set_brightness"),
+                "{prompt:?} should route to set_brightness"
+            );
+        }
+    }
 
     #[test]
     fn routes_latest_news_prompts_to_search_news() {

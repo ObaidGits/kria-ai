@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { Dialog } from "./Dialog";
 import { Confirm } from "./Confirm";
 
@@ -13,6 +14,53 @@ describe("Dialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  // A closed dialog used to stay mounted and rely on the `hidden` attribute to
+  // disappear. That does not work: `.kit-dialog__positioner` sets `display: flex`,
+  // and an author `display` overrides the UA's `[hidden] { display: none }`, so a
+  // full-screen `position: fixed; inset: 0` layer stayed over the whole app and ate
+  // every click while remaining invisible — the app looked frozen until reload.
+  // These pin that nothing is left behind, which the attribute alone cannot promise.
+  it("leaves no overlay or positioner in the DOM once closed", () => {
+    render(() => (
+      <Dialog triggerLabel="Open" title="Settings">
+        <p>Body</p>
+      </Dialog>
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(document.querySelector(".kit-dialog__positioner")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(document.querySelector(".kit-dialog__positioner")).toBeNull();
+    expect(document.querySelector(".kit-dialog__overlay")).toBeNull();
+    expect(document.querySelector(".kit-dialog__panel")).toBeNull();
+  });
+
+  it("leaves nothing behind when a controlled dialog is closed by its owner", () => {
+    // The chat page drives Confirm this way: `open` is derived from a signal that
+    // the confirm handler clears. Deleting a chat froze the UI because this path
+    // left the positioner mounted.
+    const [open, setOpen] = createSignal(true);
+    render(() => (
+      <Confirm
+        open={open()}
+        onOpenChange={(next) => setOpen(next)}
+        title="Delete chat?"
+        message="This cannot be undone."
+        confirmLabel="Delete chat"
+        risk="danger"
+        onConfirm={() => {}}
+      />
+    ));
+    expect(document.querySelector(".kit-dialog__positioner")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
+
+    expect(open()).toBe(false);
+    expect(document.querySelector(".kit-dialog__positioner")).toBeNull();
+    expect(document.querySelector(".kit-dialog__overlay")).toBeNull();
   });
 
   it("labels the dialog with its title", () => {
@@ -48,7 +96,13 @@ describe("Dialog", () => {
 
     fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(dialog).toHaveAttribute("data-closed");
+    // Escape must REMOVE the dialog, not merely mark it closed. The old assertion
+    // (`data-closed` on a still-mounted panel) pinned the behaviour that froze the
+    // app: the panel's `position: fixed; inset: 0` positioner stayed over the whole
+    // UI and swallowed every click, because a CSS `display: flex` overrides the
+    // `hidden` attribute it relied on.
+    expect(screen.queryByRole("dialog", { name: "Accessible dialog" })).toBeNull();
+    expect(dialog.isConnected).toBe(false);
   });
 
   it("elevates an approval-confirm dialog above the Approval Center (§20.3 / Req 11.9)", async () => {

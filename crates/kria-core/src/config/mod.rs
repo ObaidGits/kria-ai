@@ -1900,6 +1900,21 @@ fn provider_api_key_env_names(
     names
 }
 
+/// Recompute the legacy `llm.*` routing fields from whichever provider is active.
+///
+/// # This is the derivation, not a bug — do not remove it
+///
+/// It is tempting to read this as "the thing that reverts my setting", because that is
+/// how it FELT from the UI: Settings used to render `llm.routing_mode` as an editable
+/// "AI routing" dropdown, the user changed it, and the next config load landed here and
+/// overwrote it. The fix was to stop presenting a derived value as a control (it is now
+/// flagged in `schema::is_non_functional`), NOT to stop deriving it.
+///
+/// Deleting this function would leave `llm.routing_mode` and `llm.active_model` holding
+/// whatever was last written while `providers.active()` said something else — two
+/// sources of truth for which model answers, with `model_router` reading the stale one.
+/// The single source of truth is the active provider; these fields are its cache, kept
+/// for the older code paths that still read them.
 fn sync_legacy_llm_from_active_provider(config: &mut KriaConfig) {
     let Some(provider) = config.providers.active().cloned() else {
         return;

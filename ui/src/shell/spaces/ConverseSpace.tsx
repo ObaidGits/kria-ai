@@ -413,6 +413,13 @@ export default function ConverseSpace() {
     });
   });
 
+  // Archiving HIDES a chat, so the count of hidden chats has to be on screen.
+  // Without it an archived chat simply vanishes with no trace, which reads as the
+  // app losing chats on its own rather than as a state the user can undo.
+  const archivedCount = createMemo(
+    () => converseStore.threads().filter((thread) => thread.archived).length,
+  );
+
   function updateThreadSearch(query: string): void {
     if (threadSearchTimer) clearTimeout(threadSearchTimer);
     threadSearchTimer = setTimeout(() => void converseStore.searchThreads(query), 200);
@@ -584,7 +591,11 @@ export default function ConverseSpace() {
               aria-pressed={showArchived()}
               onClick={() => setShowArchived((value) => !value)}
             >
-              {showArchived() ? "Hide archived" : "Show archived"}
+              {showArchived()
+                ? "Hide archived"
+                : archivedCount() > 0
+                  ? `Show archived (${archivedCount()})`
+                  : "Show archived"}
             </button>
             <Show when={converseStore.searchingThreads()}>
               <span class="kria-converse__thread-status" role="status">Searching…</span>

@@ -286,7 +286,12 @@ pub fn field_meta(section: &str, field: &str) -> FieldMeta {
             risk: RiskLevel::Yellow,
             hot_reload: false,
             effect_kind: EffectKind::None,
-            prompt_changeable: true,
+            // NOT prompt-changeable: this field is derived from the active provider
+            // (see `is_non_functional`). Accepting "switch to cloud" here would write a
+            // value that the next config load overwrites, so the assistant would report
+            // success for a change that silently reverted. Provider selection is the
+            // real control.
+            prompt_changeable: false,
             temp_overridable: false,
             valid_values: Some(&["local", "gemini", "external"]),
             synonyms: &["ai routing", "local model", "cloud model"],
@@ -829,16 +834,33 @@ pub fn full_schema_json() -> serde_json::Value {
 }
 
 /// Fields that EXIST in the config shape but are **non-functional / derived** —
-/// they have no independent runtime consumer and must never be treated as a live
-/// knob (settings-config-revamp Task 9 dead-config audit). Documented here so the
-/// dead-config test can assert an explicit allow-list instead of silently passing.
+/// they must never be treated as a live knob (settings-config-revamp Task 9 dead-config
+/// audit). Documented here so the dead-config test can assert an explicit allow-list
+/// instead of silently passing.
 ///
 /// - `memory.embedding_dim`: the embedding dimension is fixed by the embedding
 ///   MODEL (all-MiniLM-L6-v2 ⇒ 384, `capability::index::MemoryEmbedder::DIM`).
 ///   The value is informational/derived; changing it cannot re-shape existing
 ///   vectors, so it is not a runtime setting.
+/// - `llm.routing_mode`: DERIVED from whichever provider is active.
+///   `sync_legacy_llm_from_active_provider` recomputes it on every config load, and
+///   `switch_provider` writes it directly, so the model router always sees the truth.
+///   It has a runtime consumer (`model_router`) but no independent user control: a
+///   value written by hand — through the Settings row it used to have, a prompt, or a
+///   config file — was overwritten at the next load, so the control appeared to work
+///   and then silently reverted. Routing changes by choosing a provider; that is the
+///   single source of truth, and this field is its cache.
+/// - `llm.gpu_layers`: DEAD. Nothing reads it. The live control is
+///   `hardware.gpu_layers`, which `commands::runtime` applies when launching the
+///   model. Two fields with the same name existed and only one worked, so exposing
+///   this one would have given the user a GPU control that changed nothing. Recorded
+///   here rather than deleted because removing a field is a config-shape change, and
+///   the audit's job is to make the dead one impossible to mistake for the live one.
 pub fn is_non_functional(section: &str, field: &str) -> bool {
-    matches!((section, field), ("memory", "embedding_dim"))
+    matches!(
+        (section, field),
+        ("memory", "embedding_dim") | ("llm", "routing_mode") | ("llm", "gpu_layers")
+    )
 }
 
 /// Whether a `(section, field)` exists in the config shape.
@@ -929,6 +951,43 @@ mod tests {
         // live knob — it must be documented non-functional and never prompt-changeable.
         assert!(is_non_functional("memory", "embedding_dim"));
         assert!(!field_meta("memory", "embedding_dim").prompt_changeable);
+    }
+
+    #[test]
+    fn the_dead_gpu_layers_duplicate_is_flagged_and_the_live_one_is_not() {
+        // Two fields were named gpu_layers. `hardware.gpu_layers` is applied when the
+        // model is launched (commands::runtime); `llm.gpu_layers` is read by nothing.
+        // Exposing the wrong one would have given the user a GPU control that changed
+        // nothing at all — the exact class of dead knob this audit list exists for.
+        assert!(is_non_functional("llm", "gpu_layers"));
+        assert!(
+            !is_non_functional("hardware", "gpu_layers"),
+            "hardware.gpu_layers is the live control and must stay settable"
+        );
+        assert!(field_exists("llm", "gpu_layers"));
+        assert!(field_exists("hardware", "gpu_layers"));
+    }
+
+    #[test]
+    fn routing_mode_is_derived_and_offers_no_user_control() {
+        // The reported symptom: changing "AI routing" in Settings appeared to work and
+        // then reverted. Cause: every config load recomputes this field from the active
+        // provider, so any hand-written value is overwritten.
+        //
+        // The field stays in the config shape — `model_router` reads it — but it must
+        // never be offered as something the user sets, through Settings OR a prompt.
+        // Routing changes by choosing a provider.
+        assert!(
+            is_non_functional("llm", "routing_mode"),
+            "routing_mode is derived from the active provider and must be flagged"
+        );
+        assert!(
+            !field_meta("llm", "routing_mode").prompt_changeable,
+            "accepting a prompt change here would report success for a change that \
+             silently reverts on the next config load"
+        );
+        // Still part of the config shape: removing it would break `model_router`.
+        assert!(field_exists("llm", "routing_mode"));
     }
 
     #[test]

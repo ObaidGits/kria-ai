@@ -728,3 +728,36 @@
   .kria-settings__list-add { align-items: stretch; flex-direction: column; }
   .kria-settings__editor-actions .kria-settings__dirty { margin-inline-start: 0; }
 }
+/* ── Setting descriptions: progressive disclosure ─────────────────────────────
+   70 of 76 settings carry a description and 25 run past 60 characters, which left
+   every screen mostly prose with the controls pushed apart. Short ones stay inline;
+   long ones clamp to a single line behind a "More" toggle. Nothing is hidden
+   permanently — the text is one click away, and the first line still gives context. */
+.kria-settings__row-description {
+  font-size: var(--font-size-caption);
+  margin: 0;
+}
+
+.kria-settings__row-description--clamped {
+  /* -webkit-line-clamp is the only cross-engine way to clamp to a line count and is
+     supported in every browser this app ships against (and in the Tauri webview). */
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kria-settings__description-toggle {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.kria-settings__description-toggle:hover {
+  color: var(--color-text-primary);
+}

@@ -66,6 +66,33 @@ export function Menu(props: MenuProps) {
       ? "kit-icon-button kit-icon-button--ghost kit-icon-button--md kit-focusable kit-transition"
       : "kit-button kit-button--secondary kit-button--md kit-focusable kit-transition";
 
+  const renderItems = () => (
+    <For each={local.items}>
+      {(item) => (
+        <Show
+          when={!item.separator}
+          fallback={<DropdownMenu.Separator class="kit-menu-separator" />}
+        >
+          <DropdownMenu.Item
+            class="kit-menu-item"
+            disabled={item.disabled}
+            onSelect={() => item.onSelect?.()}
+          >
+            <Show when={item.icon}>
+              <Icon name={item.icon!} size="body" />
+            </Show>
+            <DropdownMenu.ItemLabel>{item.label}</DropdownMenu.ItemLabel>
+            <Show when={item.description}>
+              <DropdownMenu.ItemDescription class="kit-menu-item-description">
+                {item.description}
+              </DropdownMenu.ItemDescription>
+            </Show>
+          </DropdownMenu.Item>
+        </Show>
+      )}
+    </For>
+  );
+
   return (
     <DropdownMenu
       open={local.open}
@@ -88,35 +115,19 @@ export function Menu(props: MenuProps) {
       </Show>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="kit-floating kit-floating--menu">
-          <Show when={local.label}>
-            <DropdownMenu.GroupLabel class="kit-menu-label">
-              {local.label}
-            </DropdownMenu.GroupLabel>
+          {/* A `GroupLabel` names a group, so Kobalte requires it to sit inside a
+              `Group` — rendering it bare throws `useMenuGroupContext must be used
+              within a Menu.Group`, which the app's error boundary turns into a
+              full "startup error" screen. The items are inside the group too, so
+              the label actually labels them rather than floating above nothing. */}
+          <Show when={local.label} fallback={renderItems()}>
+            <DropdownMenu.Group>
+              <DropdownMenu.GroupLabel class="kit-menu-label">
+                {local.label}
+              </DropdownMenu.GroupLabel>
+              {renderItems()}
+            </DropdownMenu.Group>
           </Show>
-          <For each={local.items}>
-            {(item) => (
-              <Show
-                when={!item.separator}
-                fallback={<DropdownMenu.Separator class="kit-menu-separator" />}
-              >
-                <DropdownMenu.Item
-                  class="kit-menu-item"
-                  disabled={item.disabled}
-                  onSelect={() => item.onSelect?.()}
-                >
-                  <Show when={item.icon}>
-                    <Icon name={item.icon!} size="body" />
-                  </Show>
-                  <DropdownMenu.ItemLabel>{item.label}</DropdownMenu.ItemLabel>
-                  <Show when={item.description}>
-                    <DropdownMenu.ItemDescription class="kit-menu-item-description">
-                      {item.description}
-                    </DropdownMenu.ItemDescription>
-                  </Show>
-                </DropdownMenu.Item>
-              </Show>
-            )}
-          </For>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu>

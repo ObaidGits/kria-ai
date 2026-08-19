@@ -130,8 +130,19 @@ pub fn field_presentation(section: &str, field: &str) -> FieldPresentation {
         ("voice", "tts_engine") => p("Text-to-speech engine", "Automatic chooses the best available local speech engine.", "voice", "Spoken responses", "Choose how KRIA sounds when speaking.", 140, "select", None, None),
         ("voice", "persist_transcripts") => p("Save transcripts", "Keep final voice transcripts in local conversation history.", "voice", "Voice privacy", "Control what voice data remains on this device.", 150, "switch", None, None),
         ("voice", "persist_raw_audio") => p("Save raw microphone audio", "Retain original voice recordings locally. Leave off unless recordings are explicitly needed.", "voice", "Voice privacy", "Control what voice data remains on this device.", 160, "switch", None, None),
-        ("llm", "active_model") => p("Active local model", "Model KRIA uses for local inference.", "intelligence", "Model runtime", runtime, 10, "text", None, None),
-        ("llm", "routing_mode") => p("AI routing", "Choose whether inference stays local or uses a configured external provider.", "intelligence", "Model runtime", runtime, 20, "text", None, None),
+        // Labelled as the FALLBACK it actually is. The provider panel above owns model
+        // choice for whichever provider is active, and when that provider names a model
+        // the sync copies it over this field. What remains is its real job: the model
+        // used for local inference when the active provider does not name one
+        // (providers.rs falls back to this value). Calling it "Active local model"
+        // implied it was the live choice, which put it in silent competition with the
+        // panel — the same confusion that made the routing dropdown untrustworthy.
+        ("llm", "active_model") => p("Default local model", "Used for local inference when the active provider does not specify a model.", "intelligence", "Model runtime", runtime, 10, "text", None, None),
+        // `("llm", "routing_mode")` deliberately has NO entry here. It is derived from
+        // the active provider (see `schema::is_non_functional`), so the row it used to
+        // render — "AI routing", with local/gemini/external — accepted a change that
+        // the next config load silently reverted. Routing is changed by selecting a
+        // provider in AI & Models, which is now the only control for it.
         ("llm", "context_window") => p("Context window", "Maximum tokens the model can consider at once. Larger values consume more memory.", "intelligence", "Model runtime", runtime, 30, "number", Some("tokens"), Some(256.0)),
         ("llm", "max_tokens") => p("Maximum response length", "Upper token limit for one generated response.", "intelligence", "Model runtime", runtime, 40, "number", Some("tokens"), Some(128.0)),
         ("llm", "temperature") => p("Response creativity", "Lower values are more predictable; higher values increase variation.", "intelligence", "Generation behavior", "Tune response variation and work limits.", 50, "range", None, Some(0.05)),
@@ -171,9 +182,17 @@ pub fn field_presentation(section: &str, field: &str) -> FieldPresentation {
         ("server", "jwt_secret") => p("Remote API signing secret", "Credential used to sign and verify remote API tokens.", "connections", "Remote credentials", remote, 120, "secret", None, None),
 
         ("hardware", "tier") => p("Hardware performance profile", "Automatic detects a suitable profile from this laptop's resources.", "system", "Hardware profile", runtime, 10, "text", None, None),
-        ("hardware", "max_context_tokens") => p("Context limit override", "Leave at Automatic to use the detected hardware profile.", "system", "Hardware overrides", runtime, 20, "number", Some("tokens"), Some(256.0)),
-        ("hardware", "gpu_layers") => p("GPU layer override", "Leave at Automatic to let KRIA choose based on available GPU memory.", "system", "Hardware overrides", runtime, 30, "number", Some("layers"), Some(1.0)),
-        ("hardware", "threads") => p("CPU thread override", "Leave at Automatic to use the detected hardware profile.", "system", "Hardware overrides", runtime, 40, "number", Some("threads"), Some(1.0)),
+        // These three moved from "System & Features" into "AI & Models".
+        //
+        // They are hardware fields by name, but every one of them is a MODEL runtime
+        // knob: how much of the model sits on the GPU, how many tokens it may consider,
+        // how many CPU threads it gets. Someone tuning a local model looks under AI &
+        // Models, finds five settings, and has no reason to suspect the GPU control is
+        // filed under System. The detection profile above stays in System, because that
+        // is about the machine rather than about the model.
+        ("hardware", "max_context_tokens") => p("Context limit override", "Leave at Automatic to use the detected hardware profile.", "intelligence", "Model performance", "Override what the detected hardware profile chose for this model.", 70, "number", Some("tokens"), Some(256.0)),
+        ("hardware", "gpu_layers") => p("GPU layer override", "Leave at Automatic to let KRIA choose based on available GPU memory.", "intelligence", "Model performance", "Override what the detected hardware profile chose for this model.", 80, "number", Some("layers"), Some(1.0)),
+        ("hardware", "threads") => p("CPU thread override", "Leave at Automatic to use the detected hardware profile.", "intelligence", "Model performance", "Override what the detected hardware profile chose for this model.", 90, "number", Some("threads"), Some(1.0)),
 
         ("image_generation", "enabled") => p("Image generation", "Allow KRIA to create images using configured local or cloud routes.", "system", "Image generation", "Choose how image generation uses local and external resources.", 50, "switch", None, None),
         ("image_generation", "image_mode") => p("Image generation route", "Choose whether image generation stays local, uses cloud, or falls back between them.", "system", "Image generation", "Choose how image generation uses local and external resources.", 60, "select", None, None),

@@ -21,6 +21,16 @@ import { currentRoute, navigate } from "../router";
 import { FeatureControlsSection } from "./settings/FeatureControlsSection";
 import { AwarenessPanel } from "./settings/AwarenessPanel";
 import { PresencePreferencesPanel } from "./settings/PresencePreferencesPanel";
+// The LLM provider editor lives in the capabilities space because that is where it
+// was first built. It is rendered HERE as well because Settings is where a user goes
+// to add a provider — before this, the "AI & Models" group offered a single legacy
+// routing dropdown with three choices while the real editor (all seven provider
+// types, API key, endpoint, model) sat one space away and was never found.
+//
+// The same component, not a copy: all of its state lives in `capabilityStore`, so
+// there is one editor and one source of truth regardless of which space mounts it.
+import { ModelsRuntimePanel } from "./capabilities";
+import { capabilityStore } from "../../stores/capabilityStore";
 import "./SettingsSpace.css";
 
 type SpecialSettingsArea = {
@@ -100,11 +110,58 @@ function riskLabel(risk: "none" | "low" | "medium" | "high"): string {
   return risk === "none" ? "None" : `${risk[0].toUpperCase()}${risk.slice(1)}`;
 }
 
-function riskExplanation(risk: "none" | "low" | "medium" | "high"): string {
-  if (risk === "high") return "High-impact change: explicit approval is required and runtime safety or exposure may change.";
-  if (risk === "medium") return "Governed change: KRIA requests approval before applying it.";
-  if (risk === "low") return "Low-impact preference that KRIA can apply directly.";
-  return "No additional risk classification is available for this raw field.";
+/**
+ * One sentence explaining what a risk tier MEANS for the user, or `null` when there
+ * is nothing worth saying.
+ *
+ * `none` returns null on purpose. It used to read "No additional risk classification
+ * is available for this raw field." — a sentence whose entire content is that there is
+ * no content. The Risk badge beside it already says "None".
+ */
+function riskExplanation(risk: "none" | "low" | "medium" | "high"): string | null {
+  // Shortened from "High-impact change: explicit approval is required and runtime
+  // safety or exposure may change." Both halves said the same thing twice; what the
+  // user needs to know is that it is gated and that it can change exposure.
+  if (risk === "high") return "Needs approval; can change safety or exposure.";
+  if (risk === "medium") return "KRIA asks for approval before applying it.";
+  if (risk === "low") return "KRIA can apply this directly.";
+  return null;
+}
+
+/**
+ * Longest description shown in full. Beyond this it is clamped to one line behind a
+ * "More" toggle.
+ *
+ * 70 of the 76 settings carry a description and 25 of those run past 60 characters, so
+ * every screenful was mostly explanatory prose with the controls pushed apart. Short
+ * one-liners are genuinely useful and cost nothing, so they stay visible; only the
+ * paragraphs are folded away. Nothing is deleted — the user can still read all of it.
+ */
+const DESCRIPTION_INLINE_LIMIT = 60;
+
+/** A setting's description: inline when short, clamped with a toggle when long. */
+function SettingDescription(props: { text: string }) {
+  const [expanded, setExpanded] = createSignal(false);
+  const isLong = () => props.text.length > DESCRIPTION_INLINE_LIMIT;
+
+  return (
+    <Show when={isLong()} fallback={<p class="kria-settings__row-description">{props.text}</p>}>
+      <p
+        class="kria-settings__row-description"
+        classList={{ "kria-settings__row-description--clamped": !expanded() }}
+      >
+        {props.text}
+      </p>
+      <button
+        type="button"
+        class="kria-settings__description-toggle kit-focusable"
+        aria-expanded={expanded()}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        {expanded() ? "Less" : "More"}
+      </button>
+    </Show>
+  );
 }
 
 function editorText(value: unknown): string {
@@ -200,7 +257,10 @@ function SettingEditor(props: { meta: SettingMeta }) {
         <small>
           {props.meta.secretAction === "manage"
             ? "Use the secure credential action for this integration."
-            : "Managed outside Settings. Use the owning integration or launch environment; generic config editing is intentionally blocked."}
+            // Shortened from "Managed outside Settings. Use the owning integration or
+            // launch environment; generic config editing is intentionally blocked." The
+            // user cannot act on WHY it is blocked, only on where to go instead.
+            : "Set this in the owning integration, not here."}
         </small>
       </div>
     );
@@ -375,6 +435,33 @@ export default function SettingsSpace() {
     };
     window.addEventListener("keydown", onKeyDown);
     onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+  });
+
+  // The provider panel reads `capabilityStore`, which is populated by whichever space
+  // asked for it. The capabilities space loads the "models" segment when its Models
+  // tab opens; Settings has no such trigger, so without this the panel would mount
+  // against an empty store and honestly report "no providers" for an install that has
+  // several. Loading is keyed on the group so it costs nothing until the user actually
+  // opens AI & Models.
+  //
+  // `loadedProviders` guards against re-fetching on every unrelated signal change in
+  // this effect's scope — the user switching group away and back is a deliberate
+  // refresh, a re-render is not.
+  let loadedProviders = false;
+  createEffect(() => {
+    const isIntelligence = settingsStore.activeGroup() === "intelligence";
+    if (!isIntelligence) {
+      loadedProviders = false;
+      return;
+    }
+    if (loadedProviders) return;
+    loadedProviders = true;
+    void capabilityStore.loadSegment("models").catch(() => {
+      // A failed load leaves the panel's own honest empty/error state in place; the
+      // store owns that messaging, so swallowing here avoids a second toast for one
+      // failure.
+      loadedProviders = false;
+    });
   });
 
   const searchQuery = createMemo(() => settingsStore.searchQuery().trim());
@@ -619,6 +706,9 @@ export default function SettingsSpace() {
             </div>
           </Show>
 
+          <Show when={!isSearching() && settingsStore.activeGroup() === "intelligence"}>
+            <ModelsRuntimePanel />
+          </Show>
           <Show when={!isSearching() && settingsStore.activeGroup() === "you"}>
             <PresencePreferencesPanel />
           </Show>
@@ -704,7 +794,9 @@ export default function SettingsSpace() {
                               <span class="kria-settings__row-category">{groupDefinition(meta.group).label} · {meta.subsection}</span>
                             </Show>
                             <strong>{meta.label}</strong>
-                            <Show when={meta.description}><p>{meta.description}</p></Show>
+                            <Show when={meta.description}>
+                              {(description) => <SettingDescription text={description()} />}
+                            </Show>
                             <Show when={isSearching() && !settingIsRelevant(meta, settingsStore.settings()) && meta.dependency}>
                               {(dependency) => <p class="kria-settings__dependency-note">{dependency().description}</p>}
                             </Show>
@@ -721,7 +813,11 @@ export default function SettingsSpace() {
                             <details class="kria-settings__technical">
                               <summary>Technical details</summary>
                               <code>{meta.key}</code>
-                              <span class="kria-settings__risk-explanation">{riskExplanation(meta.risk)}</span>
+                              <Show when={riskExplanation(meta.risk)}>
+                                {(explanation) => (
+                                  <span class="kria-settings__risk-explanation">{explanation()}</span>
+                                )}
+                              </Show>
                               <div class="kria-settings__badges" aria-label={`Technical constraints for ${meta.label}`}>
                                 <Badge tone={riskTone(meta.risk)}>Risk: {riskLabel(meta.risk)}</Badge>
                                 <Show when={meta.minimum !== undefined || meta.maximum !== undefined}>
